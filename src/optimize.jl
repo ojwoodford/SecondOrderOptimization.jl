@@ -1,0 +1,131 @@
+function optimize(
+    f::F,
+    fdf!::FDF,
+    x0,
+    options::OptimizationOptions = OptimizationOptions();
+    H::HMat = nothing,
+    retract!::R = update!,
+    callback::CB = nullcallback,
+    workspace::WS = nothing,
+    startstats::Stats = Stats()
+) where {F, FDF, HMat, R, CB, WS}
+    if !isnothing(workspace) && workspacevalid(workspace, x0, options, H)
+        return run_cached_optimize!(something(workspace.data), x0, f, fdf!, options, retract!, callback, startstats)
+    else
+        ls = makelinearsystem(x0, H, options.linsolver)
+        data = OptimizationInternal(ls, x0, startstats)
+        iteratedata = construct(options.iterator, ls, options.callbackchangesstate)
+        if !isnothing(workspace)
+            storeworkspace!(workspace, cachekey(x0, options, H), (data, iteratedata))
+        end
+        return run_optimize!(data, iteratedata, f, fdf!, options, retract!, callback)
+    end
+end
+
+function run_cached_optimize!(cached::Tuple{D, ID}, x0, f::F, fdf!::FDF, options::OptimizationOptions, retract!::R, callback::CB, startstats::Stats) where {D, ID, F, FDF, R, CB}
+    data, iteratedata = cached
+    reset!(data, x0, startstats)
+    reset!(iteratedata)
+    return run_optimize!(data, iteratedata, f, fdf!, options, retract!, callback)
+end
+
+function run_optimize!(data::D, iteratedata::ID, f::F, fdf!::FDF, options::OptimizationOptions, retract!::R, callback::CB) where {D, ID, F, FDF, R, CB}
+    data.init = Stats()
+    converged = optimizeloop!(data, iteratedata, f, fdf!, options, retract!, callback)
+    data.optimize = Stats()
+    return data.variables, OptimizationResult(data, converged, getiterator(options))
+end
+
+current_grad(iteratedata::LevMarDataTrial, data) = iteratedata.trialready ? getgrad(iteratedata.trial) : nothing
+current_grad(::NewtonDataRelinearize, data) = getgrad(data.linsystem)
+current_grad(::Any, data) = nothing
+
+@inline function optimizeloop!(data::D, iteratedata::ID, f::F, fdf!::FDF, options::OptimizationOptions, retract!::R, callback::CB) where {D, ID, F, FDF, R, CB}
+    stoptime = Base.time_ns() + options.maxtime
+    fails = 0
+    converged = 0
+
+    cost = computelinearization!(data, fdf!, data.variables)
+    data.startcost = cost
+    data.bestcost = cost
+
+    if !isfinite(cost) || !all(isfinite, getgrad(data.linsystem))
+        converged |= isinf(cost) << 0
+        converged |= isnan(cost) << 1
+        converged |= 1 << 11
+        return converged
+    end
+
+    if options.gtol > 0.0
+        maxgrad = maximum(abs, getgrad(data.linsystem))::Float64
+        if maxgrad < options.gtol
+            return 1 << 12
+        end
+    end
+
+    while true
+        data.iternum += 1
+        cost_ = iterate!(iteratedata, data, f, fdf!, options, retract!)
+        cost, terminate = callback(cost_, data.varnext, data, iteratedata)
+        @assert(dynamic(options.callbackchangesstate) || cost == cost_, "callback expected to not change the cost")
+
+        dcost = data.bestcost - cost
+        if dcost >= 0
+            data.bestcost = cost
+            fails = 0
+        else
+            dcost = cost
+            fails += 1
+            if fails == 1
+                if !data.varbestvalid
+                    data.varbest = copyvars(data.variables)
+                    data.varbestvalid = true
+                else
+                    data.variables, data.varbest = data.varbest, data.variables
+                end
+            end
+        end
+
+        data.variables, data.varnext = data.varnext, data.variables
+
+        maxstep = maximum(abs, getx(data.linsystem))::Float64
+        converged |= isinf(cost)                                     << 0
+        converged |= isnan(cost)                                     << 1
+        converged |= (dcost < data.bestcost * options.reldcost)      << 2
+        converged |= (dcost < options.absdcost)                      << 3
+        converged |= isinf(maxstep)                                  << 4
+        converged |= isnan(maxstep)                                  << 5
+        converged |= (maxstep < options.dstep)                       << 6
+        converged |= (fails > options.maxfails)                      << 7
+        converged |= (data.iternum >= options.maxiters)              << 8
+        converged |= (Base.time_ns() > stoptime)                     << 9
+        converged |= terminate                                       << 16
+
+        if options.gtol > 0.0
+            grad = current_grad(iteratedata, data)
+            if !isnothing(grad)
+                maxgrad = maximum(abs, grad)::Float64
+                converged |= (maxgrad < options.gtol)                << 12
+            end
+        end
+
+        if converged != 0
+            break
+        end
+
+        cost_ = linearize!(iteratedata, data, fdf!)
+        converged |= !isapprox(cost_, cost)                          << 10
+        if options.gtol > 0.0
+            maxgrad = maximum(abs, getgrad(data.linsystem))::Float64
+            if maxgrad < options.gtol
+                converged |= 1 << 12
+                break
+            end
+        end
+    end
+
+    if !(data.bestcost >= cost)
+        data.variables, data.varbest = data.varbest, data.variables
+    end
+    return converged
+end

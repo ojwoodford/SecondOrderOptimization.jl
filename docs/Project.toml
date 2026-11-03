@@ -1,0 +1,13 @@
+[deps]
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+FastLinAlg = "e4b2c56d-7a1e-4f9b-8c3d-3e6f5a9b2c06"
+MicroInfo = "d9a1e34b-6c2f-4b8d-9e3a-2f5c4d8e1a05"
+OptimizationVariableInterface = "f1c3d78e-8b2a-4c9d-9e4f-4a7b6c0d3e17"
+SecondOrderOptimization = "a3f5c71e-3b2d-4d9a-9e20-7f8e3c4b1a50"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+
+[sources]
+FastLinAlg = {path = "/Users/olly/.julia/dev/FastLinAlg.jl"}
+MicroInfo = {path = "/Users/olly/.julia/dev/MicroInfo.jl"}
+OptimizationVariableInterface = {path = "/Users/olly/.julia/dev/OptimizationVariableInterface.jl"}
+SecondOrderOptimization = {path = ".."}
