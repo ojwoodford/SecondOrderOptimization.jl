@@ -4,7 +4,7 @@ using FastLinAlg
 using MicroInfo
 using OptimizationVariableInterface
 using LoopVectorization
-import OptimizationVariableInterface: nvars, update, update!, copyvars, syncvars!, isbitsvartype
+import OptimizationVariableInterface: nvars, update, update!, copyvars, syncvars!
 
 # Exported public API
 export optimize

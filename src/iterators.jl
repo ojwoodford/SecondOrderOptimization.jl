@@ -209,7 +209,7 @@ end
 
 dampen!(ls, lmd::AnyMarquardtData, dlambda) = damp_marquardt!(ls, lmd.scaling, dlambda)
 
-dampingnorm(::AnyLevenbergData, x) = fast_dot(x, x)
+dampingnorm(::AnyLevenbergData, x) = sqnorm(x)
 function dampingnorm(lmd::AnyMarquardtData, x)
     total = 0.0
     scaling = lmd.scaling
