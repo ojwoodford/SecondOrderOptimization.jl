@@ -1,6 +1,6 @@
 module SecondOrderOptimization
 
-using FastLinAlg
+using FastNorm
 using MicroInfo
 using OptimizationVariableInterface
 using LoopVectorization

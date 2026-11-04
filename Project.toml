@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Oliver Woodford"]
 
 [deps]
-FastLinAlg = "e4b2c56d-7a1e-4f9b-8c3d-3e6f5a9b2c06"
+FastNorm = "9ae3a7d3-f420-46c0-9803-30469fdd2dd1"
 LDLFactorizations = "40e66cde-538c-5869-a4ad-c39174c6795b"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 LoopVectorization = "bdcacae8-1622-11e9-2a5c-532679323890"
@@ -16,7 +16,7 @@ Static = "aedffcd0-7271-4cad-89d0-dc628f76c6d3"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [compat]
-FastLinAlg = "0.1"
+FastNorm = "0.2"
 LDLFactorizations = "0.10"
 LinearAlgebra = "1.10"
 LoopVectorization = "0.12.165"
