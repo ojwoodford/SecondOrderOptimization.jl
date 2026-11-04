@@ -16,6 +16,9 @@ export CostTrajectory
 export nullcallback, printoutcallback, storecostscallback
 export nvars, update, update!, zero!, solve!
 
+# Utilities
+include("utils.jl")
+
 # Linear systems and solvers
 include("linearsystem.jl")
 include("linearsolver.jl")
