@@ -7,7 +7,7 @@ using LoopVectorization
 import OptimizationVariableInterface: nvars, update, update!, copyvars, syncvars!
 
 # Exported public API
-export optimize
+export optimize, optimize!
 export OptimizationOptions, OptimizationResult, OptimizationWorkspace, OptimizationInternal
 export OptimizationIterator, newton, levenbergmarquardt, dogleg, gradientdescent, levenbergmarquardt_dtd, getiterator
 export NewtonData, NewtonDataRelinearize, DoglegData, LevenbergData, LevenbergDataTrial, MarquardtData, MarquardtDataTrial, GradientDescentData

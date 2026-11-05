@@ -1,7 +1,7 @@
-function optimize(
+function optimize!(
     f::F,
     fdf!::FDF,
-    x0,
+    x,
     options::OptimizationOptions = OptimizationOptions();
     H::HMat = nothing,
     retract!::R = update!,
@@ -9,31 +9,51 @@ function optimize(
     workspace::WS = nothing,
     startstats::Stats = Stats()
 ) where {F, FDF, HMat, R, CB, WS}
-    if !isnothing(workspace) && workspacevalid(workspace, x0, options, H)
-        return run_cached_optimize!(something(workspace.data), x0, f, fdf!, options, retract!, callback, startstats)
+    if !isnothing(workspace) && workspacevalid(workspace, x, options, H)
+        return run_cached_optimize!(something(workspace.data), x, f, fdf!, options, retract!, callback, startstats)
     else
-        ls = makelinearsystem(x0, H, options.linsolver)
-        data = OptimizationInternal(ls, x0, startstats)
+        ls = makelinearsystem(x, H, options.linsolver)
+        data = OptimizationInternal(ls, x, startstats)
         iteratedata = construct(options.iterator, ls, options.callbackchangesstate)
         if !isnothing(workspace)
-            storeworkspace!(workspace, cachekey(x0, options, H), (data, iteratedata))
+            storeworkspace!(workspace, cachekey(x, options, H), (data, iteratedata))
         end
-        return run_optimize!(data, iteratedata, f, fdf!, options, retract!, callback)
+        return run_optimize!(data, iteratedata, f, fdf!, options, retract!, callback, x)
     end
 end
 
-function run_cached_optimize!(cached::Tuple{D, ID}, x0, f::F, fdf!::FDF, options::OptimizationOptions, retract!::R, callback::CB, startstats::Stats) where {D, ID, F, FDF, R, CB}
-    data, iteratedata = cached
-    reset!(data, x0, startstats)
-    reset!(iteratedata)
-    return run_optimize!(data, iteratedata, f, fdf!, options, retract!, callback)
+function optimize(
+    f::F,
+    fdf!::FDF,
+    x0,
+    options::OptimizationOptions = OptimizationOptions();
+    kwargs...
+) where {F, FDF}
+    return optimize!(f, fdf!, copyvars(x0), options; kwargs...)
 end
 
-function run_optimize!(data::D, iteratedata::ID, f::F, fdf!::FDF, options::OptimizationOptions, retract!::R, callback::CB) where {D, ID, F, FDF, R, CB}
+function run_cached_optimize!(cached::Tuple{D, ID}, x, f::F, fdf!::FDF, options::OptimizationOptions, retract!::R, callback::CB, startstats::Stats) where {D, ID, F, FDF, R, CB}
+    data, iteratedata = cached
+    reset!(data, x, startstats)
+    reset!(iteratedata)
+    return run_optimize!(data, iteratedata, f, fdf!, options, retract!, callback, x)
+end
+
+function run_optimize!(data::D, iteratedata::ID, f::F, fdf!::FDF, options::OptimizationOptions, retract!::R, callback::CB, x=data.variables) where {D, ID, F, FDF, R, CB}
     data.init = Stats()
     converged = optimizeloop!(data, iteratedata, f, fdf!, options, retract!, callback)
     data.optimize = Stats()
-    return data.variables, OptimizationResult(data, converged, getiterator(options))
+    if data.variables !== x
+        x = syncvars!(x, data.variables)
+        if data.varnext === x
+            data.varnext = data.variables
+        end
+        if data.varbestvalid && data.varbest === x
+            data.varbest = data.variables
+        end
+        data.variables = x
+    end
+    return x, OptimizationResult(data, converged, getiterator(options))
 end
 
 current_grad(iteratedata::LevMarDataTrial, data) = iteratedata.trialready ? getgrad(iteratedata.trial) : nothing

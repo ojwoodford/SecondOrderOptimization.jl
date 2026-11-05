@@ -62,12 +62,12 @@ end
     x_opt_sp, res_sp = optimize(quad_cost, quad_fdf!, copy(x0_vec), opts_sparse; H=H_sparse, workspace=ws_sp)
     @test isapprox(x_opt_sp, zeros(n); atol=1e-8)
 
-    # Warmup and test allocations with sparse workspace
+    # Warmup and test allocations with sparse workspace (in-place optimize! achieves 0 allocations)
     x_buf = copy(x0_vec)
-    optimize(quad_cost, quad_fdf!, x_buf, opts_sparse; H=H_sparse, workspace=ws_sp)
+    optimize!(quad_cost, quad_fdf!, x_buf, opts_sparse; H=H_sparse, workspace=ws_sp)
     @test ws_sp.data[1].variables !== ws_sp.data[1].varnext
     x_buf .= x0_vec
-    allocs_sp = @allocated optimize(quad_cost, quad_fdf!, x_buf, opts_sparse; H=H_sparse, workspace=ws_sp)
+    allocs_sp = @allocated optimize!(quad_cost, quad_fdf!, x_buf, opts_sparse; H=H_sparse, workspace=ws_sp)
     @test ws_sp.data[1].variables !== ws_sp.data[1].varnext
     @test allocs_sp == 0
 end
