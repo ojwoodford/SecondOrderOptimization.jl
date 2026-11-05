@@ -8,13 +8,9 @@ import OptimizationVariableInterface: nvars, update, update!, copyvars, syncvars
 
 # Exported public API
 export optimize, optimize!
-export OptimizationOptions, OptimizationResult, OptimizationWorkspace, OptimizationInternal
-export OptimizationIterator, newton, levenbergmarquardt, dogleg, gradientdescent, levenbergmarquardt_dtd, getiterator
-export NewtonData, NewtonDataRelinearize, DoglegData, LevenbergData, LevenbergDataTrial, MarquardtData, MarquardtDataTrial, GradientDescentData
-export OptimizationLinearSolver, auto_solver, cholesky_solver, ldl_solver, qr_solver
+export OptimizationOptions, OptimizationResult, OptimizationWorkspace
 export CostTrajectory
 export nullcallback, printoutcallback, storecostscallback
-export nvars, update, update!, zero!, solve!
 
 # Utilities
 include("utils.jl")

@@ -91,7 +91,7 @@ end
     @test occursin("termination", str)
 
     # Test enum options (OptimizationIterator & OptimizationLinearSolver)
-    opts_enum = OptimizationOptions(iterator=dogleg, linsolver=cholesky_solver, maxiters=50)
+    opts_enum = OptimizationOptions(iterator=SecondOrderOptimization.dogleg, linsolver=SecondOrderOptimization.cholesky_solver, maxiters=50)
     x_enum, _ = optimize(rosenbrock_cost, rosenbrock_fdf!, x0_static, opts_enum)
     @test isapprox(x_enum, [1.0, 1.0]; atol=1e-4)
 
