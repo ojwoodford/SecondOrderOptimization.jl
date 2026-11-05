@@ -4,7 +4,7 @@
 
 ## Key Comparisons
 
-- **General vs Least Squares**: `LeastSquaresOptim.jl` formulates problems as a residual vector $r(x)$ and Jacobian matrix $J(x)$. `SecondOrderOptimization.jl` is a general second-order solver: it optimizes arbitrary functions $f(x)$ with gradient $g(x)$ and Hessian/Gauss-Newton approximation $H(x)$. (To model structured nonlinear least squares graphs with automatic differentiation and robust kernels, use `NLLSModels.jl`, which is built on `SecondOrderOptimization.jl`.)
+- **General vs Least Squares**: `LeastSquaresOptim.jl` formulates problems as a residual vector $r(x)$ and Jacobian matrix $J(x)$. `SecondOrderOptimization.jl` is a general second-order solver: it optimizes arbitrary functions $f(x)$ with gradient $g(x)$ and Hessian/Gauss-Newton approximation $H(x)$. (To model structured nonlinear least squares graphs with automatic differentiation and robust kernels, use the complementary package `NLLSModel.jl`, which defines models that can be readily optimized using `SecondOrderOptimization.jl`.)
 - **Allocation Profiles**: `SecondOrderOptimization.jl` achieves zero heap allocations when using `StaticArrays` and [`OptimizationWorkspace`](@ref).
 
 ## Translation Example

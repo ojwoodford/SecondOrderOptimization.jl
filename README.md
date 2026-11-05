@@ -15,7 +15,7 @@ High-performance, zero-allocation second-order nonlinear optimization in Julia.
 - **Variable Types & Manifolds**: Supports scalars (`Float64`), static vectors (`SVector`), dense vectors (`Vector`), heterogeneous variable vectors, and non-Euclidean manifolds via `SecondOrderOptimization.nvars` / `SecondOrderOptimization.update` or custom `retract!(to, from, step)`.
 - **Zero-Allocation Reuse**: Preallocate solver buffers and factorizations via `OptimizationWorkspace`.
 
-Looking to solve structured nonlinear least-squares factor graphs with automatic differentiation and robust kernels? See [`NLLSModels.jl`](https://github.com/ojwoodford/NLLSModels.jl), which builds on `SecondOrderOptimization.jl`.
+Looking to solve structured nonlinear least-squares factor graphs with automatic differentiation and robust kernels? See [`NLLSModel.jl`](https://github.com/ojwoodford/NLLSModel.jl), a complementary package that defines models that can be readily optimized using `SecondOrderOptimization.jl`.
 
 ## Quick Start
 
