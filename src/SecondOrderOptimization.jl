@@ -1,7 +1,7 @@
 module SecondOrderOptimization
 
 using FastNorm
-using MicroInfo
+using Printf: @printf, @sprintf
 using OptimizationVariableInterface
 using LoopVectorization
 import OptimizationVariableInterface: nvars, update, update!, copyvars, syncvars!
@@ -14,6 +14,7 @@ export nullcallback, printoutcallback, storecostscallback
 
 # Utilities
 include("utils.jl")
+include("stats.jl")
 
 # Linear systems and solvers
 include("linearsystem.jl")

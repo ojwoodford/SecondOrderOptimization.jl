@@ -2,6 +2,7 @@ using Test
 
 @testset "SecondOrderOptimization Tests" begin
     include("utils.jl")
+    include("stats.jl")
     include("linearsolve.jl")
     include("functional.jl")
     include("nantrial.jl")
