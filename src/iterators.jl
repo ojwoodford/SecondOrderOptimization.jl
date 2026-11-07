@@ -74,6 +74,7 @@ reset!(dd::DoglegData) = (dd.trustradius = 0.0)
 
 @inline function iterate!(doglegdata::DoglegData, data, f, fdf!, options::OptimizationOptions)::Float64
     hessian, gradient = gethessgrad(data.linsystem)
+    beta = 0.0
     data.solves += @elapsed_ns begin
         gnorm2 = gradient' * gradient
         a = gnorm2 / (fast_bAb(hessian, gradient) + floatmin(eltype(gradient)))
