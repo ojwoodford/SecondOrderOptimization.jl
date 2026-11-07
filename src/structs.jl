@@ -3,7 +3,7 @@ import Printf.@printf
 
 @enum OptimizationIterator newton levenbergmarquardt dogleg gradientdescent levenbergmarquardt_dtd
 
-struct OptimizationOptions{S, L, N, B <: StaticBool}
+struct OptimizationOptions{S, L, B <: StaticBool}
     reldcost::Float64           # Minimum relative reduction in cost required to avoid termination
     absdcost::Float64           # Minimum absolute reduction in cost required to avoid termination
     dstep::Float64              # Minimum L-infinity norm of the update vector required to avoid termination
@@ -13,11 +13,10 @@ struct OptimizationOptions{S, L, N, B <: StaticBool}
     maxtime::UInt64             # Maximum optimization time allowed, in nanoseconds
     iterator::StaticSymbol{S}   # Static Symbol of the inner iterator (:newton, :levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :gradientdescent)
     linsolver::StaticSymbol{L}  # Static Symbol of the linear solver (:auto, :cholesky, :ldl, :qr)
-    numthreads::StaticInt{N}    # Number of threads to use for parallel computations
     callbackchangesstate::B     # True if callback can modify problem state/cost
 
-    function OptimizationOptions(reldcost, absdcost, dstep, gtol, maxfails, maxiters, maxtime, iterator::StaticSymbol{S}, linsolver::StaticSymbol{L}, numthreads::StaticInt{N}, callbackchangesstate::B) where {S, L, N, B <: StaticBool}
-        return new{S, L, N, B}(reldcost, absdcost, dstep, gtol, maxfails, maxiters, maxtime, iterator, linsolver, numthreads, callbackchangesstate)
+    function OptimizationOptions(reldcost, absdcost, dstep, gtol, maxfails, maxiters, maxtime, iterator::StaticSymbol{S}, linsolver::StaticSymbol{L}, callbackchangesstate::B) where {S, L, B <: StaticBool}
+        return new{S, L, B}(reldcost, absdcost, dstep, gtol, maxfails, maxiters, maxtime, iterator, linsolver, callbackchangesstate)
     end
 end
 
@@ -37,7 +36,6 @@ function OptimizationOptions(;
     linsolver=:auto,
     callback=nothing,
     iteratordata=nothing,
-    numthreads=StaticInt(Threads.nthreads()),
     callbackchangesstate=False()
 )
     @assert(isnothing(callback), "Callbacks should be passed directly to optimize, not to the options struct.")
@@ -46,7 +44,7 @@ function OptimizationOptions(;
         Float64(reldcost), Float64(absdcost), Float64(dstep), Float64(gtol),
         Int(maxfails), Int(maxiters), UInt64(round(maxtime * 1e9)),
         static(Symbol(iterator)), static(linsolver_symbol(linsolver)),
-        static(numthreads), makestaticbool(callbackchangesstate)
+        makestaticbool(callbackchangesstate)
     )
 end
 

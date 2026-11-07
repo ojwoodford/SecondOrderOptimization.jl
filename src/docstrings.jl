@@ -13,7 +13,6 @@ Stores configuration options and stopping criteria for second-order optimization
 - `maxtime::Float64 = 30.0`: Maximum wall-clock optimization runtime in seconds.
 - `iterator::Union{Symbol, OptimizationIterator} = :levenbergmarquardt`: Iterator algorithm (`:newton`, `:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg`, `:gradientdescent`).
 - `linsolver::Union{Symbol, OptimizationLinearSolver} = :auto`: Linear solver method (`:auto`, `:cholesky`, `:ldl`, `:qr`).
-- `numthreads::Union{Integer, StaticInt} = Threads.nthreads()`: Number of worker threads.
 - `callbackchangesstate::Union{Bool, StaticBool} = false`: Set `true` if callback modifies problem state.
 
 # Example

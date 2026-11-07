@@ -10,7 +10,7 @@ end
 
 function fast_bAb(A::Matrix, b::Vector)
     total = zero(eltype(b))
-    @tturbo for i in eachindex(b)
+    @turbo for i in eachindex(b)
         subtotal = zero(eltype(b))
         for j in eachindex(b)
             subtotal += A[j,i] * b[j]
