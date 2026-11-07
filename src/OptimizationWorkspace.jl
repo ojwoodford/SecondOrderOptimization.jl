@@ -31,11 +31,11 @@ function keyvalid(key::Tuple, x0, options::OptimizationOptions, H)
     return key == cachekey(x0, options, H)
 end
 
-function OptimizationWorkspace(x0, options::OptimizationOptions=OptimizationOptions(); H=nothing, retract! = update!, startstats::Stats=Stats())
-    return OptimizationWorkspace(nothing, nothing, x0, options; H=H, retract! = retract!, startstats=startstats)
+function OptimizationWorkspace(x0, options::OptimizationOptions=OptimizationOptions(); H=nothing, startstats::Stats=Stats())
+    return OptimizationWorkspace(nothing, nothing, x0, options; H=H, startstats=startstats)
 end
 
-function OptimizationWorkspace(f, fdf!, x0, options::OptimizationOptions=OptimizationOptions(); H=nothing, retract! = update!, startstats::Stats=Stats())
+function OptimizationWorkspace(f, fdf!, x0, options::OptimizationOptions=OptimizationOptions(); H=nothing, startstats::Stats=Stats())
     ls = makelinearsystem(x0, H, options.linsolver)
     data = OptimizationInternal(ls, x0, startstats)
     iteratedata = construct(options.iterator, ls, options.callbackchangesstate)

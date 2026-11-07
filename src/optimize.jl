@@ -4,13 +4,12 @@ function optimize!(
     x,
     options::OptimizationOptions = OptimizationOptions();
     H::HMat = nothing,
-    retract!::R = update!,
     callback::CB = nullcallback,
     workspace::WS = nothing,
     startstats::Stats = Stats()
-) where {F, FDF, HMat, R, CB, WS}
+) where {F, FDF, HMat, CB, WS}
     if !isnothing(workspace) && workspacevalid(workspace, x, options, H)
-        return run_cached_optimize!(something(workspace.data), x, f, fdf!, options, retract!, callback, startstats)
+        return run_cached_optimize!(something(workspace.data), x, f, fdf!, options, callback, startstats)
     else
         ls = makelinearsystem(x, H, options.linsolver)
         data = OptimizationInternal(ls, x, startstats)
@@ -18,7 +17,7 @@ function optimize!(
         if !isnothing(workspace)
             storeworkspace!(workspace, cachekey(x, options, H), (data, iteratedata))
         end
-        return run_optimize!(data, iteratedata, f, fdf!, options, retract!, callback, x)
+        return run_optimize!(data, iteratedata, f, fdf!, options, callback, x)
     end
 end
 
@@ -32,16 +31,16 @@ function optimize(
     return optimize!(f, fdf!, copyvars(x0), options; kwargs...)
 end
 
-function run_cached_optimize!(cached::Tuple{D, ID}, x, f::F, fdf!::FDF, options::OptimizationOptions, retract!::R, callback::CB, startstats::Stats) where {D, ID, F, FDF, R, CB}
+function run_cached_optimize!(cached::Tuple{D, ID}, x, f::F, fdf!::FDF, options::OptimizationOptions, callback::CB, startstats::Stats) where {D, ID, F, FDF, CB}
     data, iteratedata = cached
     reset!(data, x, startstats)
     reset!(iteratedata)
-    return run_optimize!(data, iteratedata, f, fdf!, options, retract!, callback, x)
+    return run_optimize!(data, iteratedata, f, fdf!, options, callback, x)
 end
 
-function run_optimize!(data::D, iteratedata::ID, f::F, fdf!::FDF, options::OptimizationOptions, retract!::R, callback::CB, x=data.variables) where {D, ID, F, FDF, R, CB}
+function run_optimize!(data::D, iteratedata::ID, f::F, fdf!::FDF, options::OptimizationOptions, callback::CB, x=data.variables) where {D, ID, F, FDF, CB}
     data.init = Stats()
-    converged = optimizeloop!(data, iteratedata, f, fdf!, options, retract!, callback)
+    converged = optimizeloop!(data, iteratedata, f, fdf!, options, callback)
     data.optimize = Stats()
     if data.variables !== x
         x = syncvars!(x, data.variables)
@@ -60,7 +59,7 @@ current_grad(iteratedata::LevMarDataTrial, data) = iteratedata.trialready ? getg
 current_grad(::NewtonDataRelinearize, data) = getgrad(data.linsystem)
 current_grad(::Any, data) = nothing
 
-@inline function optimizeloop!(data::D, iteratedata::ID, f::F, fdf!::FDF, options::OptimizationOptions, retract!::R, callback::CB) where {D, ID, F, FDF, R, CB}
+@inline function optimizeloop!(data::D, iteratedata::ID, f::F, fdf!::FDF, options::OptimizationOptions, callback::CB) where {D, ID, F, FDF, CB}
     stoptime = Base.time_ns() + options.maxtime
     fails = 0
     converged = 0
@@ -85,7 +84,7 @@ current_grad(::Any, data) = nothing
 
     while true
         data.iternum += 1
-        cost_ = iterate!(iteratedata, data, f, fdf!, options, retract!)
+        cost_ = iterate!(iteratedata, data, f, fdf!, options)
         cost, terminate = callback(cost_, data.varnext, data, iteratedata)
         @assert(dynamic(options.callbackchangesstate) || cost == cost_, "callback expected to not change the cost")
 

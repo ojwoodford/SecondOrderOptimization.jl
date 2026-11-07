@@ -63,8 +63,8 @@ OptimizationResult
 
 """
     OptimizationWorkspace()
-    OptimizationWorkspace(x0, options=OptimizationOptions(); H=nothing, retract!=update!)
-    OptimizationWorkspace(f, fdf!, x0, options=OptimizationOptions(); H=nothing, retract!=update!)
+    OptimizationWorkspace(x0, options=OptimizationOptions(); H=nothing)
+    OptimizationWorkspace(f, fdf!, x0, options=OptimizationOptions(); H=nothing)
 
 Preallocated cache for linear systems, solver factorizations, and trial variable buffers,
 enabling zero-allocation repeated optimizations.
@@ -279,7 +279,7 @@ x_opt, res = optimize(f, fdf!, x0; callback=storecostscallback(trajectory))
 CostTrajectory
 
 """
-    optimize!(f, fdf!, x, options=OptimizationOptions(); H=nothing, retract!=update!, callback=nullcallback, workspace=nothing) -> (x_best, result)
+    optimize!(f, fdf!, x, options=OptimizationOptions(); H=nothing, callback=nullcallback, workspace=nothing) -> (x_best, result)
 
 In-place variant of [`optimize`](@ref). Minimizes scalar objective `f(x)` updating variable state `x` in-place
 (for mutable variable containers such as `Vector`) to avoid allocating extra variable copies.
@@ -292,7 +292,6 @@ In-place variant of [`optimize`](@ref). Minimizes scalar objective `f(x)` updati
 
 # Keyword Arguments
 - `H = nothing`: Optional prototype matrix for the Hessian (e.g. `SparseMatrixCSC` or `Matrix`).
-- `retract! = update!`: Retraction function `retract!(to, from, step) -> to`.
 - `callback = nullcallback`: Callback invoked per iteration: `callback(cost, x_trial, data, iteratedata) -> (cost, terminate_flags)`.
 - `workspace = nothing`: Optional [`OptimizationWorkspace`](@ref) for memory reuse.
 
@@ -303,7 +302,7 @@ In-place variant of [`optimize`](@ref). Minimizes scalar objective `f(x)` updati
 optimize!
 
 """
-    optimize(f, fdf!, x0, options=OptimizationOptions(); H=nothing, retract!=update!, callback=nullcallback, workspace=nothing) -> (x_best, result)
+    optimize(f, fdf!, x0, options=OptimizationOptions(); H=nothing, callback=nullcallback, workspace=nothing) -> (x_best, result)
 
 Minimizes scalar objective `f(x)` given initial point `x0` and gradient/Hessian provider `fdf!(g, H, x)`.
 Does not mutate `x0` (allocates a copy of `x0` and delegates to [`optimize!`](@ref)).
@@ -316,7 +315,6 @@ Does not mutate `x0` (allocates a copy of `x0` and delegates to [`optimize!`](@r
 
 # Keyword Arguments
 - `H = nothing`: Optional prototype matrix for the Hessian (e.g. `SparseMatrixCSC` or `Matrix`).
-- `retract! = update!`: Retraction function `retract!(to, from, step) -> to`.
 - `callback = nullcallback`: Callback invoked per iteration: `callback(cost, x_trial, data, iteratedata) -> (cost, terminate_flags)`.
 - `workspace = nothing`: Optional [`OptimizationWorkspace`](@ref) for memory reuse.
 

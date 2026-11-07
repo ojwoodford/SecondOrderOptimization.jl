@@ -16,7 +16,7 @@
   - **Powell's Dogleg** (`:dogleg`): Trust-region interpolation between the Cauchy (steepest descent) step and the Newton step.
   - **Standard Newton** (`:newton`): Classical undamped second-order step.
   - **Gradient Descent** (`:gradientdescent`): Quadratic-interpolation backtracking line search.
-- **Flexible Manifolds**: Native support for custom manifolds either by extending [`SecondOrderOptimization.nvars`](@ref) and [`SecondOrderOptimization.update`](@ref) or by passing a custom `retract!(to, from, step)` function.
+- **Flexible Manifolds**: Native support for custom manifolds by extending [`SecondOrderOptimization.nvars`](@ref) and [`SecondOrderOptimization.update`](@ref).
 - **Static, Dense & Sparse Systems**: Automatically selects static (`MMatrix`), dense (`Matrix`), or sparse (`SparseMatrixCSC` with zero-allocation `LDLFactorizations.jl`) linear systems.
 - **Rich Callbacks & Diagnostics**: Monitor optimization progress, per-iteration timing, cost reductions, trust-region radius, and allocation counts via [`OptimizationResult`](@ref) and [`CostTrajectory`](@ref).
 

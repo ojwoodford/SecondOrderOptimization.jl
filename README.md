@@ -12,7 +12,7 @@ High-performance, zero-allocation second-order nonlinear optimization in Julia.
 
 - **Iterators**: Levenberg-Marquardt (`:levenbergmarquardt`, `:levenbergmarquardt_dtd`), Powell's Dogleg (`:dogleg`), undamped Newton (`:newton`), and backtracking Gradient Descent (`:gradientdescent`).
 - **Linear Solvers**: Cholesky (`:cholesky`), LDL / Bunch-Kaufman (`:ldl`, using `LDLFactorizations.jl` for sparse matrices), and QR (`:qr`), with automatic dispatch (`:auto`).
-- **Variable Types & Manifolds**: Supports scalars (`Float64`), static vectors (`SVector`), dense vectors (`Vector`), heterogeneous variable vectors, and non-Euclidean manifolds via `SecondOrderOptimization.nvars` / `SecondOrderOptimization.update` or custom `retract!(to, from, step)`.
+- **Variable Types & Manifolds**: Supports scalars (`Float64`), static vectors (`SVector`), dense vectors (`Vector`), heterogeneous variable vectors, and non-Euclidean manifolds via `SecondOrderOptimization.nvars` / `SecondOrderOptimization.update`.
 - **Zero-Allocation Reuse**: Preallocate solver buffers and factorizations via `OptimizationWorkspace`.
 
 Looking to solve structured nonlinear least-squares factor graphs with automatic differentiation and robust kernels? See [`NLLSModel.jl`](https://github.com/ojwoodford/NLLSModel.jl), a complementary package that defines models that can be readily optimized using `SecondOrderOptimization.jl`.

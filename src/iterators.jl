@@ -34,10 +34,10 @@ end
 construct(::StaticSymbol{:newton}, ls, ::True) = NewtonData()
 reset!(::NewtonData) = nothing
 
-@inline function iterate!(::NewtonData, data, f, fdf!, options::OptimizationOptions, retract!)::Float64
+@inline function iterate!(::NewtonData, data, f, fdf!, options::OptimizationOptions)::Float64
     gethessian(data.linsystem)
     data.solves += @elapsed_ns negate!(solve!(data.linsystem, options.linsolver))
-    data.varnext = retract!(data.varnext, data.variables, getx(data.linsystem))
+    data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
     data.costs += @elapsed_ns cost_ = f(data.varnext)
     return cost_
 end
@@ -48,10 +48,10 @@ end
 construct(::StaticSymbol{:newton}, ls, ::False) = NewtonDataRelinearize(0.0)
 reset!(::NewtonDataRelinearize) = nothing
 
-@inline function iterate!(nd::NewtonDataRelinearize, data, f, fdf!, options::OptimizationOptions, retract!)::Float64
+@inline function iterate!(nd::NewtonDataRelinearize, data, f, fdf!, options::OptimizationOptions)::Float64
     gethessian(data.linsystem)
     data.solves += @elapsed_ns negate!(solve!(data.linsystem, options.linsolver))
-    data.varnext = retract!(data.varnext, data.variables, getx(data.linsystem))
+    data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
     zero!(data.linsystem)
     data.gradients += @elapsed_ns nd.cost = fdf!(getb(data.linsystem), getA(data.linsystem), data.varnext)
     return nd.cost
@@ -72,7 +72,7 @@ end
 construct(::StaticSymbol{:dogleg}, ls, ::Any) = DoglegData(ls)
 reset!(dd::DoglegData) = (dd.trustradius = 0.0)
 
-@inline function iterate!(doglegdata::DoglegData, data, f, fdf!, options::OptimizationOptions, retract!)::Float64
+@inline function iterate!(doglegdata::DoglegData, data, f, fdf!, options::OptimizationOptions)::Float64
     hessian, gradient = gethessgrad(data.linsystem)
     data.solves += @elapsed_ns begin
         gnorm2 = gradient' * gradient
@@ -118,7 +118,7 @@ reset!(dd::DoglegData) = (dd.trustradius = 0.0)
                 linear_approx = 0.5 * (a * (1 - step)^2 * gnorm2) + step * (2 - step) * basecost
             end
         end
-        data.varnext = retract!(data.varnext, data.variables, getx(data.linsystem))
+        data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
         data.costs += @elapsed_ns cost_ = f(data.varnext)
         mu = (data.bestcost - cost_) / linear_approx
         if mu > 0.375
@@ -230,7 +230,7 @@ function linearize!(lmd::LevMarDataTrial, data, fdf!)
     return lmd.trialcost
 end
 
-@inline function iterate!(levmardata::LevMarData, data, f, fdf!, options::OptimizationOptions, retract!)::Float64
+@inline function iterate!(levmardata::LevMarData, data, f, fdf!, options::OptimizationOptions)::Float64
     @assert levmardata.lambda >= 0.0
     hessian, gradient = gethessgrad(data.linsystem)
     updatescaling!(levmardata, data.linsystem)
@@ -240,7 +240,7 @@ end
         dampen!(data.linsystem, levmardata, levmardata.lambda - lastlambda)
         lastlambda = levmardata.lambda
         data.solves += @elapsed_ns negate!(solve!(data.linsystem, options.linsolver))
-        data.varnext = retract!(data.varnext, data.variables, getx(data.linsystem))
+        data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
         data.costs += @elapsed_ns cost_ = f(data.varnext)
         if cost_ <= data.bestcost || maximum(abs, getx(data.linsystem))::Float64 < options.dstep
             dampen!(data.linsystem, levmardata, -lastlambda)
@@ -253,7 +253,7 @@ end
     end
 end
 
-@inline function iterate!(levmardata::LevMarDataTrial, data, f, fdf!, options::OptimizationOptions, retract!)::Float64
+@inline function iterate!(levmardata::LevMarDataTrial, data, f, fdf!, options::OptimizationOptions)::Float64
     @assert levmardata.lambda >= 0.0
     hessian, gradient = gethessgrad(data.linsystem)
     updatescaling!(levmardata, data.linsystem)
@@ -265,7 +265,7 @@ end
         dampen!(data.linsystem, levmardata, levmardata.lambda - lastlambda)
         lastlambda = levmardata.lambda
         data.solves += @elapsed_ns negate!(solve!(data.linsystem, options.linsolver))
-        data.varnext = retract!(data.varnext, data.variables, getx(data.linsystem))
+        data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
         step = getx(data.linsystem)
         if firsttrial && 0.5 * (levmardata.lambda * dampingnorm(levmardata, step) - fast_dot(gradient, step)) >= data.bestcost * options.reldcost
             levmardata.trial = sharex(levmardata.trial, data.linsystem)
@@ -299,10 +299,10 @@ construct(::StaticSymbol{:gradientdescent}, ls, ::Any) = GradientDescentData(1.0
 construct(s::StaticSymbol, ls) = construct(s, ls, False())
 reset!(gdd::GradientDescentData) = (gdd.stepsize = 1.0)
 
-@inline function iterate!(gddata::GradientDescentData, data, f, fdf!, options::OptimizationOptions, retract!)::Float64
+@inline function iterate!(gddata::GradientDescentData, data, f, fdf!, options::OptimizationOptions)::Float64
     gradient = getgrad(data.linsystem)
     getx(data.linsystem) .= -gradient * gddata.stepsize
-    data.varnext = retract!(data.varnext, data.variables, getx(data.linsystem))
+    data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
     data.costs += @elapsed_ns costc = f(data.varnext)
     while !(costc <= data.bestcost)
         if isfinite(costc)
@@ -313,7 +313,7 @@ reset!(gdd::GradientDescentData) = (gdd.stepsize = 1.0)
             gddata.stepsize *= 0.5
         end
         getx(data.linsystem) .= -gradient * gddata.stepsize
-        data.varnext = retract!(data.varnext, data.variables, getx(data.linsystem))
+        data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
         data.costs += @elapsed_ns costc = f(data.varnext)
     end
     gddata.stepsize *= 2.0

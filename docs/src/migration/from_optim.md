@@ -9,7 +9,7 @@
 | **Primary Focus** | General first & second order, line search | High-performance second-order trust-region & LM |
 | **Combined Evaluation** | Separate `f`, `g!`, `h!` or `only_fgh!` | Combined `cost = fdf!(g, H, x)` single pass |
 | **Static Allocations** | Allocations on state/results | Zero heap allocations on `StaticArrays` with [`OptimizationWorkspace`](@ref) |
-| **Manifolds** | `Manifold` wrapper | Native `nvars`/`update` or `retract!(to, from, step)` |
+| **Manifolds** | `Manifold` wrapper | Native `nvars`/`update` |
 | **Iteration Algorithms** | `Newton()`, `NewtonTrustRegion()` | `:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg`, `:newton`, `:gradientdescent` |
 
 ## Code Translation Example
