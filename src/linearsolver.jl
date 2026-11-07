@@ -10,10 +10,20 @@ function linsolver_symbol(s::OptimizationLinearSolver)
     return :qr
 end
 
+function getlinsolver(s::Symbol)::OptimizationLinearSolver
+    s === :auto && return auto_solver
+    s === :cholesky && return cholesky_solver
+    s === :ldl && return ldl_solver
+    s === :qr && return qr_solver
+    throw(ArgumentError("Unknown linear solver: $s"))
+end
+getlinsolver(s::OptimizationLinearSolver) = s
+getlinsolver(s::StaticSymbol) = getlinsolver(dynamic(s))
+
 function try_cholesky!(x::StaticVector, A::StaticMatrix, b::StaticVector)
     A_ = SMatrix(A)
     b_ = SVector(b)
-    cholfac = StaticArrays._cholesky(Size(A_), A_, false)
+    cholfac = cholesky(Symmetric(A_); check=false)
     if issuccess(cholfac)
         return x .= cholfac \ b_
     end
@@ -55,35 +65,42 @@ function solve!(ls::StaticLinearSystem, ::StaticSymbol{:qr})
 end
 
 # DenseLinearSystem
-function solve!(ls::DenseLinearSystem, ::StaticSymbol{:auto})
-    try_cholesky!(ls.x, ls.A, ls.b)
-    return ls.x
-end
-function solve!(ls::DenseLinearSystem, ::StaticSymbol{:cholesky})
-    try_cholesky!(ls.x, ls.A, ls.b)
+function solve!(ls::DenseLinearSystem, ::Union{StaticSymbol{:auto}, StaticSymbol{:cholesky}})
+    copyto!(ls.A_scratch, ls.A)
+    cholfac = cholesky!(Symmetric(ls.A_scratch); check=false)
+    if issuccess(cholfac)
+        ldiv!(ls.x, cholfac, ls.b)
+    else
+        copyto!(ls.A_scratch, ls.A)
+        ldiv!(ls.x, qr!(ls.A_scratch), ls.b)
+    end
     return ls.x
 end
 function solve!(ls::DenseLinearSystem, ::StaticSymbol{:ldl})
-    bk = bunchkaufman(Symmetric(ls.A); check=false)
+    copyto!(ls.A_scratch, ls.A)
+    bk = bunchkaufman!(Symmetric(ls.A_scratch); check=false)
     if issuccess(bk)
         ldiv!(ls.x, bk, ls.b)
     else
-        ldiv!(ls.x, qr(ls.A), ls.b)
+        copyto!(ls.A_scratch, ls.A)
+        ldiv!(ls.x, qr!(ls.A_scratch), ls.b)
     end
     return ls.x
 end
 function solve!(ls::DenseLinearSystem, ::StaticSymbol{:qr})
-    ldiv!(ls.x, qr(ls.A), ls.b)
+    copyto!(ls.A_scratch, ls.A)
+    ldiv!(ls.x, qr!(ls.A_scratch), ls.b)
     return ls.x
 end
 
 # SparseLinearSystem
-function solve!(ls::SparseLinearSystem, ::StaticSymbol{:auto})
-    ldiv!(ls.x, ldl_factorize!(ls.A, ls.solver_ws), ls.b)
-    return ls.x
-end
-function solve!(ls::SparseLinearSystem, ::StaticSymbol{:ldl})
-    ldiv!(ls.x, ldl_factorize!(ls.A, ls.solver_ws), ls.b)
+function solve!(ls::SparseLinearSystem, ::Union{StaticSymbol{:auto}, StaticSymbol{:ldl}})
+    F = ldl_factorize!(ls.A, ls.solver_ws)
+    if LDLFactorizations.factorized(F)
+        ldiv!(ls.x, F, ls.b)
+    else
+        ls.x .= qr(ls.A) \ ls.b
+    end
     return ls.x
 end
 function solve!(ls::SparseLinearSystem, ::StaticSymbol{:cholesky})

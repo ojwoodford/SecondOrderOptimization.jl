@@ -19,11 +19,16 @@ struct DenseLinearSystem{T} <: AbstractLinearSystem
     A::Matrix{T}
     b::Vector{T}
     x::Vector{T}
+    A_scratch::Matrix{T}
 end
 function DenseLinearSystem{T}(n::Integer) where T
-    return DenseLinearSystem{T}(Matrix{T}(undef, n, n), Vector{T}(undef, n), Vector{T}(undef, n))
+    return DenseLinearSystem{T}(Matrix{T}(undef, n, n), Vector{T}(undef, n), Vector{T}(undef, n), Matrix{T}(undef, n, n))
+end
+function DenseLinearSystem{T}(A::Matrix{T}, b::Vector{T}, x::Vector{T}) where T
+    return DenseLinearSystem{T}(A, b, x, Matrix{T}(undef, size(A)))
 end
 DenseLinearSystem(n::Integer) = DenseLinearSystem{Float64}(n)
+DenseLinearSystem(A::Matrix{T}, b::Vector{T}, x::Vector{T}) where T = DenseLinearSystem{T}(A, b, x)
 
 # Sparse linear system
 struct SparseLinearSystem{T, Ti, SWS} <: AbstractLinearSystem
@@ -156,7 +161,7 @@ end
 
 # Copy structure for trial relinearization (LevMarDataTrial)
 copy_structure(ls::StaticLinearSystem{N, N2, T}) where {N, N2, T} = StaticLinearSystem{N, N2, T}(MMatrix{N, N, T, N2}(undef), MVector{N, T}(undef), ls.x)
-copy_structure(ls::DenseLinearSystem{T}) where T = DenseLinearSystem{T}(Matrix{T}(undef, size(ls.A)), Vector{T}(undef, length(ls.b)), ls.x)
+copy_structure(ls::DenseLinearSystem{T}) where T = DenseLinearSystem{T}(Matrix{T}(undef, size(ls.A)), Vector{T}(undef, length(ls.b)), ls.x, Matrix{T}(undef, size(ls.A)))
 copy_structure(ls::SparseLinearSystem{T, Ti, SWS}) where {T, Ti, SWS} = SparseLinearSystem{T, Ti, SWS}(
     SparseMatrixCSC(ls.A.m, ls.A.n, ls.A.colptr, ls.A.rowval, Vector{T}(undef, length(ls.A.nzval))),
     Vector{T}(undef, length(ls.b)),
@@ -166,7 +171,7 @@ copy_structure(ls::SparseLinearSystem{T, Ti, SWS}) where {T, Ti, SWS} = SparseLi
 )
 
 sharex(ls::StaticLinearSystem{N, N2, T}, from) where {N, N2, T} = ls.x === from.x ? ls : StaticLinearSystem{N, N2, T}(ls.A, ls.b, from.x)
-sharex(ls::DenseLinearSystem{T}, from) where T = ls.x === from.x ? ls : DenseLinearSystem{T}(ls.A, ls.b, from.x)
+sharex(ls::DenseLinearSystem{T}, from) where T = ls.x === from.x ? ls : DenseLinearSystem{T}(ls.A, ls.b, from.x, ls.A_scratch)
 sharex(ls::SparseLinearSystem{T, Ti, SWS}, from) where {T, Ti, SWS} = ls.x === from.x ? ls : SparseLinearSystem{T, Ti, SWS}(ls.A, ls.b, from.x, ls.diag_inds, ls.solver_ws)
 
 # Diagonal operations for damping

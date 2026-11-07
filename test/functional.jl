@@ -91,7 +91,26 @@ end
     @test occursin("termination", str)
 
     # Test enum options (OptimizationIterator & OptimizationLinearSolver)
-    opts_enum = OptimizationOptions(iterator=dogleg, linsolver=cholesky_solver, maxiters=50)
+    opts_enum = OptimizationOptions(iterator=SecondOrderOptimization.dogleg, linsolver=SecondOrderOptimization.cholesky_solver, maxiters=50)
     x_enum, _ = optimize(rosenbrock_cost, rosenbrock_fdf!, x0_static, opts_enum)
     @test isapprox(x_enum, [1.0, 1.0]; atol=1e-4)
+
+    # Test that optimize does not mutate x0
+    opts_test = OptimizationOptions(maxiters=100)
+    x0_orig = [-1.2, 1.0]
+    x0_copy = copy(x0_orig)
+    x_opt_nomut, _ = optimize(rosenbrock_cost, rosenbrock_fdf!, x0_copy, opts_test)
+    @test x0_copy == x0_orig
+    @test x_opt_nomut !== x0_copy
+    @test isapprox(x_opt_nomut, [1.0, 1.0]; atol=1e-4)
+
+    # Test optimize! mutates mutable vector in-place
+    x_mut = copy(x0_orig)
+    x_opt_mut, _ = optimize!(rosenbrock_cost, rosenbrock_fdf!, x_mut, opts_test)
+    @test x_opt_mut === x_mut
+    @test isapprox(x_mut, [1.0, 1.0]; atol=1e-4)
+
+    # Test optimize! works on immutable StaticVector
+    x_stat_opt, _ = optimize!(rosenbrock_cost, rosenbrock_fdf!, x0_static, opts_test)
+    @test isapprox(x_stat_opt, [1.0, 1.0]; atol=1e-4)
 end

@@ -1,5 +1,9 @@
 # SecondOrderOptimization.jl
 
+[![Documentation](https://img.shields.io/badge/docs-dev-blue.svg)](https://ojwoodford.github.io/SecondOrderOptimization.jl/dev/)
+[![Build Status](https://github.com/ojwoodford/SecondOrderOptimization.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/ojwoodford/SecondOrderOptimization.jl/actions/workflows/CI.yml?query=branch%3Amain)
+[![codecov](https://codecov.io/gh/ojwoodford/SecondOrderOptimization.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/ojwoodford/SecondOrderOptimization.jl)
+
 High-performance, zero-allocation second-order nonlinear optimization in Julia.
 
 ## Overview
@@ -8,10 +12,10 @@ High-performance, zero-allocation second-order nonlinear optimization in Julia.
 
 - **Iterators**: Levenberg-Marquardt (`:levenbergmarquardt`, `:levenbergmarquardt_dtd`), Powell's Dogleg (`:dogleg`), undamped Newton (`:newton`), and backtracking Gradient Descent (`:gradientdescent`).
 - **Linear Solvers**: Cholesky (`:cholesky`), LDL / Bunch-Kaufman (`:ldl`, using `LDLFactorizations.jl` for sparse matrices), and QR (`:qr`), with automatic dispatch (`:auto`).
-- **Variable Types & Manifolds**: Supports scalars (`Float64`), static vectors (`SVector`), dense vectors (`Vector`), heterogeneous variable vectors, and non-Euclidean manifolds via `SecondOrderOptimization.nvars` / `SecondOrderOptimization.update` or custom `retract!(to, from, step)`.
+- **Variable Types & Manifolds**: Supports scalars (`Float64`), static vectors (`SVector`), dense vectors (`Vector`), heterogeneous variable vectors, and non-Euclidean manifolds via `SecondOrderOptimization.nvars` / `SecondOrderOptimization.update`.
 - **Zero-Allocation Reuse**: Preallocate solver buffers and factorizations via `OptimizationWorkspace`.
 
-Looking to solve structured nonlinear least-squares factor graphs with automatic differentiation and robust kernels? See [`NLLSModels.jl`](https://github.com/ojwoodford/NLLSModels.jl), which builds on `SecondOrderOptimization.jl`.
+Looking to solve structured nonlinear least-squares factor graphs with automatic differentiation and robust kernels? See [`NLLSModel.jl`](https://github.com/ojwoodford/NLLSModel.jl), a complementary package that defines models that can be readily optimized using `SecondOrderOptimization.jl`.
 
 ## Quick Start
 

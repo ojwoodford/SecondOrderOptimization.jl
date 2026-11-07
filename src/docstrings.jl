@@ -13,7 +13,6 @@ Stores configuration options and stopping criteria for second-order optimization
 - `maxtime::Float64 = 30.0`: Maximum wall-clock optimization runtime in seconds.
 - `iterator::Union{Symbol, OptimizationIterator} = :levenbergmarquardt`: Iterator algorithm (`:newton`, `:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg`, `:gradientdescent`).
 - `linsolver::Union{Symbol, OptimizationLinearSolver} = :auto`: Linear solver method (`:auto`, `:cholesky`, `:ldl`, `:qr`).
-- `numthreads::Union{Integer, StaticInt} = Threads.nthreads()`: Number of worker threads.
 - `callbackchangesstate::Union{Bool, StaticBool} = false`: Set `true` if callback modifies problem state.
 
 # Example
@@ -63,8 +62,8 @@ OptimizationResult
 
 """
     OptimizationWorkspace()
-    OptimizationWorkspace(x0, options=OptimizationOptions(); H=nothing, retract!=update!)
-    OptimizationWorkspace(f, fdf!, x0, options=OptimizationOptions(); H=nothing, retract!=update!)
+    OptimizationWorkspace(x0, options=OptimizationOptions(); H=nothing)
+    OptimizationWorkspace(f, fdf!, x0, options=OptimizationOptions(); H=nothing)
 
 Preallocated cache for linear systems, solver factorizations, and trial variable buffers,
 enabling zero-allocation repeated optimizations.
@@ -279,9 +278,33 @@ x_opt, res = optimize(f, fdf!, x0; callback=storecostscallback(trajectory))
 CostTrajectory
 
 """
-    optimize(f, fdf!, x0, options=OptimizationOptions(); H=nothing, retract!=update!, callback=nullcallback, workspace=nothing) -> (x_best, result)
+    optimize!(f, fdf!, x, options=OptimizationOptions(); H=nothing, callback=nullcallback, workspace=nothing) -> (x_best, result)
+
+In-place variant of [`optimize`](@ref). Minimizes scalar objective `f(x)` updating variable state `x` in-place
+(for mutable variable containers such as `Vector`) to avoid allocating extra variable copies.
+
+# Arguments
+- `f`: Callable `f(x) -> Real` returning the scalar objective cost.
+- `fdf!`: In-place callable `fdf!(g, H, x) -> Real` populating gradient `g` and Hessian `H` and returning scalar cost.
+- `x`: Variable state to optimize in-place (e.g. `Vector`, or immutable `StaticVector` / `Number`).
+- `options::OptimizationOptions`: Optimization settings and stopping criteria.
+
+# Keyword Arguments
+- `H = nothing`: Optional prototype matrix for the Hessian (e.g. `SparseMatrixCSC` or `Matrix`).
+- `callback = nullcallback`: Callback invoked per iteration: `callback(cost, x_trial, data, iteratedata) -> (cost, terminate_flags)`.
+- `workspace = nothing`: Optional [`OptimizationWorkspace`](@ref) for memory reuse.
+
+# Returns
+- `x_best`: The optimal variable state found (for mutable vectors, identical to `x` mutated in-place).
+- `result::OptimizationResult`: Detailed optimization statistics.
+"""
+optimize!
+
+"""
+    optimize(f, fdf!, x0, options=OptimizationOptions(); H=nothing, callback=nullcallback, workspace=nothing) -> (x_best, result)
 
 Minimizes scalar objective `f(x)` given initial point `x0` and gradient/Hessian provider `fdf!(g, H, x)`.
+Does not mutate `x0` (allocates a copy of `x0` and delegates to [`optimize!`](@ref)).
 
 # Arguments
 - `f`: Callable `f(x) -> Real` returning the scalar objective cost.
@@ -291,7 +314,6 @@ Minimizes scalar objective `f(x)` given initial point `x0` and gradient/Hessian 
 
 # Keyword Arguments
 - `H = nothing`: Optional prototype matrix for the Hessian (e.g. `SparseMatrixCSC` or `Matrix`).
-- `retract! = update!`: Retraction function `retract!(to, from, step) -> to`.
 - `callback = nullcallback`: Callback invoked per iteration: `callback(cost, x_trial, data, iteratedata) -> (cost, terminate_flags)`.
 - `workspace = nothing`: Optional [`OptimizationWorkspace`](@ref) for memory reuse.
 
