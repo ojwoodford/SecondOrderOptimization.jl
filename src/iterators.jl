@@ -127,7 +127,8 @@ reset!(dd::DoglegData) = (dd.trustradius = 0.0)
         elseif !(mu >= 0.125)
             doglegdata.trustradius *= 0.5
         end
-        if cost_ <= data.bestcost || (maximum(abs, getx(data.linsystem))::Float64 < options.dstep)
+        step_sz = maximum(abs, getx(data.linsystem))::Float64
+        if cost_ <= data.bestcost || !(step_sz >= options.dstep) || !(doglegdata.trustradius >= floatmin(Float64)) || !isfinite(cost_) || !isfinite(doglegdata.trustradius)
             return cost_
         end
     end
