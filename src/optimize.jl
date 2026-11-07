@@ -60,7 +60,7 @@ current_grad(::NewtonDataRelinearize, data) = getgrad(data.linsystem)
 current_grad(::Any, data) = nothing
 
 @inline function optimizeloop!(data::D, iteratedata::ID, f::F, fdf!::FDF, options::OptimizationOptions, callback::CB) where {D, ID, F, FDF, CB}
-    stoptime = Base.time_ns() + options.maxtime
+    stoptime = typemax(UInt64) - options.maxtime <= Base.time_ns() ? typemax(UInt64) : Base.time_ns() + options.maxtime
     fails = 0
     converged = 0
 
@@ -93,7 +93,6 @@ current_grad(::Any, data) = nothing
             data.bestcost = cost
             fails = 0
         else
-            dcost = cost
             fails += 1
             if fails == 1
                 if !data.varbestvalid
@@ -110,8 +109,10 @@ current_grad(::Any, data) = nothing
         maxstep = maximum(abs, getx(data.linsystem))::Float64
         converged |= isinf(cost)                                     << 0
         converged |= isnan(cost)                                     << 1
-        converged |= (dcost < data.bestcost * options.reldcost)      << 2
-        converged |= (dcost < options.absdcost)                      << 3
+        if dcost >= 0
+            converged |= (dcost < abs(data.bestcost) * options.reldcost) << 2
+            converged |= (dcost < options.absdcost)                      << 3
+        end
         converged |= isinf(maxstep)                                  << 4
         converged |= isnan(maxstep)                                  << 5
         converged |= (maxstep < options.dstep)                       << 6
@@ -133,7 +134,10 @@ current_grad(::Any, data) = nothing
         end
 
         cost_ = linearize!(iteratedata, data, fdf!)
-        converged |= !isapprox(cost_, cost)                          << 10
+        if !isapprox(cost_, cost)
+            converged |= 1 << 10
+            break
+        end
         if options.gtol > 0.0
             maxgrad = maximum(abs, getgrad(data.linsystem))::Float64
             if maxgrad < options.gtol

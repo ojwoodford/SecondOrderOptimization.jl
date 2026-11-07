@@ -24,6 +24,24 @@ makestaticbool(x::Union{Bool, StaticBool}) = static(x)
 makestaticbool(::Type{True}) = True()
 makestaticbool(::Type{False}) = False()
 
+# Termination bitmask constants
+const TERMINATION_COST_INF          = 1 << 0
+const TERMINATION_COST_NAN          = 1 << 1
+const TERMINATION_REL_DCOST         = 1 << 2
+const TERMINATION_ABS_DCOST         = 1 << 3
+const TERMINATION_STEP_INF          = 1 << 4
+const TERMINATION_STEP_NAN          = 1 << 5
+const TERMINATION_STEP_SIZE         = 1 << 6
+const TERMINATION_MAX_FAILS         = 1 << 7
+const TERMINATION_MAX_ITERS         = 1 << 8
+const TERMINATION_MAX_TIME          = 1 << 9
+const TERMINATION_COST_DISCREPANCY  = 1 << 10
+const TERMINATION_START_NOT_FINITE  = 1 << 11
+const TERMINATION_GRAD_TOL          = 1 << 12
+
+const SUCCESS_CONVERGENCE_MASK = TERMINATION_REL_DCOST | TERMINATION_ABS_DCOST | TERMINATION_STEP_SIZE | TERMINATION_GRAD_TOL
+const FAILURE_TERMINATION_MASK = TERMINATION_COST_INF | TERMINATION_COST_NAN | TERMINATION_STEP_INF | TERMINATION_STEP_NAN | TERMINATION_MAX_FAILS | TERMINATION_MAX_ITERS | TERMINATION_MAX_TIME | TERMINATION_COST_DISCREPANCY | TERMINATION_START_NOT_FINITE
+
 function OptimizationOptions(;
     maxiters=100,
     reldcost=1.e-15,
@@ -38,12 +56,17 @@ function OptimizationOptions(;
     iteratordata=nothing,
     callbackchangesstate=False()
 )
-    @assert(isnothing(callback), "Callbacks should be passed directly to optimize, not to the options struct.")
-    @assert(isnothing(iteratordata), "Iteratordata should not be passed to the options struct.")
+    isnothing(callback) || throw(ArgumentError("Callbacks should be passed directly to optimize, not to the options struct."))
+    isnothing(iteratordata) || throw(ArgumentError("Iteratordata should not be passed to the options struct."))
+    iter_sym = Symbol(iterator)
+    getiterator(iter_sym) # validates iterator symbol
+    linsolv_sym = linsolver_symbol(linsolver)
+    getlinsolver(linsolv_sym) # validates linear solver symbol
+    maxtime_ns = isfinite(maxtime) ? UInt64(round(max(maxtime, 0.0) * 1e9)) : typemax(UInt64)
     return OptimizationOptions(
         Float64(reldcost), Float64(absdcost), Float64(dstep), Float64(gtol),
-        Int(maxfails), Int(maxiters), UInt64(round(maxtime * 1e9)),
-        static(Symbol(iterator)), static(linsolver_symbol(linsolver)),
+        Int(maxfails), Int(maxiters), maxtime_ns,
+        static(iter_sym), static(linsolv_sym),
         makestaticbool(callbackchangesstate)
     )
 end
@@ -126,36 +149,50 @@ Base.:+(a::OptimizationResult, b::OptimizationResult) = OptimizationResult(
     a.optimizeallocated + b.optimizeallocated
 )
 
+"""
+    isconverged(x::OptimizationResult) -> Bool
+
+Returns `true` if the optimization terminated due to satisfying at least one convergence criterion
+(`gtol`, `reldcost`, `absdcost`, or `dstep`) without encountering failure conditions (such as non-finite
+costs, NaN steps, max outer iterations, max runtime, or cost calculation discrepancies).
+"""
+function isconverged(x::OptimizationResult)
+    t = x.termination
+    return ((t & TERMINATION_GRAD_TOL) != 0) || (((t & SUCCESS_CONVERGENCE_MASK) != 0) && ((t & FAILURE_TERMINATION_MASK) == 0))
+end
+
 function Base.show(io::IO, x::OptimizationResult)
     optimtime = x.timetotal - x.timeinit
     timedoptim = max(x.timecost + x.timegradient + x.timesolver, optimtime)
-    @printf(io, "SecondOrderOptimization optimization using %s took %s and %d iterations to reduce the cost from %e to %e (a %.2f%% reduction), requiring:
-   %s for initialization (%.2f%% of total time, with %d allocations totalling %s), and
-   %s for optimization (%.2f%% of total time, with %d allocations totalling %s), of which:
-        %d cost computations accounted for %.2f%% of the time,
-        %d gradient computations accounted for %.2f%%, and
-        %d linear solver computations accounted for %.2f%%.\n",
+    cost_change_pct = (x.startcost != 0.0 && isfinite(x.startcost) && isfinite(x.bestcost)) ?
+        100.0 * (x.startcost - x.bestcost) / abs(x.startcost) : 0.0
+    @printf(io, "SecondOrderOptimization optimization using %s took %s and %d iterations to change the cost from %e to %e (%.2f%% change), requiring:\n",
         String(x.iterator),
-        timestring(x.timetotal), x.niterations, x.startcost, x.bestcost, 100 * (1 - x.bestcost / x.startcost),
-        timestring(x.timeinit), 100.0 * x.timeinit / x.timetotal, x.initallocations, bytesstring(x.initallocated),
-        timestring(optimtime), 100.0 * optimtime / x.timetotal, x.optimizeallocations, bytesstring(x.optimizeallocated),
-        x.costcomputations, 100.0 * x.timecost / timedoptim,
-        x.gradientcomputations, 100.0 * x.timegradient / timedoptim,
+        timestring(x.timetotal), x.niterations, x.startcost, x.bestcost, cost_change_pct)
+    @printf(io, "   %s for initialization (%.2f%% of total time, with %d allocations totalling %s), and\n",
+        timestring(x.timeinit), 100.0 * x.timeinit / x.timetotal, x.initallocations, bytesstring(x.initallocated))
+    @printf(io, "   %s for optimization (%.2f%% of total time, with %d allocations totalling %s), of which:\n",
+        timestring(optimtime), 100.0 * optimtime / x.timetotal, x.optimizeallocations, bytesstring(x.optimizeallocated))
+    @printf(io, "        %d cost computations accounted for %.2f%% of the time,\n",
+        x.costcomputations, 100.0 * x.timecost / timedoptim)
+    @printf(io, "        %d gradient computations accounted for %.2f%%, and\n",
+        x.gradientcomputations, 100.0 * x.timegradient / timedoptim)
+    @printf(io, "        %d linear solver computations accounted for %.2f%%.\n",
         x.linearsolves, 100.0 * x.timesolver / timedoptim)
     if 0 != x.termination;            println(io, "Reason(s) for termination:"); end
-    if 0 != x.termination & (1 << 0); println(io, "   Cost is infinite."); end
-    if 0 != x.termination & (1 << 1); println(io, "   Cost is NaN."); end
-    if 0 != x.termination & (1 << 2); println(io, "   Relative decrease in cost below threshold."); end
-    if 0 != x.termination & (1 << 3); println(io, "   Absolute decrease in cost below threshold."); end
-    if 0 != x.termination & (1 << 4); println(io, "   Step contains an infinite value."); end
-    if 0 != x.termination & (1 << 5); println(io, "   Step contains a NaN."); end
-    if 0 != x.termination & (1 << 6); println(io, "   Step size below threshold."); end
-    if 0 != x.termination & (1 << 7); println(io, "   Too many consecutive iterations increasing the cost."); end
-    if 0 != x.termination & (1 << 8); println(io, "   Maximum number of outer iterations reached."); end
-    if 0 != x.termination & (1 << 9); println(io, "   Maximum allowed computation time exceeded."); end
-    if 0 != x.termination & (1 << 10); println(io, "   Internal discrepancy in cost computations."); end
-    if 0 != x.termination & (1 << 11); println(io, "   Cost or gradient not finite at the start point."); end
-    if 0 != x.termination & (1 << 12); println(io, "   Gradient norm below threshold."); end
+    if 0 != x.termination & TERMINATION_COST_INF;         println(io, "   Cost is infinite."); end
+    if 0 != x.termination & TERMINATION_COST_NAN;         println(io, "   Cost is NaN."); end
+    if 0 != x.termination & TERMINATION_REL_DCOST;        println(io, "   Relative decrease in cost below threshold."); end
+    if 0 != x.termination & TERMINATION_ABS_DCOST;        println(io, "   Absolute decrease in cost below threshold."); end
+    if 0 != x.termination & TERMINATION_STEP_INF;         println(io, "   Step contains an infinite value."); end
+    if 0 != x.termination & TERMINATION_STEP_NAN;         println(io, "   Step contains a NaN."); end
+    if 0 != x.termination & TERMINATION_STEP_SIZE;        println(io, "   Step size below threshold."); end
+    if 0 != x.termination & TERMINATION_MAX_FAILS;        println(io, "   Too many consecutive iterations increasing the cost."); end
+    if 0 != x.termination & TERMINATION_MAX_ITERS;        println(io, "   Maximum number of outer iterations reached."); end
+    if 0 != x.termination & TERMINATION_MAX_TIME;         println(io, "   Maximum allowed computation time exceeded."); end
+    if 0 != x.termination & TERMINATION_COST_DISCREPANCY; println(io, "   Internal discrepancy in cost computations."); end
+    if 0 != x.termination & TERMINATION_START_NOT_FINITE; println(io, "   Cost or gradient not finite at the start point."); end
+    if 0 != x.termination & TERMINATION_GRAD_TOL;         println(io, "   Gradient norm below threshold."); end
     userflags = x.termination >> 16
     if 0 != userflags; println(io, "   Terminated by user-defined callback, with flags: ", string(userflags, base=2)); end
 end

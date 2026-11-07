@@ -19,7 +19,7 @@ end
 
 h_structure_key(::Nothing) = nothing
 h_structure_key(H::AbstractMatrix) = (typeof(H), size(H))
-h_structure_key(H::SparseMatrixCSC) = (typeof(H), size(H), objectid(H.colptr), objectid(H.rowval), length(H.nzval))
+h_structure_key(H::SparseMatrixCSC) = (typeof(H), size(H), hash(H.colptr), hash(H.rowval), length(H.nzval))
 
 function cachekey(x0, options::OptimizationOptions, H)
     return (typeof(x0), dynamic(nvars(x0)), typeof(options), h_structure_key(H))
@@ -32,13 +32,13 @@ function keyvalid(key::Tuple, x0, options::OptimizationOptions, H)
 end
 
 function OptimizationWorkspace(x0, options::OptimizationOptions=OptimizationOptions(); H=nothing, startstats::Stats=Stats())
-    return OptimizationWorkspace(nothing, nothing, x0, options; H=H, startstats=startstats)
-end
-
-function OptimizationWorkspace(f, fdf!, x0, options::OptimizationOptions=OptimizationOptions(); H=nothing, startstats::Stats=Stats())
     ls = makelinearsystem(x0, H, options.linsolver)
     data = OptimizationInternal(ls, x0, startstats)
     iteratedata = construct(options.iterator, ls, options.callbackchangesstate)
     key = cachekey(x0, options, H)
     return OptimizationWorkspace{typeof(key), Tuple{typeof(data), typeof(iteratedata)}}(key, (data, iteratedata))
 end
+
+# Backward compatibility overload
+OptimizationWorkspace(f, fdf!, x0, options::OptimizationOptions=OptimizationOptions(); H=nothing, startstats::Stats=Stats()) =
+    OptimizationWorkspace(x0, options; H=H, startstats=startstats)

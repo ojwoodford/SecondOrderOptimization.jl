@@ -8,4 +8,5 @@ using Test
     include("nantrial.jl")
     include("trialreuse.jl")
     include("OptimizationWorkspace.jl")
+    include("general_objectives.jl")
 end
