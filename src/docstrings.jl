@@ -177,7 +177,8 @@ NewtonDataRelinearize
 """
     DoglegData
 
-Iterator state for Powell's dogleg trust-region optimization, storing the trust-region radius `trustradius`
+Iterator state for Powell's dogleg trust-region optimization (Nocedal & Wright 2006 framework),
+storing the active trust-region radius `trustradius`, maximum radius bound `maxtrustradius`,
 and scratch buffers for the Cauchy and Newton steps.
 """
 DoglegData

@@ -9,5 +9,6 @@ using Test
     include("trialreuse.jl")
     include("OptimizationWorkspace.jl")
     include("general_objectives.jl")
+    include("dogleg_trustregion.jl")
     include("extensions.jl")
 end

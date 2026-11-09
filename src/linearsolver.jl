@@ -55,11 +55,20 @@ function is_indefinite(F::LDLFactorizations.LDLFactorization)
     return false
 end
 
+@inline function has_positive_pivots(C::Cholesky)
+    @inbounds for i in 1:size(C.factors, 1)
+        if !(C.factors[i, i] > 0)
+            return false
+        end
+    end
+    return true
+end
+
 function try_cholesky!(x::StaticVector, A::StaticMatrix, b::StaticVector)
     A_ = SMatrix(A)
     b_ = SVector(b)
     cholfac = cholesky(Symmetric(A_); check=false)
-    if issuccess(cholfac)
+    if issuccess(cholfac) && has_positive_pivots(cholfac)
         x .= cholfac \ b_
         return Success
     end
@@ -90,7 +99,7 @@ function solve!(ls::StaticLinearSystem, ::Union{StaticSymbol{:auto}, StaticSymbo
         end
     end
     cholfac = cholesky(Symmetric(A_); check=false)
-    if issuccess(cholfac)
+    if issuccess(cholfac) && has_positive_pivots(cholfac)
         ls.x .= cholfac \ SVector(ls.b)
         return Success
     end
