@@ -31,24 +31,33 @@ end
 getlinsolver(s::OptimizationLinearSolver) = s
 getlinsolver(s::StaticSymbol) = getlinsolver(dynamic(s))
 
-function is_indefinite(bk::BunchKaufman)
+function is_indefinite(bk::BunchKaufman, tol::Float64=1e-6)
     n = length(bk.ipiv)
     k = 1
     @inbounds while k <= n
         if bk.ipiv[k] < 0
-            return true
-        elseif bk.D[k, k] < 0
-            return true
+            d11 = bk.D[k, k]
+            d22 = bk.D[k+1, k+1]
+            d12 = bk.D[k, k+1]
+            tr = d11 + d22
+            det = d11 * d22 - d12 * d12
+            if det < -tol || tr < -tol
+                return true
+            end
+            k += 2
         else
+            if bk.D[k, k] < -tol
+                return true
+            end
             k += 1
         end
     end
     return false
 end
 
-function is_indefinite(F::LDLFactorizations.LDLFactorization)
+function is_indefinite(F::LDLFactorizations.LDLFactorization, tol::Float64=1e-6)
     @inbounds for d in F.d
-        if d < 0
+        if d < -tol
             return true
         end
     end
