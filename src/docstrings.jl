@@ -356,11 +356,12 @@ zero!(ls)
 zero!
 
 """
-    solve!(ls, solver=static(:auto))
-    solve!(x, A, b)
+    solve!(ls, solver=static(:auto)) -> SolveStatus
+    solve!(x, A, b) -> SolveStatus
 
 Solves the linear system `A * x = b` in-place using the specified `solver` (`:auto`, `:cholesky`, `:ldl`, `:qr`)
-and returns the solution vector `x`.
+and returns the `SolveStatus` enum (`Success`, `NotPositiveDefinite`, `Indefinite`).
+Note: On `StaticLinearSystem`, `:qr` executes static LU decomposition via `\`.
 
 # Example
 ```julia

@@ -1,42 +1,69 @@
 using StaticArrays, Static, SparseArrays, LinearAlgebra
 
+@enum SolveStatus Success NotPositiveDefinite Indefinite
+@enum OptimizationLinearSolver auto_solver cholesky_solver ldl_solver qr_solver
+
+linsolver_symbol(s::Symbol) = s
+linsolver_symbol(s::StaticSymbol) = dynamic(s)
+function linsolver_symbol(s::OptimizationLinearSolver)
+    s == auto_solver && return :auto
+    s == cholesky_solver && return :cholesky
+    s == ldl_solver && return :ldl
+    return :qr
+end
+
 abstract type AbstractLinearSystem end
+function solve! end
+function dampen! end
 
 # Static linear system
-struct StaticLinearSystem{N, N2, T} <: AbstractLinearSystem
-    A::MMatrix{N, N, T, N2}
-    b::MVector{N, T}
-    x::MVector{N, T}
+mutable struct StaticLinearSystem{N, N2, T} <: AbstractLinearSystem
+    const A::MMatrix{N, N, T, N2}
+    const b::MVector{N, T}
+    const x::MVector{N, T}
+    lambda::T
+    scaling::Union{Nothing, SVector{N, T}}
+end
+function StaticLinearSystem{N, N2, T}(A::MMatrix{N, N, T, N2}, b::MVector{N, T}, x::MVector{N, T}) where {N, N2, T}
+    return StaticLinearSystem{N, N2, T}(A, b, x, zero(T), nothing)
 end
 function StaticLinearSystem{N, T}() where {N, T}
     N2 = N * N
-    return StaticLinearSystem{N, N2, T}(MMatrix{N, N, T, N2}(undef), MVector{N, T}(undef), MVector{N, T}(undef))
+    return StaticLinearSystem{N, N2, T}(MMatrix{N, N, T, N2}(undef), MVector{N, T}(undef), MVector{N, T}(undef), zero(T), nothing)
 end
 StaticLinearSystem{N}() where N = StaticLinearSystem{N, Float64}()
 
 # Dense linear system
-struct DenseLinearSystem{T} <: AbstractLinearSystem
-    A::Matrix{T}
-    b::Vector{T}
-    x::Vector{T}
-    A_scratch::Matrix{T}
+mutable struct DenseLinearSystem{T} <: AbstractLinearSystem
+    const A::Matrix{T}
+    const b::Vector{T}
+    const x::Vector{T}
+    const A_scratch::Matrix{T}
+    lambda::T
+    scaling::Union{Nothing, Vector{T}}
 end
 function DenseLinearSystem{T}(n::Integer) where T
-    return DenseLinearSystem{T}(Matrix{T}(undef, n, n), Vector{T}(undef, n), Vector{T}(undef, n), Matrix{T}(undef, n, n))
+    return DenseLinearSystem{T}(Matrix{T}(undef, n, n), Vector{T}(undef, n), Vector{T}(undef, n), Matrix{T}(undef, n, n), zero(T), nothing)
 end
-function DenseLinearSystem{T}(A::Matrix{T}, b::Vector{T}, x::Vector{T}) where T
-    return DenseLinearSystem{T}(A, b, x, Matrix{T}(undef, size(A)))
+function DenseLinearSystem{T}(A::Matrix{T}, b::Vector{T}, x::Vector{T}, A_scratch::Matrix{T}=Matrix{T}(undef, size(A))) where T
+    return DenseLinearSystem{T}(A, b, x, A_scratch, zero(T), nothing)
 end
 DenseLinearSystem(n::Integer) = DenseLinearSystem{Float64}(n)
 DenseLinearSystem(A::Matrix{T}, b::Vector{T}, x::Vector{T}) where T = DenseLinearSystem{T}(A, b, x)
 
 # Sparse linear system
-struct SparseLinearSystem{T, Ti, SWS} <: AbstractLinearSystem
-    A::SparseMatrixCSC{T, Ti}
-    b::Vector{T}
-    x::Vector{T}
-    diag_inds::Vector{Ti}
-    solver_ws::SWS
+mutable struct SparseLinearSystem{T, Ti, SWS} <: AbstractLinearSystem
+    const A::SparseMatrixCSC{T, Ti}
+    const b::Vector{T}
+    const x::Vector{T}
+    const diag_inds::Vector{Ti}
+    const solver_ws::SWS
+    const diag_cache::Vector{T}
+    lambda::T
+    scaling::Union{Nothing, Vector{T}}
+end
+function SparseLinearSystem(A::SparseMatrixCSC{T, Ti}, b::Vector{T}, x::Vector{T}, diag_inds::Vector{Ti}, solver_ws::SWS, diag_cache::Vector{T}=copy(A.nzval[diag_inds])) where {T, Ti, SWS}
+    return SparseLinearSystem{T, Ti, SWS}(A, b, x, diag_inds, solver_ws, diag_cache, zero(T), nothing)
 end
 
 function ensure_diag_and_inds(A::SparseMatrixCSC{T, Ti}) where {T, Ti}
@@ -100,10 +127,18 @@ function ensure_diag_and_inds(A::SparseMatrixCSC{T, Ti}) where {T, Ti}
     return new_A, new_diag_inds
 end
 
+makesparsews(A, ::Union{StaticSymbol{:auto}, StaticSymbol{:ldl}}) = LDLFactorizations.ldl_analyze(A)
+makesparsews(A, ::StaticSymbol{:cholesky}) = SparseArrays.cholesky(Symmetric(A, :U); check=false)
+makesparsews(A, ::StaticSymbol{:qr}) = nothing
+makesparsews(A, s::Symbol) = makesparsews(A, static(s))
+makesparsews(A, s::OptimizationLinearSolver) = makesparsews(A, static(linsolver_symbol(s)))
+
 function makelinearsystem(x0, H::SparseMatrixCSC, linsolver)
     A, diag_inds = ensure_diag_and_inds(H)
-    ldlfac = LDLFactorizations.ldl_analyze(A)
-    return SparseLinearSystem(A, zeros(Float64, size(A, 1)), zeros(Float64, size(A, 1)), diag_inds, ldlfac)
+    sym = static(linsolver_symbol(linsolver))
+    ws = makesparsews(A, sym)
+    diag_cache = copy(A.nzval[diag_inds])
+    return SparseLinearSystem(A, zeros(Float64, size(A, 1)), zeros(Float64, size(A, 1)), diag_inds, ws, diag_cache)
 end
 
 function makelinearsystem(x0, H::MMatrix{N, N, Float64, N2}, linsolver) where {N, N2}
@@ -159,20 +194,35 @@ function zero!(ls::SparseLinearSystem)
     return ls
 end
 
+refresh_diag_cache!(ls::AbstractLinearSystem) = nothing
+function refresh_diag_cache!(ls::SparseLinearSystem)
+    @inbounds for (i, idx) in enumerate(ls.diag_inds)
+        ls.diag_cache[i] = ls.A.nzval[idx]
+    end
+    return nothing
+end
+
+# Unified damping interface: dampen! records, solve! applies
+dampen!(ls::AbstractLinearSystem, lambda::Real) = (ls.lambda = convert(eltype(getb(ls)), lambda); ls.scaling = nothing; ls)
+dampen!(ls::AbstractLinearSystem, lambda::Real, scaling) = (ls.lambda = convert(eltype(getb(ls)), lambda); ls.scaling = scaling; ls)
+
 # Copy structure for trial relinearization (LevMarDataTrial)
-copy_structure(ls::StaticLinearSystem{N, N2, T}) where {N, N2, T} = StaticLinearSystem{N, N2, T}(MMatrix{N, N, T, N2}(undef), MVector{N, T}(undef), ls.x)
-copy_structure(ls::DenseLinearSystem{T}) where T = DenseLinearSystem{T}(Matrix{T}(undef, size(ls.A)), Vector{T}(undef, length(ls.b)), ls.x, Matrix{T}(undef, size(ls.A)))
+copy_structure(ls::StaticLinearSystem{N, N2, T}) where {N, N2, T} = StaticLinearSystem{N, N2, T}(MMatrix{N, N, T, N2}(undef), MVector{N, T}(undef), ls.x, ls.lambda, ls.scaling)
+copy_structure(ls::DenseLinearSystem{T}) where T = DenseLinearSystem{T}(Matrix{T}(undef, size(ls.A)), Vector{T}(undef, length(ls.b)), ls.x, Matrix{T}(undef, size(ls.A)), ls.lambda, ls.scaling)
 copy_structure(ls::SparseLinearSystem{T, Ti, SWS}) where {T, Ti, SWS} = SparseLinearSystem{T, Ti, SWS}(
     SparseMatrixCSC(ls.A.m, ls.A.n, ls.A.colptr, ls.A.rowval, Vector{T}(undef, length(ls.A.nzval))),
     Vector{T}(undef, length(ls.b)),
     ls.x,
     ls.diag_inds,
-    ls.solver_ws
+    ls.solver_ws,
+    copy(ls.diag_cache),
+    ls.lambda,
+    ls.scaling
 )
 
-sharex(ls::StaticLinearSystem{N, N2, T}, from) where {N, N2, T} = ls.x === from.x ? ls : StaticLinearSystem{N, N2, T}(ls.A, ls.b, from.x)
-sharex(ls::DenseLinearSystem{T}, from) where T = ls.x === from.x ? ls : DenseLinearSystem{T}(ls.A, ls.b, from.x, ls.A_scratch)
-sharex(ls::SparseLinearSystem{T, Ti, SWS}, from) where {T, Ti, SWS} = ls.x === from.x ? ls : SparseLinearSystem{T, Ti, SWS}(ls.A, ls.b, from.x, ls.diag_inds, ls.solver_ws)
+sharex(ls::StaticLinearSystem{N, N2, T}, from) where {N, N2, T} = ls.x === from.x ? ls : StaticLinearSystem{N, N2, T}(ls.A, ls.b, from.x, ls.lambda, ls.scaling)
+sharex(ls::DenseLinearSystem{T}, from) where T = ls.x === from.x ? ls : DenseLinearSystem{T}(ls.A, ls.b, from.x, ls.A_scratch, ls.lambda, ls.scaling)
+sharex(ls::SparseLinearSystem{T, Ti, SWS}, from) where {T, Ti, SWS} = ls.x === from.x ? ls : SparseLinearSystem{T, Ti, SWS}(ls.A, ls.b, from.x, ls.diag_inds, ls.solver_ws, ls.diag_cache, ls.lambda, ls.scaling)
 
 # Diagonal operations for damping
 function uniformscaling!(A::AbstractMatrix, k)

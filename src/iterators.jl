@@ -22,6 +22,7 @@ function computelinearization!(data, fdf!, x)
     zero!(data.linsystem)
     cost = 0.0
     data.gradients += @elapsed_ns cost = fdf!(getb(data.linsystem), getA(data.linsystem), x)
+    refresh_diag_cache!(data.linsystem)
     return cost
 end
 
@@ -36,10 +37,29 @@ reset!(::NewtonData) = nothing
 
 @inline function iterate!(::NewtonData, data, f, fdf!, options::OptimizationOptions)::Float64
     gethessian(data.linsystem)
-    data.solves += @elapsed_ns negate!(solve!(data.linsystem, options.linsolver))
-    data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
-    data.costs += @elapsed_ns cost_ = f(data.varnext)
-    return cost_
+    status = Success
+    data.solves += @elapsed_ns begin
+        status = solve!(data.linsystem, options.linsolver)
+        if status == Success
+        else
+            mu = max(max_diag(data.linsystem) * 1e-4, 1e-6)
+            shift_iters = 30
+            while status != Success && shift_iters > 0
+                shift_iters -= 1
+                dampen!(data.linsystem, mu)
+                mu *= 4.0
+                status = solve!(data.linsystem, options.linsolver)
+            end
+            dampen!(data.linsystem, 0.0)
+        end
+    end
+    if status == Success
+        negate!(getx(data.linsystem))
+        data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
+        data.costs += @elapsed_ns cost_ = f(data.varnext)
+        return cost_
+    end
+    return NaN
 end
 
 mutable struct NewtonDataRelinearize
@@ -50,11 +70,31 @@ reset!(::NewtonDataRelinearize) = nothing
 
 @inline function iterate!(nd::NewtonDataRelinearize, data, f, fdf!, options::OptimizationOptions)::Float64
     gethessian(data.linsystem)
-    data.solves += @elapsed_ns negate!(solve!(data.linsystem, options.linsolver))
-    data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
-    zero!(data.linsystem)
-    data.gradients += @elapsed_ns nd.cost = fdf!(getb(data.linsystem), getA(data.linsystem), data.varnext)
-    return nd.cost
+    status = Success
+    data.solves += @elapsed_ns begin
+        status = solve!(data.linsystem, options.linsolver)
+        if status == Success
+        else
+            mu = max(max_diag(data.linsystem) * 1e-4, 1e-6)
+            shift_iters = 30
+            while status != Success && shift_iters > 0
+                shift_iters -= 1
+                dampen!(data.linsystem, mu)
+                mu *= 4.0
+                status = solve!(data.linsystem, options.linsolver)
+            end
+            dampen!(data.linsystem, 0.0)
+        end
+    end
+    if status == Success
+        negate!(getx(data.linsystem))
+        data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
+        zero!(data.linsystem)
+        data.gradients += @elapsed_ns nd.cost = fdf!(getb(data.linsystem), getA(data.linsystem), data.varnext)
+        refresh_diag_cache!(data.linsystem)
+        return nd.cost
+    end
+    return NaN
 end
 
 linearize!(nd::NewtonDataRelinearize, data, fdf!) = nd.cost
@@ -88,33 +128,41 @@ reset!(dd::DoglegData) = (dd.trustradius = 0.0)
     alpha2 = Inf
     gHg = 0.0
     newton_dot_g = 0.0
-    data.solves += @elapsed_ns begin
-        gHg = fast_bAb(hessian, gradient)
-        if gHg > 0
-            a = gnorm2 / gHg
-            alpha = a * gnorm
+    gHg = fast_bAb(hessian, gradient)
+    if gHg > 0
+        a = gnorm2 / gHg
+        alpha = a * gnorm
+    end
+    alpha2 = alpha * alpha
+    if isfinite(alpha2)
+        doglegdata.cauchy .= (-a) .* gradient
+        if doglegdata.trustradius == 0
+            doglegdata.trustradius = alpha
         end
-        alpha2 = alpha * alpha
-        if isfinite(alpha2)
-            doglegdata.cauchy .= (-a) .* gradient
-            if doglegdata.trustradius == 0
-                doglegdata.trustradius = alpha
-            end
-        else
-            alpha = Inf
-            alpha2 = Inf
-            if doglegdata.trustradius == 0
-                doglegdata.trustradius = isfinite(gnorm) ? gnorm : 1.0
-            end
+    else
+        alpha = Inf
+        alpha2 = Inf
+        if doglegdata.trustradius == 0
+            doglegdata.trustradius = isfinite(gnorm) ? gnorm : 1.0
         end
-        if alpha < doglegdata.trustradius
-            negate!(solve!(data.linsystem, options.linsolver))
+    end
+    if alpha < doglegdata.trustradius
+        status = Success
+        data.solves += @elapsed_ns begin
+            status = solve!(data.linsystem, options.linsolver)
+        end
+        if status == Success
+            negate!(getx(data.linsystem))
             doglegdata.newton .= getx(data.linsystem)
             beta = fast_norm(doglegdata.newton)
             newton_dot_g = fast_dot(gradient, doglegdata.newton)
             if !isfinite(beta) || !(newton_dot_g < 0)
                 doglegdata.trustradius = alpha
             end
+        else
+            doglegdata.trustradius = min(doglegdata.trustradius, alpha)
+            beta = Inf
+            newton_dot_g = 0.0
         end
     end
     basecost = max(-0.5 * newton_dot_g, floatmin(Float64))
@@ -194,7 +242,8 @@ function updatescaling!(lmd::AnyLevenbergData, ls)
     end
 end
 
-dampen!(ls, ::AnyLevenbergData, dlambda) = uniformscaling!(ls, dlambda)
+dampen!(ls::AbstractLinearSystem, ::AnyLevenbergData, lambda) = dampen!(ls, max(0.0, lambda))
+dampen!(ls::AbstractLinearSystem, lmd::AnyLevenbergData) = dampen!(ls, lmd.lambda)
 
 mutable struct MarquardtData{T} <: LevMarData
     lambda::Float64
@@ -240,7 +289,8 @@ function updatescaling!(lmd::AnyMarquardtData, ls)
     lmd.scaling .= max.(lmd.scaling, max(m * 1e-8, 1e-12))
 end
 
-dampen!(ls, lmd::AnyMarquardtData, dlambda) = damp_marquardt!(ls, lmd.scaling, dlambda)
+dampen!(ls::AbstractLinearSystem, lmd::AnyMarquardtData, lambda) = dampen!(ls, max(0.0, lambda), lmd.scaling)
+dampen!(ls::AbstractLinearSystem, lmd::AnyMarquardtData) = dampen!(ls, lmd.lambda, lmd.scaling)
 
 dampingnorm(::AnyLevenbergData, x) = sqnorm(x)
 function dampingnorm(lmd::AnyMarquardtData, x)
@@ -267,22 +317,40 @@ end
     @assert levmardata.lambda >= 0.0
     hessian, gradient = gethessgrad(data.linsystem)
     updatescaling!(levmardata, data.linsystem)
-    lastlambda = 0.0
     mu = 2.0
     inner_iters = 0
     while true
         inner_iters += 1
-        dampen!(data.linsystem, levmardata, levmardata.lambda - lastlambda)
-        lastlambda = levmardata.lambda
-        data.solves += @elapsed_ns negate!(solve!(data.linsystem, options.linsolver))
+        status = Success
+        data.solves += @elapsed_ns begin
+            while true
+                dampen!(data.linsystem, levmardata)
+                status = solve!(data.linsystem, options.linsolver)
+                if status == Success
+                    negate!(getx(data.linsystem))
+                    break
+                end
+                levmardata.lambda *= mu
+                mu *= 2.0
+                if levmardata.lambda > 1e16 || inner_iters > 100
+                    dampen!(data.linsystem, 0.0)
+                    break
+                end
+            end
+        end
+        if status != Success
+            return NaN
+        end
         data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
         data.costs += @elapsed_ns cost_ = f(data.varnext)
         step_sz = maximum(abs, getx(data.linsystem))::Float64
-        if cost_ <= data.bestcost || !(step_sz >= options.dstep) || !isfinite(step_sz) || inner_iters > 100
-            dampen!(data.linsystem, levmardata, -lastlambda)
-            stepquality = (cost_ - data.bestcost) / (0.5 * fast_bAb(hessian, getx(data.linsystem)) + fast_dot(gradient, getx(data.linsystem)))
-            levmardata.lambda *= stepquality < 0.983 ? 1.0 - (2.0 * stepquality - 1.0)^3 : 0.1
-            levmardata.lambda = max(levmardata.lambda, 1e-12)
+        if cost_ <= data.bestcost || !(step_sz >= options.dstep) || !isfinite(step_sz) || inner_iters > 100 || levmardata.lambda > 1e16
+            dampen!(data.linsystem, 0.0)
+            if cost_ <= data.bestcost
+                stepquality = (cost_ - data.bestcost) / (0.5 * fast_bAb(hessian, getx(data.linsystem)) + fast_dot(gradient, getx(data.linsystem)))
+                levmardata.lambda *= stepquality < 0.983 ? 1.0 - (2.0 * stepquality - 1.0)^3 : 0.1
+                levmardata.lambda = max(levmardata.lambda, 1e-12)
+            end
             return cost_
         end
         levmardata.lambda *= mu
@@ -294,22 +362,40 @@ end
     @assert levmardata.lambda >= 0.0
     hessian, gradient = gethessgrad(data.linsystem)
     updatescaling!(levmardata, data.linsystem)
-    lastlambda = 0.0
     mu = 2.0
     levmardata.trialready = false
     firsttrial = true
     inner_iters = 0
     while true
         inner_iters += 1
-        dampen!(data.linsystem, levmardata, levmardata.lambda - lastlambda)
-        lastlambda = levmardata.lambda
-        data.solves += @elapsed_ns negate!(solve!(data.linsystem, options.linsolver))
+        status = Success
+        data.solves += @elapsed_ns begin
+            while true
+                dampen!(data.linsystem, levmardata)
+                status = solve!(data.linsystem, options.linsolver)
+                if status == Success
+                    negate!(getx(data.linsystem))
+                    break
+                end
+                levmardata.trialready = false
+                levmardata.lambda *= mu
+                mu *= 2.0
+                if levmardata.lambda > 1e16 || inner_iters > 100
+                    dampen!(data.linsystem, 0.0)
+                    break
+                end
+            end
+        end
+        if status != Success
+            return NaN
+        end
         data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
         step = getx(data.linsystem)
         if firsttrial && 0.5 * (levmardata.lambda * dampingnorm(levmardata, step) - fast_dot(gradient, step)) >= abs(data.bestcost) * options.reldcost
             levmardata.trial = sharex(levmardata.trial, data.linsystem)
             zero!(levmardata.trial)
             data.gradients += @elapsed_ns cost_ = fdf!(getb(levmardata.trial), getA(levmardata.trial), data.varnext)
+            refresh_diag_cache!(levmardata.trial)
             levmardata.trialready = true
             levmardata.trialcost = cost_
         else
@@ -317,11 +403,13 @@ end
         end
         firsttrial = false
         step_sz = maximum(abs, getx(data.linsystem))::Float64
-        if cost_ <= data.bestcost || !(step_sz >= options.dstep) || !isfinite(step_sz) || inner_iters > 100
-            dampen!(data.linsystem, levmardata, -lastlambda)
-            stepquality = (cost_ - data.bestcost) / (0.5 * fast_bAb(hessian, getx(data.linsystem)) + fast_dot(gradient, getx(data.linsystem)))
-            levmardata.lambda *= stepquality < 0.983 ? 1.0 - (2.0 * stepquality - 1.0)^3 : 0.1
-            levmardata.lambda = max(levmardata.lambda, 1e-12)
+        if cost_ <= data.bestcost || !(step_sz >= options.dstep) || !isfinite(step_sz) || inner_iters > 100 || levmardata.lambda > 1e16
+            dampen!(data.linsystem, 0.0)
+            if cost_ <= data.bestcost
+                stepquality = (cost_ - data.bestcost) / (0.5 * fast_bAb(hessian, getx(data.linsystem)) + fast_dot(gradient, getx(data.linsystem)))
+                levmardata.lambda *= stepquality < 0.983 ? 1.0 - (2.0 * stepquality - 1.0)^3 : 0.1
+                levmardata.lambda = max(levmardata.lambda, 1e-12)
+            end
             return cost_
         end
         levmardata.trialready = false

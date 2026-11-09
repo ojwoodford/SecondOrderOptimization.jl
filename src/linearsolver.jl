@@ -1,15 +1,5 @@
 using LDLFactorizations, LinearAlgebra, StaticArrays, SparseArrays, Static
 
-@enum OptimizationLinearSolver auto_solver cholesky_solver ldl_solver qr_solver
-
-linsolver_symbol(s::Symbol) = s
-function linsolver_symbol(s::OptimizationLinearSolver)
-    s == auto_solver && return :auto
-    s == cholesky_solver && return :cholesky
-    s == ldl_solver && return :ldl
-    return :qr
-end
-
 function getlinsolver(s::Symbol)::OptimizationLinearSolver
     s === :auto && return auto_solver
     s === :cholesky && return cholesky_solver
@@ -20,22 +10,48 @@ end
 getlinsolver(s::OptimizationLinearSolver) = s
 getlinsolver(s::StaticSymbol) = getlinsolver(dynamic(s))
 
+function is_indefinite(bk::BunchKaufman)
+    n = length(bk.ipiv)
+    k = 1
+    @inbounds while k <= n
+        if bk.ipiv[k] < 0
+            return true
+        elseif bk.D[k, k] < 0
+            return true
+        else
+            k += 1
+        end
+    end
+    return false
+end
+
+function is_indefinite(F::LDLFactorizations.LDLFactorization)
+    @inbounds for d in F.d
+        if d < 0
+            return true
+        end
+    end
+    return false
+end
+
 function try_cholesky!(x::StaticVector, A::StaticMatrix, b::StaticVector)
     A_ = SMatrix(A)
     b_ = SVector(b)
     cholfac = cholesky(Symmetric(A_); check=false)
     if issuccess(cholfac)
-        return x .= cholfac \ b_
+        x .= cholfac \ b_
+        return Success
     end
-    return x .= A_ \ b_
+    return NotPositiveDefinite
 end
 
 function try_cholesky!(x, A, b)
-    cholfac = cholesky(A; check=false)
+    cholfac = cholesky(Symmetric(A); check=false)
     if issuccess(cholfac)
-        return ldiv!(x, cholfac, b)
+        ldiv!(x, cholfac, b)
+        return Success
     end
-    return ldiv!(x, qr(A), b)
+    return NotPositiveDefinite
 end
 
 # Linear solve dispatching on solver symbol: :auto, :cholesky, :ldl, :qr
@@ -43,79 +59,155 @@ solve!(ls) = solve!(ls, static(:auto))
 solve!(ls, solver::OptimizationLinearSolver) = solve!(ls, static(linsolver_symbol(solver)))
 
 # StaticLinearSystem
-function solve!(ls::StaticLinearSystem, ::StaticSymbol{:auto})
-    try_cholesky!(ls.x, ls.A, ls.b)
-    return ls.x
-end
-function solve!(ls::StaticLinearSystem, ::StaticSymbol{:cholesky})
-    try_cholesky!(ls.x, ls.A, ls.b)
-    return ls.x
-end
-function solve!(ls::StaticLinearSystem, ::StaticSymbol{:ldl})
+function solve!(ls::StaticLinearSystem, ::Union{StaticSymbol{:auto}, StaticSymbol{:cholesky}, StaticSymbol{:ldl}})
     A_ = SMatrix(ls.A)
-    b_ = SVector(ls.b)
-    ls.x .= bunchkaufman(A_) \ b_
-    return ls.x
+    if ls.lambda > 0
+        if isnothing(ls.scaling)
+            A_ = A_ + ls.lambda * I
+        else
+            A_ = A_ + Diagonal(ls.lambda .* ls.scaling)
+        end
+    end
+    cholfac = cholesky(Symmetric(A_); check=false)
+    if issuccess(cholfac)
+        ls.x .= cholfac \ SVector(ls.b)
+        return Success
+    end
+    return NotPositiveDefinite
 end
+
 function solve!(ls::StaticLinearSystem, ::StaticSymbol{:qr})
     A_ = SMatrix(ls.A)
-    b_ = SVector(ls.b)
-    ls.x .= A_ \ b_
-    return ls.x
+    if ls.lambda > 0
+        if isnothing(ls.scaling)
+            A_ = A_ + ls.lambda * I
+        else
+            A_ = A_ + Diagonal(ls.lambda .* ls.scaling)
+        end
+    end
+    ls.x .= A_ \ SVector(ls.b)
+    return Success
 end
 
 # DenseLinearSystem
 function solve!(ls::DenseLinearSystem, ::Union{StaticSymbol{:auto}, StaticSymbol{:cholesky}})
     copyto!(ls.A_scratch, ls.A)
+    if ls.lambda > 0
+        if isnothing(ls.scaling)
+            uniformscaling!(ls.A_scratch, ls.lambda)
+        else
+            damp_marquardt!(ls.A_scratch, ls.scaling, ls.lambda)
+        end
+    end
     cholfac = cholesky!(Symmetric(ls.A_scratch); check=false)
     if issuccess(cholfac)
         ldiv!(ls.x, cholfac, ls.b)
-    else
-        copyto!(ls.A_scratch, ls.A)
-        ldiv!(ls.x, qr!(ls.A_scratch), ls.b)
+        return Success
     end
-    return ls.x
+    return NotPositiveDefinite
 end
+
 function solve!(ls::DenseLinearSystem, ::StaticSymbol{:ldl})
     copyto!(ls.A_scratch, ls.A)
+    if ls.lambda > 0
+        if isnothing(ls.scaling)
+            uniformscaling!(ls.A_scratch, ls.lambda)
+        else
+            damp_marquardt!(ls.A_scratch, ls.scaling, ls.lambda)
+        end
+    end
     bk = bunchkaufman!(Symmetric(ls.A_scratch); check=false)
     if issuccess(bk)
         ldiv!(ls.x, bk, ls.b)
-    else
-        copyto!(ls.A_scratch, ls.A)
-        ldiv!(ls.x, qr!(ls.A_scratch), ls.b)
+        if is_indefinite(bk)
+            return Indefinite
+        end
+        return Success
     end
-    return ls.x
+    return NotPositiveDefinite
 end
+
 function solve!(ls::DenseLinearSystem, ::StaticSymbol{:qr})
     copyto!(ls.A_scratch, ls.A)
-    ldiv!(ls.x, qr!(ls.A_scratch), ls.b)
-    return ls.x
+    if ls.lambda > 0
+        if isnothing(ls.scaling)
+            uniformscaling!(ls.A_scratch, ls.lambda)
+        else
+            damp_marquardt!(ls.A_scratch, ls.scaling, ls.lambda)
+        end
+    end
+    qrfac = qr!(ls.A_scratch, ColumnNorm())
+    ldiv!(ls.x, qrfac, ls.b)
+    return Success
 end
 
 # SparseLinearSystem
 function solve!(ls::SparseLinearSystem, ::Union{StaticSymbol{:auto}, StaticSymbol{:ldl}})
+    if ls.lambda > 0
+        if isnothing(ls.scaling)
+            uniformscaling!(ls, ls.lambda)
+        else
+            damp_marquardt!(ls, ls.scaling, ls.lambda)
+        end
+    end
     F = ldl_factorize!(ls.A, ls.solver_ws)
+    if ls.lambda > 0
+        @inbounds for (i, idx) in enumerate(ls.diag_inds)
+            ls.A.nzval[idx] = ls.diag_cache[i]
+        end
+    end
     if LDLFactorizations.factorized(F)
         ldiv!(ls.x, F, ls.b)
-    else
-        ls.x .= qr(ls.A) \ ls.b
+        if is_indefinite(F)
+            return Indefinite
+        end
+        return Success
     end
-    return ls.x
+    return NotPositiveDefinite
 end
+
 function solve!(ls::SparseLinearSystem, ::StaticSymbol{:cholesky})
-    cholfac = SparseArrays.cholesky(ls.A; check=false)
+    if isnothing(ls.scaling)
+        shift_val = Float64(ls.lambda)
+        cholfac = cholesky!(ls.solver_ws, Symmetric(ls.A, :U); shift=shift_val, check=false)
+    else
+        if ls.lambda > 0
+            damp_marquardt!(ls, ls.scaling, ls.lambda)
+        end
+        cholfac = cholesky!(ls.solver_ws, Symmetric(ls.A, :U); check=false)
+        if ls.lambda > 0
+            @inbounds for (i, idx) in enumerate(ls.diag_inds)
+                ls.A.nzval[idx] = ls.diag_cache[i]
+            end
+        end
+    end
     if issuccess(cholfac)
         ls.x .= cholfac \ ls.b
-    else
-        ls.x .= qr(ls.A) \ ls.b
+        return Success
     end
-    return ls.x
+    return NotPositiveDefinite
 end
+
 function solve!(ls::SparseLinearSystem, ::StaticSymbol{:qr})
+    if ls.lambda > 0
+        if isnothing(ls.scaling)
+            uniformscaling!(ls, ls.lambda)
+        else
+            damp_marquardt!(ls, ls.scaling, ls.lambda)
+        end
+    end
     ls.x .= qr(ls.A) \ ls.b
-    return ls.x
+    if ls.lambda > 0
+        @inbounds for (i, idx) in enumerate(ls.diag_inds)
+            ls.A.nzval[idx] = ls.diag_cache[i]
+        end
+    end
+    return Success
 end
+
+# Method dispatch for Symbol and OptimizationLinearSolver
+solve!(ls::AbstractLinearSystem, s::Symbol) = solve!(ls, static(s))
+solve!(ls::AbstractLinearSystem, s::OptimizationLinearSolver) = solve!(ls, static(linsolver_symbol(s)))
 
 # Generic matrix fallback for direct solve!(x, A, b)
 solve!(x, A, b) = try_cholesky!(x, A, b)
