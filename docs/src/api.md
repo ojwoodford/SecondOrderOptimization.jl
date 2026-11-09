@@ -4,6 +4,7 @@
 
 ```@docs
 optimize
+optimize!
 ```
 
 ## Variable & Retraction Interface
@@ -47,15 +48,36 @@ GradientDescentData
 
 ## Linear Solvers
 
+### Solver Strategy & Types
+
 ```@docs
 OptimizationLinearSolver
 auto_solver
 cholesky_solver
 ldl_solver
 qr_solver
+validatelinsolver
 solve!
 zero!
+SolveStatus
+Success
+NotPositiveDefinite
+Indefinite
 ```
+
+### Extension Solvers
+
+`SecondOrderOptimization.jl` integrates with optional linear solver packages via Julia 1.10+ package extensions:
+
+- **`Krylov.jl` (via `KrylovExt`)**: Provides iterative Krylov subspace linear solvers.
+  - `:cg`: Conjugate Gradients for symmetric positive-definite systems.
+  - `:minres`: MINRES for symmetric indefinite systems.
+  - `:lsmr`: LSMR for least-squares and general systems.
+  - `:krylov`: Alias for `:cg`.
+  To enable: `using Krylov`.
+- **`Pardiso.jl` (via `PardisoExt`)**: Provides multithreaded direct sparse factorization using Intel MKL PARDISO or Panua Pardiso.
+  - `:pardiso`: Multi-threaded sparse direct solver for large sparse matrices.
+  To enable: `using Pardiso`.
 
 ## Callbacks & Diagnostics
 

@@ -11,7 +11,9 @@ High-performance, zero-allocation second-order nonlinear optimization in Julia.
 `SecondOrderOptimization.jl` minimizes smooth scalar objectives $f(x)$ using second-order trust-region and damped Newton methods:
 
 - **Iterators**: Levenberg-Marquardt (`:levenbergmarquardt`, `:levenbergmarquardt_dtd`), Powell's Dogleg (`:dogleg`), undamped Newton (`:newton`), and backtracking Gradient Descent (`:gradientdescent`).
-- **Linear Solvers**: Cholesky (`:cholesky`), LDL / Bunch-Kaufman (`:ldl`, using `LDLFactorizations.jl` for sparse matrices), and QR (`:qr`), with automatic dispatch (`:auto`).
+- **Linear Solvers**:
+  - *Built-in*: Cholesky (`:cholesky`), LDL / Bunch-Kaufman (`:ldl`, using `LDLFactorizations.jl` for sparse matrices), and QR (`:qr`), with automatic dispatch (`:auto`).
+  - *Extensions*: Iterative Krylov subspace solvers (`:cg`, `:minres`, `:lsmr`, `:krylov` via `Krylov.jl`) and multi-threaded sparse direct factorizations (`:pardiso` via `Pardiso.jl`).
 - **Variable Types & Manifolds**: Supports scalars (`Float64`), static vectors (`SVector`), dense vectors (`Vector`), heterogeneous variable vectors, and non-Euclidean manifolds via `SecondOrderOptimization.nvars` / `SecondOrderOptimization.update`.
 - **Zero-Allocation Reuse**: Preallocate solver buffers and factorizations via `OptimizationWorkspace`.
 
@@ -36,4 +38,25 @@ end
 x0 = @SVector [-1.2, 1.0]
 options = OptimizationOptions(iterator = :levenbergmarquardt, gtol = 1e-8)
 x_opt, result = optimize(f, fdf!, x0, options)
+```
+
+## Large-Scale & Iterative Solvers (Extensions)
+
+Simply load `Krylov` or `Pardiso` to unlock optional solver backends:
+
+```julia
+using SecondOrderOptimization, SparseArrays
+using Krylov   # unlocks :cg, :minres, :lsmr, :krylov
+
+# Conjugate Gradient for large sparse positive-definite systems:
+opts = OptimizationOptions(iterator = :levenbergmarquardt, linsolver = :cg)
+x_opt, res = optimize(f, fdf!, x0, opts; H = H_sparse_prototype)
+```
+
+```julia
+using SecondOrderOptimization, SparseArrays
+using Pardiso  # unlocks :pardiso (multi-threaded MKL / Panua direct solver)
+
+opts = OptimizationOptions(iterator = :newton, linsolver = :pardiso)
+x_opt, res = optimize(f, fdf!, x0, opts; H = H_sparse_prototype)
 ```

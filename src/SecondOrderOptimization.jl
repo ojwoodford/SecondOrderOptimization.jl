@@ -10,8 +10,13 @@ export optimize, optimize!
 export OptimizationOptions, OptimizationResult, OptimizationWorkspace, isconverged
 export CostTrajectory
 export nullcallback, printoutcallback, storecostscallback
-export AbstractLinearSystem, solve!, dampen!, validatelinsolver
+export AbstractLinearSystem, solve!, dampen!, validatelinsolver, zero!
 export SolveStatus, Success, NotPositiveDefinite, Indefinite
+export OptimizationLinearSolver, auto_solver, cholesky_solver, ldl_solver, qr_solver
+export OptimizationIterator, newton, levenbergmarquardt, levenbergmarquardt_dtd, dogleg, gradientdescent, getiterator
+export NewtonData, NewtonDataRelinearize, DoglegData
+export LevenbergData, LevenbergDataTrial, MarquardtData, MarquardtDataTrial, GradientDescentData
+export OptimizationInternal
 export TERMINATION_COST_INF, TERMINATION_COST_NAN, TERMINATION_REL_DCOST, TERMINATION_ABS_DCOST
 export TERMINATION_STEP_INF, TERMINATION_STEP_NAN, TERMINATION_STEP_SIZE, TERMINATION_MAX_FAILS
 export TERMINATION_MAX_ITERS, TERMINATION_MAX_TIME, TERMINATION_COST_DISCREPANCY

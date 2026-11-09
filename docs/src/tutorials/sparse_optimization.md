@@ -51,7 +51,85 @@ x_opt, res = optimize(chain_cost, chain_fdf!, copy(x0), opts; H = H_proto, works
 
 ## Choosing the Sparse Linear Solver
 
-You can select the sparse factorization backend via `options = OptimizationOptions(linsolver = ...)`:
-- `:auto` or `:ldl`: In-place sparse $LDL^T$ factorization via `LDLFactorizations.jl` (zero allocation during solve).
-- `:cholesky`: Sparse Cholesky via SuiteSparse CHOLMOD with QR fallback.
-- `:qr`: Sparse QR via SuiteSparse SPQR.
+You can select the sparse linear solver backend via the `linsolver` keyword argument of [`OptimizationOptions`](@ref):
+
+| Solver Symbol | Backend | Solver Class | Recommended Use Case | Setup |
+| :--- | :--- | :--- | :--- | :--- |
+| `:auto` / `:ldl` | `LDLFactorizations.jl` | Direct $LDL^T$ | Small to medium sparse systems ($< 10^5$ DoF); zero allocation during solve | Built-in |
+| `:cholesky` | `SparseArrays.CHOLMOD` | Direct Supernodal Cholesky | Sparse positive-definite systems; leverages native CHOLMOD $\lambda$ shift | Built-in |
+| `:qr` | `SuiteSparse.SPQR` | Direct Column-Pivoted QR | Rank-deficient sparse systems | Built-in |
+| `:pardiso` | `Pardiso.jl` | Direct Multi-Threaded Factorization | Large sparse systems ($10^4\text{--}10^6$ DoF) leveraging multi-core CPUs (MKL / Panua) | `using Pardiso` |
+| `:cg` | `Krylov.jl` | Iterative Conjugate Gradient | Ultra large-scale SPD systems ($10^5\text{--}10^7$ DoF) or when direct fill-in exhausts RAM | `using Krylov` |
+| `:minres` | `Krylov.jl` | Iterative MINRES | Large symmetric indefinite systems, saddle-point problems, and Newton steps | `using Krylov` |
+| `:lsmr` | `Krylov.jl` | Iterative LSMR | Large least-squares problems or ill-conditioned systems | `using Krylov` |
+| `:krylov` | `Krylov.jl` | Iterative (defaults to `:cg`) | General iterative Krylov subspace solve | `using Krylov` |
+
+---
+
+## Extension Solvers: When and How to Use Them
+
+`SecondOrderOptimization.jl` integrates with `Pardiso.jl` and `Krylov.jl` through Julia 1.10+ package extensions. These optional backends are activated automatically whenever their respective packages are loaded in your Julia session.
+
+### 1. `Pardiso.jl` (`linsolver = :pardiso`)
+
+#### When to Use
+- **Multi-threaded CPU Factorization**: Standard `LDLFactorizations.jl` is single-threaded. When optimizing medium-to-large sparse problems on modern workstations or servers with 8–64 CPU cores, Intel MKL PARDISO parallelizes sparse numerical factorization across threads.
+- **Exact Direct Solves**: When you need exact machine-precision step computations without tuning iterative convergence tolerances.
+
+#### How to Use
+Simply load `Pardiso` alongside `SecondOrderOptimization`:
+
+```julia
+using SecondOrderOptimization
+using SparseArrays
+using Pardiso
+
+# Large-scale objective with sparse prototype H_proto
+options = OptimizationOptions(
+    iterator = :newton,
+    linsolver = :pardiso,
+    gtol = 1e-6
+)
+
+x_opt, result = optimize(chain_cost, chain_fdf!, x0, options; H = H_proto)
+println("Final cost: ", result.bestcost)
+```
+
+> **Note**: `PardisoExt` automatically detects whether Intel MKL (`MKLPardisoSolver`) or Panua Pardiso (`PardisoSolver`) is available in your environment, configures the solver for symmetric positive-definite systems (`REAL_SYM_POSDEF`), and maps breakdown/singularity into [`NotPositiveDefinite`](@ref).
+
+---
+
+### 2. `Krylov.jl` (`linsolver = :cg`, `:minres`, `:lsmr`, `:krylov`)
+
+#### When to Use
+- **Memory-Constrained & Ultra Large-Scale Optimization**: For problems with hundreds of thousands or millions of variables ($10^5\text{--}10^7$ DoF), direct factorizations ($LDL^T$, Cholesky) suffer from catastrophic sparse fill-in (where $L$ contains orders of magnitude more non-zeros than $A$), causing out-of-memory errors. Krylov subspace methods require only $O(N)$ storage.
+- **Iterative Solver Selection**:
+  - **`:cg` (Conjugate Gradient)**: Use for symmetric positive-definite systems. Ideal in combination with **Levenberg-Marquardt** (`:levenbergmarquardt`), where damping $\lambda I$ guarantees positive definiteness.
+  - **`:minres` (Minimal Residual)**: Use for symmetric indefinite systems, such as saddle-point formulations or unconstrained Newton steps with negative curvature.
+  - **`:lsmr`**: Use for ill-conditioned or least-squares formulations.
+
+#### How to Use
+Simply load `Krylov` in your session:
+
+```julia
+using SecondOrderOptimization
+using SparseArrays
+using Krylov
+
+# Configure Levenberg-Marquardt with Conjugate Gradient linear solver
+options = OptimizationOptions(
+    iterator = :levenbergmarquardt,
+    linsolver = :cg,
+    maxiters = 50,
+    gtol = 1e-5
+)
+
+# Zero-allocation workspace preallocates Krylov basis vectors in `solver_ws`
+ws = OptimizationWorkspace(chain_cost, chain_fdf!, x0, options; H = H_proto)
+x_opt, result = optimize(chain_cost, chain_fdf!, copy(x0), options; H = H_proto, workspace = ws)
+```
+
+#### Zero-Allocation Iterative Solves
+When `OptimizationWorkspace` is constructed with a Krylov solver, `SecondOrderOptimization.jl` preallocates the appropriate Krylov workspace (`Krylov.CgWorkspace`, `MinresWorkspace`, or `LsmrWorkspace`) inside `solver_ws`. During the optimization loop, `cg!`, `minres!`, and `lsmr!` execute in-place with **zero heap allocations** per iteration.
+
+If the linear solver detects negative curvature ($x^T A x < 0$), it reports [`Indefinite`](@ref), allowing Newton and Dogleg iterators to apply regularizing spectral shifts or fall back to trust-region boundaries.

@@ -268,6 +268,37 @@ ldl_solver
 qr_solver
 
 """
+    SolveStatus
+
+Enum returned by [`solve!`](@ref) indicating the status of the linear system solution:
+- [`Success`](@ref): The linear system was solved successfully.
+- [`NotPositiveDefinite`](@ref): The matrix was found not to be positive definite during Cholesky or LDL factorization.
+- [`Indefinite`](@ref): The matrix was detected to be indefinite or negative curvature was encountered during solving.
+"""
+SolveStatus
+
+"""
+    Success
+
+[`SolveStatus`](@ref) indicating that the linear system was solved successfully.
+"""
+Success
+
+"""
+    NotPositiveDefinite
+
+[`SolveStatus`](@ref) indicating that the matrix failed a positive-definiteness test (e.g. non-positive pivot in Cholesky).
+"""
+NotPositiveDefinite
+
+"""
+    Indefinite
+
+[`SolveStatus`](@ref) indicating that the matrix was detected to be indefinite or negative curvature was encountered.
+"""
+Indefinite
+
+"""
     CostTrajectory()
 
 Storage container for per-iteration costs, wall-clock timestamps, and step vectors.
@@ -363,8 +394,14 @@ zero!
     solve!(ls, solver=static(:auto)) -> SolveStatus
     solve!(x, A, b) -> SolveStatus
 
-Solves the linear system `A * x = b` in-place using the specified `solver` (`:auto`, `:cholesky`, `:ldl`, `:qr`)
-and returns the `SolveStatus` enum (`Success`, `NotPositiveDefinite`, `Indefinite`).
+Solves the linear system `A * x = b` in-place using the specified `solver` and returns the [`SolveStatus`](@ref) enum (`Success`, `NotPositiveDefinite`, `Indefinite`).
+
+# Supported Solver Identifiers
+- Core solvers: `:auto`, `:cholesky`, `:ldl`, `:qr` (or enum constants [`auto_solver`](@ref), [`cholesky_solver`](@ref), [`ldl_solver`](@ref), [`qr_solver`](@ref)).
+- Extension solvers (when package is loaded):
+  - `using Krylov`: `:cg` (Conjugate Gradient), `:minres` (MINRES), `:lsmr` (LSMR), `:krylov` (defaults to `:cg`).
+  - `using Pardiso`: `:pardiso` (Intel MKL PARDISO or Panua Pardiso multi-threaded direct sparse solver).
+
 Note: On `StaticLinearSystem`, `:qr` executes static LU decomposition via `\`.
 
 # Example
@@ -376,6 +413,14 @@ solve!(x, A, b)
 ```
 """
 solve!
+
+"""
+    validatelinsolver(solver::Union{Symbol, StaticSymbol, OptimizationLinearSolver}) -> Bool
+
+Returns `true` if `solver` is a supported linear solver backend, or `false` otherwise.
+Extension solvers (`:cg`, `:minres`, `:lsmr`, `:krylov`, `:pardiso`) register validation methods when their respective packages (`Krylov.jl` or `Pardiso.jl`) are loaded.
+"""
+validatelinsolver
 
 """
     nullcallback(cost, x_trial, data, iteratedata) -> (cost, 0)
