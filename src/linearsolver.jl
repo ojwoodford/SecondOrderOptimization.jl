@@ -1,11 +1,32 @@
 using LDLFactorizations, LinearAlgebra, StaticArrays, SparseArrays, Static
 
-function getlinsolver(s::Symbol)::OptimizationLinearSolver
+validatelinsolver(::StaticSymbol{:auto}) = true
+validatelinsolver(::StaticSymbol{:cholesky}) = true
+validatelinsolver(::StaticSymbol{:ldl}) = true
+validatelinsolver(::StaticSymbol{:qr}) = true
+validatelinsolver(::StaticSymbol{S}) where S = false
+validatelinsolver(s::Symbol) = validatelinsolver(static(s))
+validatelinsolver(s::OptimizationLinearSolver) = true
+
+function checklinsolver(s::Symbol)
+    validatelinsolver(s) && return true
+    if s === :pardiso
+        throw(ArgumentError("Linear solver :pardiso requires Pardiso.jl. Please run `using Pardiso` first."))
+    elseif s in (:cg, :minres, :lsmr, :krylov)
+        throw(ArgumentError("Linear solver :$s requires Krylov.jl. Please run `using Krylov` first."))
+    end
+    throw(ArgumentError("Unknown linear solver: $s"))
+end
+checklinsolver(s::OptimizationLinearSolver) = true
+checklinsolver(s::StaticSymbol) = checklinsolver(dynamic(s))
+
+function getlinsolver(s::Symbol)
     s === :auto && return auto_solver
     s === :cholesky && return cholesky_solver
     s === :ldl && return ldl_solver
     s === :qr && return qr_solver
-    throw(ArgumentError("Unknown linear solver: $s"))
+    checklinsolver(s)
+    return s
 end
 getlinsolver(s::OptimizationLinearSolver) = s
 getlinsolver(s::StaticSymbol) = getlinsolver(dynamic(s))

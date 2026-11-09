@@ -130,6 +130,7 @@ end
 makesparsews(A, ::Union{StaticSymbol{:auto}, StaticSymbol{:ldl}}) = LDLFactorizations.ldl_analyze(A)
 makesparsews(A, ::StaticSymbol{:cholesky}) = SparseArrays.cholesky(Symmetric(A, :U); check=false)
 makesparsews(A, ::StaticSymbol{:qr}) = nothing
+makesparsews(A, ::StaticSymbol{S}) where S = nothing
 makesparsews(A, s::Symbol) = makesparsews(A, static(s))
 makesparsews(A, s::OptimizationLinearSolver) = makesparsews(A, static(linsolver_symbol(s)))
 

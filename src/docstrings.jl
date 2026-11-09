@@ -12,7 +12,7 @@ Stores configuration options and stopping criteria for second-order optimization
 - `maxfails::Int = 3`: Maximum consecutive failed steps (cost increases) before termination.
 - `maxtime::Float64 = 30.0`: Maximum wall-clock optimization runtime in seconds.
 - `iterator::Union{Symbol, OptimizationIterator} = :levenbergmarquardt`: Iterator algorithm (`:newton`, `:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg`, `:gradientdescent`).
-- `linsolver::Union{Symbol, OptimizationLinearSolver} = :auto`: Linear solver method (`:auto`, `:cholesky`, `:ldl`, `:qr`).
+- `linsolver::Union{Symbol, OptimizationLinearSolver} = :auto`: Linear solver method (`:auto`, `:cholesky`, `:ldl`, `:qr`, or `:cg`, `:minres`, `:lsmr`, `:krylov` via `Krylov.jl`, or `:pardiso` via `Pardiso.jl`).
 - `callbackchangesstate::Union{Bool, StaticBool} = false`: Set `true` if callback modifies problem state.
 
 # Example
@@ -224,9 +224,13 @@ GradientDescentData
 
 Enum specifying linear solver strategy:
 - [`auto_solver`](@ref): Cholesky for dense/static matrices, LDL for sparse matrices.
-- [`cholesky_solver`](@ref): Cholesky factorization with QR fallback.
+- [`cholesky_solver`](@ref): Cholesky factorization.
 - [`ldl_solver`](@ref): LDL / Bunch-Kaufman factorization.
 - [`qr_solver`](@ref): QR factorization.
+
+Additional solver symbols can be passed as Symbols when package extensions are loaded:
+- `:cg`, `:minres`, `:lsmr`, `:krylov`: Iterative solvers provided by `Krylov.jl` via the `KrylovExt` extension.
+- `:pardiso`: Multithreaded direct sparse solver provided by `Pardiso.jl` via the `PardisoExt` extension.
 
 # Example
 ```julia

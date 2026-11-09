@@ -9,4 +9,5 @@ using Test
     include("trialreuse.jl")
     include("OptimizationWorkspace.jl")
     include("general_objectives.jl")
+    include("extensions.jl")
 end
