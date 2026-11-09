@@ -138,7 +138,7 @@ current_grad(::Any, data) = nothing
         end
 
         cost_ = linearize!(iteratedata, data, fdf!)
-        if !isapprox(cost_, cost)
+        if !isapprox(cost_, cost; atol=1.0e-25)
             converged |= 1 << 10
             break
         end
