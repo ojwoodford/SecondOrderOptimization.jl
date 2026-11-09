@@ -85,6 +85,10 @@ current_grad(::Any, data) = nothing
     while true
         data.iternum += 1
         cost_ = iterate!(iteratedata, data, f, fdf!, options)
+        if cost_ === LINSOLVER_FAILED
+            converged |= TERMINATION_LINSOLVER_FAILED
+            break
+        end
         cost, terminate = callback(cost_, data.varnext, data, iteratedata)
         @assert(dynamic(options.callbackchangesstate) || cost == cost_, "callback expected to not change the cost")
 

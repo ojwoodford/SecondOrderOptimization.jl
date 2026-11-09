@@ -59,7 +59,7 @@ reset!(::NewtonData) = nothing
         data.costs += @elapsed_ns cost_ = f(data.varnext)
         return cost_
     end
-    return NaN
+    return LINSOLVER_FAILED
 end
 
 mutable struct NewtonDataRelinearize
@@ -94,7 +94,7 @@ reset!(::NewtonDataRelinearize) = nothing
         refresh_diag_cache!(data.linsystem)
         return nd.cost
     end
-    return NaN
+    return LINSOLVER_FAILED
 end
 
 linearize!(nd::NewtonDataRelinearize, data, fdf!) = nd.cost
@@ -339,7 +339,7 @@ end
             end
         end
         if status != Success
-            return NaN
+            return LINSOLVER_FAILED
         end
         data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
         data.costs += @elapsed_ns cost_ = f(data.varnext)
@@ -387,7 +387,7 @@ end
             end
         end
         if status != Success
-            return NaN
+            return LINSOLVER_FAILED
         end
         data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
         step = getx(data.linsystem)
