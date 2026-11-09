@@ -123,7 +123,7 @@ reset!(dd::DoglegData) = (dd.trustradius = 0.0)
 @inline function iterate!(doglegdata::DoglegData, data, f, fdf!, options::OptimizationOptions)::Float64
     hessian, gradient = gethessgrad(data.linsystem)
     gnorm2 = sqnorm(gradient)
-    gnorm = isfinite(gnorm2) ? sqrt(gnorm2) : fast_norm(gradient)
+    gnorm = sqrt(gnorm2)
     if !(gnorm > 0)
         fill!(getx(data.linsystem), zero(eltype(gradient)))
         data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
