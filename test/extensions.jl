@@ -1,3 +1,5 @@
+!in(@__DIR__, LOAD_PATH) && push!(LOAD_PATH, @__DIR__)
+
 using SecondOrderOptimization, SparseArrays, LinearAlgebra, Test, Static
 
 @testset "extensions.jl" begin
