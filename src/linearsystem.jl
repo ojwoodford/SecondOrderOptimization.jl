@@ -272,3 +272,7 @@ function damp_marquardt!(ls::SparseLinearSystem, scaling, dlambda)
     end
 end
 damp_marquardt!(ls, scaling, dlambda) = damp_marquardt!(getA(ls), scaling, dlambda)
+
+function quadratic_model_reduction(ls::AbstractLinearSystem, dx)
+    return 0.5 * fast_bAb(getA(ls), dx) + fast_dot(getb(ls), dx)
+end

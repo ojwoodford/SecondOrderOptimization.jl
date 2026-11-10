@@ -10,7 +10,7 @@ export optimize, optimize!
 export OptimizationOptions, OptimizationResult, OptimizationWorkspace, isconverged
 export CostTrajectory
 export nullcallback, printoutcallback, storecostscallback
-export AbstractLinearSystem, solve!, dampen!, validatelinsolver, zero!, makelinearsystem, copy_structure, sharex, fast_bAb, fast_dot
+export AbstractLinearSystem, solve!, dampen!, validatelinsolver, zero!, makelinearsystem, copy_structure, sharex, fast_bAb, fast_dot, quadratic_model_reduction
 export SolveStatus, Success, NotPositiveDefinite, Indefinite
 export OptimizationLinearSolver, auto_solver, cholesky_solver, ldl_solver, qr_solver
 export OptimizationIterator, newton, levenbergmarquardt, levenbergmarquardt_dtd, dogleg, gradientdescent, getiterator
