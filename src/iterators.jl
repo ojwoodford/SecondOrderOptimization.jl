@@ -54,6 +54,9 @@ reset!(::NewtonData) = nothing
         end
     end
     if status == Success
+        if !all(isfinite, getx(data.linsystem))
+            return NaN
+        end
         negate!(getx(data.linsystem))
         data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
         data.costs += @elapsed_ns cost_ = f(data.varnext)
@@ -87,6 +90,9 @@ reset!(::NewtonDataRelinearize) = nothing
         end
     end
     if status == Success
+        if !all(isfinite, getx(data.linsystem))
+            return NaN
+        end
         negate!(getx(data.linsystem))
         data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
         zero!(data.linsystem)
@@ -122,21 +128,18 @@ reset!(dd::DoglegData) = (dd.trustradius = 0.0)
 
 @inline function iterate!(doglegdata::DoglegData, data, f, fdf!, options::OptimizationOptions)::Float64
     hessian, gradient = gethessgrad(data.linsystem)
-    gnorm2 = sqnorm(gradient)
-    gnorm = sqrt(gnorm2)
-    if !(gnorm > 0)
-        fill!(getx(data.linsystem), zero(eltype(gradient)))
-        data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
-        data.costs += @elapsed_ns cost_ = f(data.varnext)
-        return cost_
-    end
 
     # Compute Cauchy point info & curvature along gradient
     gHg = fast_bAb(hessian, gradient)
-    has_pos_curv = isfinite(gHg) && (gHg > 0)
+    if !isfinite(gHg)
+        return NaN
+    end
     a = Inf
     alpha = Inf
     alpha2 = Inf
+    gnorm2 = sqnorm(gradient)
+    gnorm = sqrt(gnorm2)
+    has_pos_curv = gHg > 0
     if has_pos_curv
         a = gnorm2 / gHg
         alpha = a * gnorm
@@ -172,7 +175,7 @@ reset!(dd::DoglegData) = (dd.trustradius = 0.0)
         elseif has_pos_curv && isfinite(alpha)
             doglegdata.trustradius = max(1.0, alpha)
         else
-            doglegdata.trustradius = isfinite(gnorm) ? max(1.0, gnorm) : 1.0
+            doglegdata.trustradius = max(1.0, gnorm)
         end
         doglegdata.trustradius = min(doglegdata.trustradius, doglegdata.maxtrustradius)
     end
@@ -211,6 +214,11 @@ reset!(dd::DoglegData) = (dd.trustradius = 0.0)
             # Newton step unavailable / indefinite: Cauchy step
             getx(data.linsystem) .= doglegdata.cauchy
             step_norm = alpha
+        end
+
+        step_sz = maximum(abs, getx(data.linsystem))::Float64
+        if !isfinite(step_sz)
+            return NaN
         end
 
         data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
@@ -268,7 +276,8 @@ const AnyLevenbergData = Union{LevenbergData, LevenbergDataTrial}
 
 function updatescaling!(lmd::AnyLevenbergData, ls)
     if lmd.lambda == 0
-        lmd.lambda = max(max_diag(ls) * 1e-6, 1e-12)
+        md = max_diag(ls)
+        lmd.lambda = isfinite(md) ? max(md * 1e-6, 1e-12) : 1e-6
     end
 end
 
@@ -300,7 +309,8 @@ function updatescaling!(lmd::AnyMarquardtData, ls::SparseLinearSystem)
     end
     m = zero(eltype(lmd.scaling))
     for (i, idx) in enumerate(ls.diag_inds)
-        @inbounds d = lmd.scaling[i] = max(lmd.scaling[i], abs(ls.A.nzval[idx]))
+        val = abs(ls.A.nzval[idx])
+        @inbounds d = lmd.scaling[i] = max(lmd.scaling[i], isfinite(val) ? val : 1.0)
         m = max(m, d)
     end
     lmd.scaling .= max.(lmd.scaling, max(m * 1e-8, 1e-12))
@@ -313,7 +323,8 @@ function updatescaling!(lmd::AnyMarquardtData, ls)
     m = zero(eltype(lmd.scaling))
     A = gethessian(ls)
     for i in axes(A, 1)
-        @inbounds d = lmd.scaling[i] = max(lmd.scaling[i], abs(A[i, i]))
+        val = abs(A[i, i])
+        @inbounds d = lmd.scaling[i] = max(lmd.scaling[i], isfinite(val) ? val : 1.0)
         m = max(m, d)
     end
     lmd.scaling .= max.(lmd.scaling, max(m * 1e-8, 1e-12))
@@ -371,10 +382,14 @@ end
         if status != Success
             return LINSOLVER_FAILED
         end
+        step_sz = maximum(abs, getx(data.linsystem))::Float64
+        if !isfinite(step_sz)
+            dampen!(data.linsystem, 0.0)
+            return NaN
+        end
         data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
         data.costs += @elapsed_ns cost_ = f(data.varnext)
-        step_sz = maximum(abs, getx(data.linsystem))::Float64
-        if cost_ <= data.bestcost || !(step_sz >= options.dstep) || !isfinite(step_sz) || inner_iters > 100 || levmardata.lambda > 1e16
+        if cost_ <= data.bestcost || !(step_sz >= options.dstep) || inner_iters > 100 || levmardata.lambda > 1e16
             dampen!(data.linsystem, 0.0)
             if cost_ <= data.bestcost
                 stepquality = (cost_ - data.bestcost) / (0.5 * fast_bAb(hessian, getx(data.linsystem)) + fast_dot(gradient, getx(data.linsystem)))
@@ -419,6 +434,11 @@ end
         if status != Success
             return LINSOLVER_FAILED
         end
+        step_sz = maximum(abs, getx(data.linsystem))::Float64
+        if !isfinite(step_sz)
+            dampen!(data.linsystem, 0.0)
+            return NaN
+        end
         data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
         step = getx(data.linsystem)
         if firsttrial && 0.5 * (levmardata.lambda * dampingnorm(levmardata, step) - fast_dot(gradient, step)) >= abs(data.bestcost) * options.reldcost
@@ -432,8 +452,7 @@ end
             data.costs += @elapsed_ns cost_ = f(data.varnext)
         end
         firsttrial = false
-        step_sz = maximum(abs, getx(data.linsystem))::Float64
-        if cost_ <= data.bestcost || !(step_sz >= options.dstep) || !isfinite(step_sz) || inner_iters > 100 || levmardata.lambda > 1e16
+        if cost_ <= data.bestcost || !(step_sz >= options.dstep) || inner_iters > 100 || levmardata.lambda > 1e16
             dampen!(data.linsystem, 0.0)
             if cost_ <= data.bestcost
                 stepquality = (cost_ - data.bestcost) / (0.5 * fast_bAb(hessian, getx(data.linsystem)) + fast_dot(gradient, getx(data.linsystem)))
@@ -460,6 +479,9 @@ reset!(gdd::GradientDescentData) = (gdd.stepsize = 1.0)
 
 @inline function iterate!(gddata::GradientDescentData, data, f, fdf!, options::OptimizationOptions)::Float64
     gradient = getgrad(data.linsystem)
+    if !all(isfinite, gradient)
+        return NaN
+    end
     getx(data.linsystem) .= -gradient .* gddata.stepsize
     data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
     data.costs += @elapsed_ns costc = f(data.varnext)

@@ -107,4 +107,23 @@ end
     x_opt, res = optimize(nanwall_cost, nanwall_fdf!, x_bad, opts)
     @test (res.termination & (1 << 11)) != 0
     @test (res.termination & (1 << 1)) != 0
+
+    # Test non-finite linearization at an accepted point (e.g. acos(min(x, 1)) where gradient becomes NaN for x >= 1)
+    nanlinearization_cost(x) = 0.5 * (acos(min(x[1], 1.0))^2 + (x[1] - 2.0)^2)
+    function nanlinearization_fdf!(g, H, x)
+        r1 = acos(min(x[1], 1.0))
+        r2 = x[1] - 2.0
+        dr1 = x[1] >= 1.0 ? NaN : -1.0 / sqrt(1.0 - x[1]^2)
+        dr2 = 1.0
+        g[1] = r1 * dr1 + r2 * dr2
+        H[1, 1] = dr1^2 + dr2^2
+        return 0.5 * (r1^2 + r2^2)
+    end
+    for iterator in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton, :gradientdescent)
+        opts = OptimizationOptions(iterator=iterator, maxtime=2.0)
+        x_opt, res = optimize(nanlinearization_cost, nanlinearization_fdf!, [0.0], opts)
+        @test (res.termination & (TERMINATION_STEP_NAN | TERMINATION_COST_NAN)) != 0
+        @test isfinite(res.bestcost) && res.bestcost < nanlinearization_cost([0.0])
+        @test res.bestcost == nanlinearization_cost(x_opt)
+    end
 end

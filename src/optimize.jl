@@ -90,7 +90,7 @@ current_grad(::Any, data) = nothing
             break
         end
         cost, terminate = callback(cost_, data.varnext, data, iteratedata)
-        @assert(dynamic(options.callbackchangesstate) || cost == cost_, "callback expected to not change the cost")
+        @assert(dynamic(options.callbackchangesstate) || isequal(cost, cost_), "callback expected to not change the cost")
 
         dcost = data.bestcost - cost
         if dcost >= 0
@@ -138,7 +138,7 @@ current_grad(::Any, data) = nothing
         end
 
         cost_ = linearize!(iteratedata, data, fdf!)
-        if !isapprox(cost_, cost; atol=1.0e-25)
+        if !isapprox(cost_, cost; rtol=1.0e-10, atol=1.0e-25)
             converged |= 1 << 10
             break
         end

@@ -17,6 +17,10 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 Krylov = "ba0b0d4f-ebba-5204-a429-3ac8c609bfb7"
 Pardiso = "46dd5b70-b6fb-5a00-ae2d-e8fea33afaf2"
 
+[sources]
+FastNorm = {path = "/Users/olly/.julia/dev/FastNorm.jl"}
+OptimizationVariableInterface = {path = "/Users/olly/.julia/dev/OptimizationVariableInterface.jl"}
+
 [extensions]
 KrylovExt = "Krylov"
 PardisoExt = "Pardiso"
