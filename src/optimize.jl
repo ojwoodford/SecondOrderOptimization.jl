@@ -57,6 +57,8 @@ end
 
 current_grad(iteratedata::LevMarDataTrial, data) = iteratedata.trialready ? getgrad(iteratedata.trial) : nothing
 current_grad(::NewtonDataRelinearize, data) = getgrad(data.linsystem)
+current_grad(::DoglegData{T,Nothing}, data) where {T} = nothing
+current_grad(dd::DoglegData, data) = dd.trialready ? getgrad(dd.trial) : nothing
 current_grad(::Any, data) = nothing
 
 @inline function optimizeloop!(data::D, iteratedata::ID, f::F, fdf!::FDF, options::OptimizationOptions, callback::CB) where {D, ID, F, FDF, CB}

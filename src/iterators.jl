@@ -106,147 +106,207 @@ end
 linearize!(nd::NewtonDataRelinearize, data, fdf!) = nd.cost
 
 # Dogleg optimization
-mutable struct DoglegData{T}
+mutable struct DoglegData{T,L}
     trustradius::Float64
     maxtrustradius::Float64
     cauchy::T
     newton::T
-
-    function DoglegData(trustradius::Float64, maxtrustradius::Float64, cauchy::T, newton::T) where {T}
-        return new{T}(trustradius, maxtrustradius, cauchy, newton)
-    end
-    function DoglegData(trustradius::Float64, cauchy::T, newton::T) where {T}
-        return new{T}(trustradius, 1e10, cauchy, newton)
-    end
-    function DoglegData(ls, maxtrustradius::Float64=1e10)
-        x = getx(ls)
-        return new{typeof(x)}(0.0, maxtrustradius, similar(x), similar(x))
-    end
+    trial::L              # nothing, or a spare linear system for reusing the trial linearization
+    trialcost::Float64
+    trialready::Bool
 end
-construct(::StaticSymbol{:dogleg}, ls, ::Any) = DoglegData(ls)
-reset!(dd::DoglegData) = (dd.trustradius = 0.0)
 
-@inline function iterate!(doglegdata::DoglegData, data, f, fdf!, options::OptimizationOptions)::Float64
+DoglegData(trustradius::Float64, maxtrustradius::Float64, cauchy::T, newton::T) where {T} =
+    DoglegData(trustradius, maxtrustradius, cauchy, newton, nothing, NaN, false)
+DoglegData(trustradius::Float64, cauchy::T, newton::T) where {T} =
+    DoglegData(trustradius, 1e10, cauchy, newton)
+function DoglegData(ls, maxtrustradius::Float64=1e10; trial=nothing)
+    x = getx(ls)
+    return DoglegData(0.0, maxtrustradius, similar(x), similar(x), trial, NaN, false)
+end
+
+construct(::StaticSymbol{:dogleg}, ls, ::True) = DoglegData(ls)
+construct(::StaticSymbol{:dogleg}, ls, ::False) = DoglegData(ls; trial=copy_structure(ls))
+reset!(dd::DoglegData) = (dd.trustradius = 0.0; dd.trialready = false; dd.trialcost = NaN)
+
+@inline function evaltrial!(dd::DoglegData{T,Nothing}, data, f, fdf!, ::Bool) where {T}
+    data.costs += @elapsed_ns cost_ = f(data.varnext)
+    return cost_
+end
+@inline function evaltrial!(dd::DoglegData, data, f, fdf!, usefdf::Bool)
+    if !usefdf
+        data.costs += @elapsed_ns cost_ = f(data.varnext)
+        return cost_
+    end
+    dd.trial = sharex(dd.trial, data.linsystem)
+    zero!(dd.trial)
+    data.gradients += @elapsed_ns cost_ = fdf!(getb(dd.trial), getA(dd.trial), data.varnext)
+    refresh_diag_cache!(dd.trial)
+    dd.trialready = true
+    dd.trialcost = cost_
+    return cost_
+end
+
+linearize!(::DoglegData{T,Nothing}, data, fdf!) where {T} = computelinearization!(data, fdf!, data.variables)
+function linearize!(dd::DoglegData, data, fdf!)
+    if !dd.trialready
+        return computelinearization!(data, fdf!, data.variables)
+    end
+    dd.trialready = false
+    trial = sharex(dd.trial, data.linsystem)
+    dd.trial = data.linsystem
+    data.linsystem = trial
+    return dd.trialcost
+end
+
+@inline function iterate!(dd::DoglegData, data, f, fdf!, options::OptimizationOptions)::Float64
+    dd.trialready = false
     hessian, gradient = gethessgrad(data.linsystem)
 
-    # Compute Cauchy point info & curvature along gradient
     gHg = fast_bAb(hessian, gradient)
     if !isfinite(gHg)
         return NaN
     end
-    a = Inf
-    alpha = Inf
-    alpha2 = Inf
     gnorm2 = sqnorm(gradient)
+    if gnorm2 == 0
+        # Stationary point: zero step (outer loop terminates on dstep/reldcost)
+        getx(data.linsystem) .= 0.0
+        data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
+        return data.bestcost
+    end
     gnorm = sqrt(gnorm2)
-    has_pos_curv = gHg > 0
-    if has_pos_curv
-        a = gnorm2 / gHg
-        alpha = a * gnorm
-        alpha2 = alpha * alpha
-        doglegdata.cauchy .= (-a) .* gradient
-    end
 
-    # 1. Newton-First Fast-Path: Solve H * delta_N = -g via options.linsolver
+    # Cauchy point: exact model minimiser along -g, exists only for positive curvature
+    cauchy_a = 0.0
+    cauchy_norm = Inf
+    if gHg > 0
+        cauchy_a = gnorm2 / gHg
+        cauchy_norm = cauchy_a * gnorm
+        if isfinite(cauchy_norm)
+            dd.cauchy .= (-cauchy_a) .* gradient
+        end
+    end
+    cauchy_ok = isfinite(cauchy_norm)
+
+    # Newton step, with the same shifted-retry fallback as NewtonData
     newton_norm = Inf
+    newton_pred = 0.0
     newton_valid = false
-    if has_pos_curv
-        status = Success
-        data.solves += @elapsed_ns begin
-            status = solve!(data.linsystem, options.linsolver)
-        end
-        if status == Success
-            negate!(getx(data.linsystem))
-            doglegdata.newton .= getx(data.linsystem)
-            newton_norm = fast_norm(doglegdata.newton)
-            newton_dot_g = fast_dot(gradient, doglegdata.newton)
-            if isfinite(newton_norm) && (newton_dot_g < 0)
-                newton_valid = true
-                alpha = min(alpha, newton_norm)
-                alpha2 = alpha * alpha
+    status = Success
+    data.solves += @elapsed_ns begin
+        status = solve!(data.linsystem, options.linsolver)
+        if status != Success
+            md = max_diag(data.linsystem)
+            mu = isfinite(md) ? max(md * 1e-4, 1e-6) : 1e-6
+            shifts = 20
+            while status != Success && shifts > 0
+                shifts -= 1
+                dampen!(data.linsystem, mu)
+                mu *= 4.0
+                status = solve!(data.linsystem, options.linsolver)
             end
+            dampen!(data.linsystem, 0.0)   # hessian must be undamped below
+        end
+    end
+    if status == Success
+        negate!(getx(data.linsystem))
+        dd.newton .= getx(data.linsystem)
+        newton_norm = fast_norm(dd.newton)
+        newton_dot_g = fast_dot(gradient, dd.newton)
+        if isfinite(newton_norm) && newton_dot_g < 0
+            # Validity = positive predicted model reduction under the true (undamped) H
+            newton_pred = -newton_dot_g - 0.5 * fast_bAb(hessian, dd.newton)
+            newton_valid = isfinite(newton_pred) && newton_pred > 0
         end
     end
 
-    # Initialize trust radius if needed (Delta_0 = max(1.0, ||delta_N||_2))
-    if doglegdata.trustradius <= 0.0 || !isfinite(doglegdata.trustradius)
+    # Scale-free initial radius
+    if !(dd.trustradius > 0) || !isfinite(dd.trustradius)
         if newton_valid
-            doglegdata.trustradius = max(1.0, newton_norm)
-        elseif has_pos_curv && isfinite(alpha)
-            doglegdata.trustradius = max(1.0, alpha)
+            r = newton_norm
+        elseif cauchy_ok
+            r = cauchy_norm
         else
-            doglegdata.trustradius = max(1.0, gnorm)
+            md = max_diag(data.linsystem)
+            r = (isfinite(md) && md > 0) ? gnorm / md : 1.0
         end
-        doglegdata.trustradius = min(doglegdata.trustradius, doglegdata.maxtrustradius)
+        dd.trustradius = min(r, dd.maxtrustradius)
     end
 
-    # 2 & 3. Inner dogleg trial step and Nocedal & Wright radius adaptation
+    x = getx(data.linsystem)
     cost_ = data.bestcost
+    noise = 10 * eps(Float64) * abs(data.bestcost)
     inner_iters = 0
     while true
         inner_iters += 1
-        step_norm = doglegdata.trustradius
+        Δ = dd.trustradius
+        step_norm = Δ
+        pred_red = NaN
 
-        if newton_valid && newton_norm <= doglegdata.trustradius
-            # Newton step is inside the trust region: take it directly
-            getx(data.linsystem) .= doglegdata.newton
+        if newton_valid && newton_norm <= Δ
+            # Full Newton step inside the region
+            x .= dd.newton
             step_norm = newton_norm
-        elseif !has_pos_curv || !isfinite(alpha) || (alpha >= doglegdata.trustradius)
-            # Cauchy point is on/outside trust boundary or negative curvature: truncated gradient step
-            scale = -step_norm / gnorm
-            getx(data.linsystem) .= scale .* gradient
+            pred_red = newton_pred
+        elseif !cauchy_ok || cauchy_norm >= Δ
+            # Truncated gradient step (also covers negative curvature)
+            s = Δ / gnorm
+            x .= (-s) .* gradient
+            pred_red = s * (gnorm2 - 0.5 * s * gHg)
         elseif newton_valid
-            # Dogleg boundary intersection: alpha < trustradius < newton_norm
-            getx(data.linsystem) .= doglegdata.newton .- doglegdata.cauchy
-            aw = sqnorm(getx(data.linsystem))
-            c0 = fast_dot(doglegdata.cauchy, getx(data.linsystem))
-            trsq = step_norm * step_norm - alpha2
+            # Dogleg: cauchy_norm < Δ < newton_norm
+            x .= dd.newton .- dd.cauchy
+            aw = sqnorm(x)
+            c0 = fast_dot(dd.cauchy, x)
+            trsq = Δ * Δ - cauchy_norm * cauchy_norm
+            tau = 0.0
             if aw > 0 && isfinite(trsq) && trsq > 0
                 disc = sqrt(c0 * c0 + aw * trsq)
                 tau = c0 <= 0 ? (-c0 + disc) / aw : trsq / (c0 + disc)
                 tau = clamp(tau, 0.0, 1.0)
-            else
-                tau = 0.0
             end
-            getx(data.linsystem) .*= tau
-            getx(data.linsystem) .+= doglegdata.cauchy
+            x .*= tau
+            x .+= dd.cauchy
+            if tau == 0.0
+                step_norm = cauchy_norm
+            end
+            pred_red = -fast_dot(gradient, x) - 0.5 * fast_bAb(hessian, x)
         else
-            # Newton step unavailable / indefinite: Cauchy step
-            getx(data.linsystem) .= doglegdata.cauchy
-            step_norm = alpha
+            # Newton unavailable: full Cauchy step
+            x .= dd.cauchy
+            step_norm = cauchy_norm
+            pred_red = 0.5 * cauchy_a * gnorm2
         end
 
-        step_sz = maximum(abs, getx(data.linsystem))::Float64
+        step_sz = maximum(abs, x)::Float64
         if !isfinite(step_sz)
             return NaN
         end
 
-        data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
-        data.costs += @elapsed_ns cost_ = f(data.varnext)
+        data.varnext = update!(data.varnext, data.variables, x)
+        # On the first trial, linearize at the trial point too if the step is likely to be accepted
+        usefdf = inner_iters == 1 && pred_red >= abs(data.bestcost) * options.reldcost
+        cost_ = evaltrial!(dd, data, f, fdf!, usefdf)
 
-        # Evaluate actual reduction vs predicted reduction: Delta m = -g'*delta - 0.5 * delta'*H*delta
+        # Noise-floored reduction ratio (Fletcher): stable when both reductions ~ eps*cost
         act_red = data.bestcost - cost_
-        delta_dot_g = fast_dot(gradient, getx(data.linsystem))
-        delta_H_delta = fast_bAb(hessian, getx(data.linsystem))
-        pred_red = -delta_dot_g - 0.5 * delta_H_delta
+        denom = pred_red + noise
+        rho = (isfinite(act_red) && isfinite(denom) && denom > 0) ? (act_red + noise) / denom : -Inf
 
-        rho = (isfinite(act_red) && isfinite(pred_red) && pred_red > 0) ? (act_red / pred_red) : -Inf
-
-        if rho > 1e-4
-            # Step accepted: adapt radius for next outer iteration
-            if rho > 0.75 && step_norm >= 0.9 * doglegdata.trustradius
-                doglegdata.trustradius = min(2.0 * doglegdata.trustradius, doglegdata.maxtrustradius)
-            elseif rho < 0.25
-                doglegdata.trustradius = 0.25 * doglegdata.trustradius
+        if act_red >= 0 && rho > 1e-4
+            if rho < 0.25
+                dd.trustradius = 0.25 * step_norm
+            elseif rho > 0.75 && step_norm >= 0.9 * Δ
+                dd.trustradius = min(2.0 * Δ, dd.maxtrustradius)
             end
             return cost_
-        else
-            # Step rejected: shrink radius and retry
-            doglegdata.trustradius = 0.25 * min(doglegdata.trustradius, step_norm)
-            step_sz = maximum(abs, getx(data.linsystem))::Float64
-            if !(step_sz >= options.dstep) || !(doglegdata.trustradius >= floatmin(Float64)) || !isfinite(doglegdata.trustradius) || inner_iters > 100
-                return cost_
-            end
+        end
+
+        # Rejected
+        dd.trialready = false
+        dd.trustradius = 0.25 * step_norm
+        if !(step_sz >= options.dstep) || !(dd.trustradius >= floatmin(Float64)) || inner_iters > 100
+            return cost_
         end
     end
 end
