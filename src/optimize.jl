@@ -55,12 +55,6 @@ function run_optimize!(data::D, iteratedata::ID, f::F, fdf!::FDF, options::Optim
     return x, OptimizationResult(data, converged, getiterator(options))
 end
 
-current_grad(iteratedata::LevMarDataTrial, data) = iteratedata.trialready ? getgrad(iteratedata.trial) : nothing
-current_grad(::NewtonDataRelinearize, data) = getgrad(data.linsystem)
-current_grad(::DoglegData{T,Nothing}, data) where {T} = nothing
-current_grad(dd::DoglegData, data) = dd.trialready ? getgrad(dd.trial) : nothing
-current_grad(::Any, data) = nothing
-
 @inline function optimizeloop!(data::D, iteratedata::ID, f::F, fdf!::FDF, options::OptimizationOptions, callback::CB) where {D, ID, F, FDF, CB}
     stoptime = typemax(UInt64) - options.maxtime <= Base.time_ns() ? typemax(UInt64) : Base.time_ns() + options.maxtime
     fails = 0
@@ -70,21 +64,14 @@ current_grad(::Any, data) = nothing
     data.startcost = cost
     data.bestcost = cost
 
-    if !isfinite(cost) || !all(isfinite, getgrad(data.linsystem))
-        converged |= isinf(cost) << 0
-        converged |= isnan(cost) << 1
-        converged |= 1 << 11
-        return converged
-    end
+    converged |= isinf(cost)                                         << 0
+    converged |= isnan(cost)                                         << 1
+    maxgrad = maximum(abs, getgrad(data.linsystem))::Float64
+    converged |= !isfinite(maxgrad)                                  << 12
+    converged |= (converged != 0)                                    << 11
+    converged |= (maxgrad < options.gtol)                            << 13
 
-    if options.gtol > 0.0
-        maxgrad = maximum(abs, getgrad(data.linsystem))::Float64
-        if maxgrad < options.gtol
-            return 1 << 12
-        end
-    end
-
-    while true
+    while converged == 0
         data.iternum += 1
         cost_ = iterate!(iteratedata, data, f, fdf!, options)
         if cost_ === LINSOLVER_FAILED
@@ -113,44 +100,28 @@ current_grad(::Any, data) = nothing
         data.variables, data.varnext = data.varnext, data.variables
 
         maxstep = maximum(abs, getx(data.linsystem))::Float64
-        converged |= isinf(cost)                                     << 0
-        converged |= isnan(cost)                                     << 1
+        converged |= isinf(cost)                                         << 0
+        converged |= isnan(cost)                                         << 1
         if dcost >= 0
             converged |= (dcost < abs(data.bestcost) * options.reldcost) << 2
             converged |= (dcost < options.absdcost)                      << 3
         end
-        converged |= isinf(maxstep)                                  << 4
-        converged |= isnan(maxstep)                                  << 5
-        converged |= (maxstep < options.dstep)                       << 6
-        converged |= (fails > options.maxfails)                      << 7
-        converged |= (data.iternum >= options.maxiters)              << 8
-        converged |= (Base.time_ns() > stoptime)                     << 9
-        converged |= terminate                                       << 16
-
-        if options.gtol > 0.0
-            grad = current_grad(iteratedata, data)
-            if !isnothing(grad)
-                maxgrad = maximum(abs, grad)::Float64
-                converged |= (maxgrad < options.gtol)                << 12
-            end
-        end
-
+        converged |= isinf(maxstep)                                      << 4
+        converged |= isnan(maxstep)                                      << 5
+        converged |= (maxstep < options.dstep)                           << 6
+        converged |= (fails > options.maxfails)                          << 7
+        converged |= (data.iternum >= options.maxiters)                  << 8
+        converged |= (Base.time_ns() > stoptime)                         << 9
+        converged |= terminate                                           << 16
         if converged != 0
             break
         end
 
         cost_ = linearize!(iteratedata, data, fdf!)
-        if !isapprox(cost_, cost; rtol=1.0e-10, atol=1.0e-25)
-            converged |= 1 << 10
-            break
-        end
-        if options.gtol > 0.0
-            maxgrad = maximum(abs, getgrad(data.linsystem))::Float64
-            if maxgrad < options.gtol
-                converged |= 1 << 12
-                break
-            end
-        end
+        converged |= !isapprox(cost_, cost; rtol=1.0e-10, atol=1.0e-25)  << 10
+        maxgrad = maximum(abs, getgrad(data.linsystem))::Float64
+        converged |= !isfinite(maxgrad)                                  << 12
+        converged |= (maxgrad < options.gtol)                            << 13
     end
 
     if !(data.bestcost >= cost)

@@ -122,7 +122,7 @@ end
     for iterator in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton, :gradientdescent)
         opts = OptimizationOptions(iterator=iterator, maxtime=2.0)
         x_opt, res = optimize(nanlinearization_cost, nanlinearization_fdf!, [0.0], opts)
-        @test (res.termination & (TERMINATION_STEP_NAN | TERMINATION_COST_NAN)) != 0
+        @test (res.termination & (TERMINATION_STEP_NAN | TERMINATION_COST_NAN | TERMINATION_GRAD_NOT_FINITE)) != 0
         @test isfinite(res.bestcost) && res.bestcost < nanlinearization_cost([0.0])
         @test res.bestcost == nanlinearization_cost(x_opt)
     end

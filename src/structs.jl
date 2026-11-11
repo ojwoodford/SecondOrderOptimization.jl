@@ -37,11 +37,12 @@ const TERMINATION_MAX_ITERS         = 1 << 8
 const TERMINATION_MAX_TIME          = 1 << 9
 const TERMINATION_COST_DISCREPANCY  = 1 << 10
 const TERMINATION_START_NOT_FINITE  = 1 << 11
-const TERMINATION_GRAD_TOL          = 1 << 12
-const TERMINATION_LINSOLVER_FAILED  = 1 << 13
+const TERMINATION_GRAD_NOT_FINITE   = 1 << 12
+const TERMINATION_GRAD_TOL          = 1 << 13
+const TERMINATION_LINSOLVER_FAILED  = 1 << 14
 
 const SUCCESS_CONVERGENCE_MASK = TERMINATION_REL_DCOST | TERMINATION_ABS_DCOST | TERMINATION_STEP_SIZE | TERMINATION_GRAD_TOL
-const FAILURE_TERMINATION_MASK = TERMINATION_COST_INF | TERMINATION_COST_NAN | TERMINATION_STEP_INF | TERMINATION_STEP_NAN | TERMINATION_MAX_FAILS | TERMINATION_MAX_ITERS | TERMINATION_MAX_TIME | TERMINATION_COST_DISCREPANCY | TERMINATION_START_NOT_FINITE | TERMINATION_LINSOLVER_FAILED
+const FAILURE_TERMINATION_MASK = TERMINATION_COST_INF | TERMINATION_COST_NAN | TERMINATION_STEP_INF | TERMINATION_STEP_NAN | TERMINATION_MAX_FAILS | TERMINATION_MAX_ITERS | TERMINATION_MAX_TIME | TERMINATION_COST_DISCREPANCY | TERMINATION_START_NOT_FINITE | TERMINATION_GRAD_NOT_FINITE | TERMINATION_LINSOLVER_FAILED
 
 const LINSOLVER_FAILED = reinterpret(Float64, 0x7ff8000000000001)
 
@@ -195,6 +196,7 @@ function Base.show(io::IO, x::OptimizationResult)
     if 0 != x.termination & TERMINATION_MAX_TIME;         println(io, "   Maximum allowed computation time exceeded."); end
     if 0 != x.termination & TERMINATION_COST_DISCREPANCY; println(io, "   Internal discrepancy in cost computations."); end
     if 0 != x.termination & TERMINATION_START_NOT_FINITE; println(io, "   Cost or gradient not finite at the start point."); end
+    if 0 != x.termination & TERMINATION_GRAD_NOT_FINITE;  println(io, "   Gradient not finite."); end
     if 0 != x.termination & TERMINATION_GRAD_TOL;         println(io, "   Gradient norm below threshold."); end
     if 0 != x.termination & TERMINATION_LINSOLVER_FAILED; println(io, "   Linear solver failed to solve the linear system."); end
     userflags = x.termination >> 16

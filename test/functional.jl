@@ -49,7 +49,7 @@ end
     opts_gtol = OptimizationOptions(gtol=1e-3, maxiters=100)
     x_opt, res = optimize(rosenbrock_cost, rosenbrock_fdf!, copy(x0_dense), opts_gtol)
     @test isapprox(x_opt, [1.0, 1.0]; atol=1e-2)
-    @test (res.termination & (1 << 12)) != 0
+    @test (res.termination & TERMINATION_GRAD_TOL) != 0
     g_final = zeros(2)
     H_final = zeros(2, 2)
     rosenbrock_fdf!(g_final, H_final, x_opt)
@@ -59,7 +59,7 @@ end
     x_at_min = @SVector [1.0, 1.0]
     x_opt0, res0 = optimize(rosenbrock_cost, rosenbrock_fdf!, x_at_min, opts_gtol)
     @test res0.niterations == 0
-    @test (res0.termination & (1 << 12)) != 0
+    @test (res0.termination & TERMINATION_GRAD_TOL) != 0
 
     # Test OptimizationResult addition order
     r_sum = res + res0
