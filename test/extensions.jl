@@ -21,7 +21,9 @@ using SecondOrderOptimization, SparseArrays, LinearAlgebra, Test, Static
 
     @test SecondOrderOptimization.validatelinsolver(:cg)
     @test SecondOrderOptimization.validatelinsolver(:minres)
-    @test SecondOrderOptimization.validatelinsolver(:lsmr)
+    # M10: LSMR on the Hessian works with H'H, squaring its condition number again, so it isn't offered
+    @test !SecondOrderOptimization.validatelinsolver(:lsmr)
+    @test_throws ArgumentError OptimizationOptions(linsolver=:lsmr)
     @test SecondOrderOptimization.validatelinsolver(:krylov)
 
     # Quadratic test problem: f(x) = 0.5 * x' A x - b' x
@@ -37,7 +39,7 @@ using SecondOrderOptimization, SparseArrays, LinearAlgebra, Test, Static
     end
 
     # Test Krylov solvers on SparseLinearSystem
-    for solver in (:cg, :minres, :lsmr, :krylov)
+    for solver in (:cg, :minres, :krylov)
         # Newton iterator
         opts_newton = OptimizationOptions(iterator=:newton, linsolver=solver, maxiters=10, gtol=1e-6)
         x_newton, res_newton = optimize(quad_cost, quad_fdf!, [0.0, 0.0, 0.0], opts_newton; H=copy(A_spd))
@@ -53,7 +55,7 @@ using SecondOrderOptimization, SparseArrays, LinearAlgebra, Test, Static
 
     # B1: a sparse system built for another solver throws an informative error rather than
     # trying to replace the `const` workspace field
-    for solver in (:cg, :minres, :lsmr)
+    for solver in (:cg, :minres)
         ls_wrong = SecondOrderOptimization.makelinearsystem(zeros(3), copy(A_spd), static(:auto))
         ls_wrong.b .= b_vec
         @test_throws ArgumentError SecondOrderOptimization.solve!(ls_wrong, static(solver))
@@ -93,7 +95,7 @@ using SecondOrderOptimization, SparseArrays, LinearAlgebra, Test, Static
         return 0.5 * dot(x, A_dense * x) - dot(b_vec, x)
     end
 
-    for solver in (:cg, :minres, :lsmr)
+    for solver in (:cg, :minres)
         # M9: dense Krylov solves use a preallocated workspace
         ls_dk = SecondOrderOptimization.makelinearsystem(zeros(3), copy(A_dense), static(solver))
         @test ls_dk.solver_ws isa Krylov.KrylovWorkspace

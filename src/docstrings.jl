@@ -37,7 +37,7 @@ Stores configuration options and stopping criteria for second-order optimization
 - `maxfails::Int = 3`: Maximum consecutive failed steps (cost increases) before termination.
 - `maxtime::Float64 = 30.0`: Maximum wall-clock optimization runtime in seconds.
 - `iterator::Union{Symbol, OptimizationIterator} = :levenbergmarquardt`: Iterator algorithm (`:newton`, `:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg`, `:gradientdescent`).
-- `linsolver::Union{Symbol, OptimizationLinearSolver} = :auto`: Linear solver method (`:auto`, `:cholesky`, `:ldl`, `:qr`, or `:cg`, `:minres`, `:lsmr`, `:krylov` via `Krylov.jl`, or `:pardiso` via `Pardiso.jl`).
+- `linsolver::Union{Symbol, OptimizationLinearSolver} = :auto`: Linear solver method (`:auto`, `:cholesky`, `:ldl`, `:qr`, or `:cg`, `:minres`, `:krylov` via `Krylov.jl`, or `:pardiso` via `Pardiso.jl`).
 - `callbackchangesstate::Union{Bool, StaticBool} = false`: Set `true` if callback modifies problem state.
 
 # Example
@@ -260,7 +260,7 @@ Enum specifying linear solver strategy:
 - [`qr_solver`](@ref): QR factorization.
 
 Additional solver symbols can be passed as Symbols when package extensions are loaded:
-- `:cg`, `:minres`, `:lsmr`, `:krylov`: Iterative solvers provided by `Krylov.jl` via the `KrylovExt` extension.
+- `:cg`, `:minres`, `:krylov`: Iterative solvers provided by `Krylov.jl` via the `KrylovExt` extension.
 - `:pardiso`: Multithreaded direct sparse solver provided by `Pardiso.jl` via the `PardisoExt` extension.
 
 # Example
@@ -434,7 +434,7 @@ Solves the linear system `A * x = b` in-place using the specified `solver` and r
 # Supported Solver Identifiers
 - Core solvers: `:auto`, `:cholesky`, `:ldl`, `:qr` (or enum constants [`auto_solver`](@ref), [`cholesky_solver`](@ref), [`ldl_solver`](@ref), [`qr_solver`](@ref)).
 - Extension solvers (when package is loaded):
-  - `using Krylov`: `:cg` (Conjugate Gradient), `:minres` (MINRES), `:lsmr` (LSMR), `:krylov` (defaults to `:cg`). On sparse systems, `:cg` and `:minres` are Jacobi (diagonal) preconditioned whenever the damped diagonal is positive.
+  - `using Krylov`: `:cg` (Conjugate Gradient), `:minres` (MINRES), `:krylov` (defaults to `:cg`). On sparse systems, `:cg` and `:minres` are Jacobi (diagonal) preconditioned whenever the damped diagonal is positive.
   - `using Pardiso`: `:pardiso` (Intel MKL PARDISO or Panua Pardiso multi-threaded direct sparse solver).
 
 Note: On `StaticLinearSystem`, `:qr` executes static LU decomposition via `\`, and `:ldl` uses Cholesky, falling back to LU when the matrix is not positive definite (the solve is then reported as `Indefinite`).
@@ -453,7 +453,7 @@ solve!
     validatelinsolver(solver::Union{Symbol, StaticSymbol, OptimizationLinearSolver}) -> Bool
 
 Returns `true` if `solver` is a supported linear solver backend, or `false` otherwise.
-Extension solvers (`:cg`, `:minres`, `:lsmr`, `:krylov`, `:pardiso`) register validation methods when their respective packages (`Krylov.jl` or `Pardiso.jl`) are loaded.
+Extension solvers (`:cg`, `:minres`, `:krylov`, `:pardiso`) register validation methods when their respective packages (`Krylov.jl` or `Pardiso.jl`) are loaded.
 """
 validatelinsolver
 

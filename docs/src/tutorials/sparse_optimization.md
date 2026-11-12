@@ -61,7 +61,6 @@ You can select the sparse linear solver backend via the `linsolver` keyword argu
 | `:pardiso` | `Pardiso.jl` | Direct Multi-Threaded Factorization | Large sparse systems ($10^4\text{--}10^6$ DoF) leveraging multi-core CPUs (MKL / Panua) | `using Pardiso` |
 | `:cg` | `Krylov.jl` | Iterative Conjugate Gradient | Ultra large-scale SPD systems ($10^5\text{--}10^7$ DoF) or when direct fill-in exhausts RAM | `using Krylov` |
 | `:minres` | `Krylov.jl` | Iterative MINRES | Large symmetric indefinite systems, saddle-point problems, and Newton steps | `using Krylov` |
-| `:lsmr` | `Krylov.jl` | Iterative LSMR | Large least-squares problems or ill-conditioned systems | `using Krylov` |
 | `:krylov` | `Krylov.jl` | Iterative (defaults to `:cg`) | General iterative Krylov subspace solve | `using Krylov` |
 
 ---
@@ -99,14 +98,13 @@ println("Final cost: ", result.bestcost)
 
 ---
 
-### 2. `Krylov.jl` (`linsolver = :cg`, `:minres`, `:lsmr`, `:krylov`)
+### 2. `Krylov.jl` (`linsolver = :cg`, `:minres`, `:krylov`)
 
 #### When to Use
 - **Memory-Constrained & Ultra Large-Scale Optimization**: For problems with hundreds of thousands or millions of variables ($10^5\text{--}10^7$ DoF), direct factorizations ($LDL^T$, Cholesky) suffer from catastrophic sparse fill-in (where $L$ contains orders of magnitude more non-zeros than $A$), causing out-of-memory errors. Krylov subspace methods require only $O(N)$ storage.
 - **Iterative Solver Selection**:
   - **`:cg` (Conjugate Gradient)**: Use for symmetric positive-definite systems. Ideal in combination with **Levenberg-Marquardt** (`:levenbergmarquardt`), where damping $\lambda I$ guarantees positive definiteness.
   - **`:minres` (Minimal Residual)**: Use for symmetric indefinite systems, such as saddle-point formulations or unconstrained Newton steps with negative curvature.
-  - **`:lsmr`**: Use for ill-conditioned or least-squares formulations.
 
 #### How to Use
 Simply load `Krylov` in your session:
@@ -130,6 +128,6 @@ x_opt, result = optimize(chain_cost, chain_fdf!, copy(x0), options; H = H_proto,
 ```
 
 #### Zero-Allocation Iterative Solves
-When `OptimizationWorkspace` is constructed with a Krylov solver, `SecondOrderOptimization.jl` preallocates the appropriate Krylov workspace (`Krylov.CgWorkspace`, `MinresWorkspace`, or `LsmrWorkspace`) inside `solver_ws`. During the optimization loop, `cg!`, `minres!`, and `lsmr!` execute in-place with **zero heap allocations** per iteration.
+When `OptimizationWorkspace` is constructed with a Krylov solver, `SecondOrderOptimization.jl` preallocates the appropriate Krylov workspace (`Krylov.CgWorkspace` or `MinresWorkspace`) inside `solver_ws`. During the optimization loop, `cg!` and `minres!` execute in-place with **zero heap allocations** per iteration.
 
 If the linear solver detects negative curvature ($x^T A x < 0$), it reports [`Indefinite`](@ref), allowing Newton and Dogleg iterators to apply regularizing spectral shifts or fall back to trust-region boundaries.

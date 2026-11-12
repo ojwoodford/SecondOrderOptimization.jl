@@ -14,7 +14,6 @@ import SecondOrderOptimization: uniformscaling!, damp_marquardt!
 # Validation of Krylov solver symbols
 validatelinsolver(::StaticSymbol{:cg}) = true
 validatelinsolver(::StaticSymbol{:minres}) = true
-validatelinsolver(::StaticSymbol{:lsmr}) = true
 validatelinsolver(::StaticSymbol{:krylov}) = true
 
 # A Krylov workspace plus storage for a Jacobi (diagonal) preconditioner
@@ -39,13 +38,11 @@ end
 # Preallocated workspace creation for SparseLinearSystem
 makesparsews(A, ::StaticSymbol{:cg}) = JacobiWorkspace(Krylov.CgWorkspace(A, zeros(eltype(A), size(A, 1))), size(A, 1))
 makesparsews(A, ::StaticSymbol{:minres}) = JacobiWorkspace(Krylov.MinresWorkspace(A, zeros(eltype(A), size(A, 1))), size(A, 1))
-makesparsews(A, ::StaticSymbol{:lsmr}) = Krylov.LsmrWorkspace(A, zeros(eltype(A), size(A, 1)))
 makesparsews(A, ::StaticSymbol{:krylov}) = makesparsews(A, static(:cg))
 
 # Preallocated workspace creation for DenseLinearSystem
 makedensews(n, ::StaticSymbol{:cg}) = Krylov.CgWorkspace(n, n, Vector{Float64})
 makedensews(n, ::StaticSymbol{:minres}) = Krylov.MinresWorkspace(n, n, Vector{Float64})
-makedensews(n, ::StaticSymbol{:lsmr}) = Krylov.LsmrWorkspace(n, n, Vector{Float64})
 makedensews(n, ::StaticSymbol{:krylov}) = makedensews(n, static(:cg))
 
 # The sparse workspace is built once, by `makesparsews`, and `solver_ws` is a `const` field,
@@ -113,25 +110,6 @@ function solve!(ls::SparseLinearSystem, ::StaticSymbol{:minres})
     return ws.stats.solved ? Success : NotPositiveDefinite
 end
 
-function solve!(ls::SparseLinearSystem, ::StaticSymbol{:lsmr})
-    ws = check_krylov_ws(ls.solver_ws, Krylov.LsmrWorkspace, :lsmr)
-    if ls.lambda > 0
-        if isnothing(ls.scaling)
-            uniformscaling!(ls, ls.lambda)
-        else
-            damp_marquardt!(ls, ls.scaling, ls.lambda)
-        end
-    end
-    Krylov.lsmr!(ws, ls.A, ls.b)
-    copyto!(ls.x, ws.x)
-    if ls.lambda > 0
-        @inbounds for (i, idx) in enumerate(ls.diag_inds)
-            ls.A.nzval[idx] = ls.diag_cache[i]
-        end
-    end
-    return ws.stats.solved ? Success : NotPositiveDefinite
-end
-
 solve!(ls::SparseLinearSystem, ::StaticSymbol{:krylov}) = solve!(ls, static(:cg))
 
 # DenseLinearSystem execution
@@ -172,26 +150,6 @@ function solve!(ls::DenseLinearSystem, ::StaticSymbol{:minres})
         return ws.stats.solved ? Success : NotPositiveDefinite
     end
     (x, stats) = Krylov.minres(ls.A_scratch, ls.b)
-    copyto!(ls.x, x)
-    return stats.solved ? Success : NotPositiveDefinite
-end
-
-function solve!(ls::DenseLinearSystem, ::StaticSymbol{:lsmr})
-    copyto!(ls.A_scratch, ls.A)
-    if ls.lambda > 0
-        if isnothing(ls.scaling)
-            uniformscaling!(ls.A_scratch, ls.lambda)
-        else
-            damp_marquardt!(ls.A_scratch, ls.scaling, ls.lambda)
-        end
-    end
-    ws = ls.solver_ws
-    if ws isa Krylov.LsmrWorkspace
-        Krylov.lsmr!(ws, ls.A_scratch, ls.b)
-        copyto!(ls.x, ws.x)
-        return ws.stats.solved ? Success : NotPositiveDefinite
-    end
-    (x, stats) = Krylov.lsmr(ls.A_scratch, ls.b)
     copyto!(ls.x, x)
     return stats.solved ? Success : NotPositiveDefinite
 end

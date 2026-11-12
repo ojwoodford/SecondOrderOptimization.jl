@@ -75,7 +75,6 @@ Indefinite
   - `:cg`: Conjugate Gradients for symmetric positive-definite systems. Reports `Indefinite` on nonpositive curvature.
   - `:minres`: MINRES for symmetric indefinite systems.
   - On sparse systems, `:cg` and `:minres` are Jacobi (diagonal) preconditioned whenever the damped diagonal is positive.
-  - `:lsmr`: LSMR for least-squares and general systems.
   - `:krylov`: Alias for `:cg`.
   To enable: `using Krylov`.
 - **`Pardiso.jl` (via `PardisoExt`)**: Provides multithreaded direct sparse factorization using Intel MKL PARDISO or Panua Pardiso.

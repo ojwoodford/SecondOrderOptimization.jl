@@ -13,7 +13,7 @@ High-performance, zero-allocation second-order nonlinear optimization in Julia.
 - **Iterators**: Levenberg-Marquardt (`:levenbergmarquardt`, `:levenbergmarquardt_dtd`), Powell's Dogleg (`:dogleg`), undamped Newton (`:newton`), and backtracking Gradient Descent (`:gradientdescent`).
 - **Linear Solvers**:
   - *Built-in*: Cholesky (`:cholesky`), LDL / Bunch-Kaufman (`:ldl`, using `LDLFactorizations.jl` for sparse matrices), and QR (`:qr`), with automatic dispatch (`:auto`).
-  - *Extensions*: Iterative Krylov subspace solvers (`:cg`, `:minres`, `:lsmr`, `:krylov` via `Krylov.jl`) and multi-threaded sparse direct factorizations (`:pardiso` via `Pardiso.jl`).
+  - *Extensions*: Iterative Krylov subspace solvers (`:cg`, `:minres`, `:krylov` via `Krylov.jl`) and multi-threaded sparse direct factorizations (`:pardiso` via `Pardiso.jl`).
 - **Variable Types & Manifolds**: Supports scalars (`Float64`), static vectors (`SVector`), dense vectors (`Vector`), heterogeneous variable vectors, and non-Euclidean manifolds via `SecondOrderOptimization.nvars` / `SecondOrderOptimization.update`.
 - **Zero-Allocation Reuse**: Preallocate solver buffers and factorizations via `OptimizationWorkspace`.
 
@@ -46,7 +46,7 @@ Simply load `Krylov` or `Pardiso` to unlock optional solver backends:
 
 ```julia
 using SecondOrderOptimization, SparseArrays
-using Krylov   # unlocks :cg, :minres, :lsmr, :krylov
+using Krylov   # unlocks :cg, :minres, :krylov
 
 # Conjugate Gradient for large sparse positive-definite systems:
 opts = OptimizationOptions(iterator = :levenbergmarquardt, linsolver = :cg)

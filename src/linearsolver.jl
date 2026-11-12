@@ -36,7 +36,7 @@ function checklinsolver(s::Symbol)
     validatelinsolver(s) && return true
     if s === :pardiso
         throw(ArgumentError("Linear solver :pardiso requires Pardiso.jl. Please run `using Pardiso` first."))
-    elseif s in (:cg, :minres, :lsmr, :krylov)
+    elseif s in (:cg, :minres, :krylov)
         throw(ArgumentError("Linear solver :$s requires Krylov.jl. Please run `using Krylov` first."))
     elseif s in SCHUR_SOLVERS
         throw(ArgumentError("Linear solver :$s requires BlockLinearSystems.jl. Please run `using BlockLinearSystems` first."))
