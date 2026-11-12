@@ -90,4 +90,45 @@ using SecondOrderOptimization, StaticArrays, LinearAlgebra, Test
     @test length(ct.trajectory) > 0
     @test length(ct.trajectory) == length(ct.costs)
     @test all(x -> length(x) == 2, ct.trajectory)
+
+    # 5. B5: Levenberg-Marquardt damping update stays bounded when the predicted change is
+    # not negative (indefinite Hessian)
+    luf = SecondOrderOptimization.lambda_update_factor
+    @test luf(-1.0, 0.0) == 2.0             # zero prediction: was a factor of Inf
+    @test luf(-1.0, 1e-20) == 2.0           # wrong-signed prediction
+    @test luf(-1.0, 0.1) == 2.0             # q = -10: was a factor of 9262
+    @test luf(1.0, -0.1) == 2.0             # q = -10 with a negative prediction
+    @test luf(-0.5, -1.0) == 1.0            # q = 0.5
+    @test luf(-1.0, -1.0) == 0.1            # q = 1, very good step
+    @test luf(0.0, -1.0) == 2.0             # q = 0
+    for q in range(-5, 2; length=101)
+        @test 0.1 <= luf(-q, -1.0) <= 2.0
+    end
+
+    # Double well in x, sinusoid in y: indefinite Hessian near the start. :qr returns a step
+    # even when the damped Hessian is indefinite, so the predicted change can be positive.
+    dw_cost(x) = -x[1]^2 + 0.25 * x[1]^4 + 1 - cos(3 * x[2])
+    function dw_fdf!(g, H, x)
+        g[1] = -2 * x[1] + x[1]^3
+        g[2] = 3 * sin(3 * x[2])
+        H .= 0
+        H[1, 1] = -2 + 3 * x[1]^2
+        H[2, 2] = 9 * cos(3 * x[2])
+        return dw_cost(x)
+    end
+    for solver in (:qr, :auto), it in (:levenbergmarquardt, :levenbergmarquardt_dtd), x0 in ([0.1, 0.4], [0.05, 0.9], [1e-3, 1.0])
+        lambdas = Float64[]
+        lmcb(cost, xt, data, itd) = (push!(lambdas, itd.lambda); (cost, 0))
+        x_dw, res_dw = optimize(dw_cost, dw_fdf!, copy(x0), OptimizationOptions(iterator=it, linsolver=solver, gtol=1e-8); H=zeros(2, 2), callback=lmcb)
+        @test all(isfinite, lambdas)
+        @test maximum(lambdas) < 1e8
+        @test isconverged(res_dw)
+        if solver === :qr
+            # :qr ignores indefiniteness, so it may stop at the saddle x[1] = 0
+            @test abs(x_dw[1]) < 1e-6 || isapprox(abs(x_dw[1]), sqrt(2); atol=1e-6)
+        else
+            @test isapprox(abs(x_dw[1]), sqrt(2); atol=1e-6)   # reached a minimum in x
+        end
+        @test abs(sin(3 * x_dw[2])) < 1e-6 && cos(3 * x_dw[2]) > 0
+    end
 end

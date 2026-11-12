@@ -414,6 +414,17 @@ function linearize!(lmd::LevMarDataTrial, data, fdf!)
     return lmd.trialcost
 end
 
+# Multiplier for the damping after an accepted step, from the actual and the predicted change
+# in cost (Nielsen's update). The predicted change is not negative when the Hessian is
+# indefinite, in which case the step is treated as low quality. The factor is clamped so a
+# tiny or wrong-signed prediction can't make the damping explode.
+function lambda_update_factor(actual::Float64, predicted::Float64)
+    predicted < 0 || return 2.0
+    q = actual / predicted
+    q >= 0.983 && return 0.1
+    return clamp(1.0 - (2.0 * q - 1.0)^3, 0.1, 2.0)
+end
+
 @inline function iterate!(levmardata::LevMarData, data, f, fdf!, options::OptimizationOptions)::Float64
     @assert levmardata.lambda >= 0.0
     hessian, gradient = gethessgrad(data.linsystem)
@@ -452,9 +463,8 @@ end
         if cost_ <= data.bestcost || !(step_sz >= options.dstep) || inner_iters > 100 || levmardata.lambda > 1e16
             dampen!(data.linsystem, 0.0)
             if cost_ <= data.bestcost
-                stepquality = (cost_ - data.bestcost) / (0.5 * fast_bAb(hessian, getx(data.linsystem)) + fast_dot(gradient, getx(data.linsystem)))
-                levmardata.lambda *= stepquality < 0.983 ? 1.0 - (2.0 * stepquality - 1.0)^3 : 0.1
-                levmardata.lambda = max(levmardata.lambda, 1e-12)
+                predicted = 0.5 * fast_bAb(hessian, getx(data.linsystem)) + fast_dot(gradient, getx(data.linsystem))
+                levmardata.lambda = max(levmardata.lambda * lambda_update_factor(cost_ - data.bestcost, predicted), 1e-12)
             end
             return cost_
         end
@@ -515,9 +525,8 @@ end
         if cost_ <= data.bestcost || !(step_sz >= options.dstep) || inner_iters > 100 || levmardata.lambda > 1e16
             dampen!(data.linsystem, 0.0)
             if cost_ <= data.bestcost
-                stepquality = (cost_ - data.bestcost) / (0.5 * fast_bAb(hessian, getx(data.linsystem)) + fast_dot(gradient, getx(data.linsystem)))
-                levmardata.lambda *= stepquality < 0.983 ? 1.0 - (2.0 * stepquality - 1.0)^3 : 0.1
-                levmardata.lambda = max(levmardata.lambda, 1e-12)
+                predicted = 0.5 * fast_bAb(hessian, getx(data.linsystem)) + fast_dot(gradient, getx(data.linsystem))
+                levmardata.lambda = max(levmardata.lambda * lambda_update_factor(cost_ - data.bestcost, predicted), 1e-12)
             end
             return cost_
         end
