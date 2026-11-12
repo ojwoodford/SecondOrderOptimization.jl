@@ -20,6 +20,8 @@ update!
 ```@docs
 OptimizationOptions
 OptimizationResult
+isconverged
+termination_reasons
 OptimizationWorkspace
 OptimizationInternal
 ```
@@ -70,14 +72,18 @@ Indefinite
 `SecondOrderOptimization.jl` integrates with optional linear solver packages via Julia 1.10+ package extensions:
 
 - **`Krylov.jl` (via `KrylovExt`)**: Provides iterative Krylov subspace linear solvers.
-  - `:cg`: Conjugate Gradients for symmetric positive-definite systems.
+  - `:cg`: Conjugate Gradients for symmetric positive-definite systems. Reports `Indefinite` on nonpositive curvature.
   - `:minres`: MINRES for symmetric indefinite systems.
+  - On sparse systems, `:cg` and `:minres` are Jacobi (diagonal) preconditioned whenever the damped diagonal is positive.
   - `:lsmr`: LSMR for least-squares and general systems.
   - `:krylov`: Alias for `:cg`.
   To enable: `using Krylov`.
 - **`Pardiso.jl` (via `PardisoExt`)**: Provides multithreaded direct sparse factorization using Intel MKL PARDISO or Panua Pardiso.
-  - `:pardiso`: Multi-threaded sparse direct solver for large sparse matrices.
+  - `:pardiso`: Multi-threaded sparse direct solver for large sparse matrices. The symbolic analysis runs once, when the linear system is built; each solve runs only the positive-definite numerical factorization, and reports `NotPositiveDefinite` when it fails.
   To enable: `using Pardiso`.
+- **`BlockLinearSystems.jl` (via `BlockLinearSystemsExt`)**: Schur-complement solvers for a `SchurBlockMatrix` Hessian.
+  - `:schur`, `:dense_schur`, `:sparse_schur`.
+  To enable: `using BlockLinearSystems`.
 
 ## Callbacks & Diagnostics
 
