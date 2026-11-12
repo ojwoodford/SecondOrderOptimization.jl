@@ -26,7 +26,7 @@ KrylovExt = "Krylov"
 PardisoExt = "Pardiso"
 
 [compat]
-FastNorm = "0.2"
+FastNorm = "0.2, 0.3"
 Krylov = "0.9, 0.10"
 LDLFactorizations = "0.10"
 LinearAlgebra = "1.10"
