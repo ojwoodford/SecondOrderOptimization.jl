@@ -30,3 +30,11 @@ makedocs(
         ],
     ]
 )
+
+# Publishes to the gh-pages branch when run on GitHub Actions (see .github/workflows/Documentation.yml);
+# does nothing when run locally.
+deploydocs(
+    repo = "github.com/ojwoodford/SecondOrderOptimization.jl.git",
+    devbranch = "main",
+    push_preview = false,
+)

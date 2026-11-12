@@ -6,6 +6,4 @@ SecondOrderOptimization = "a3f5c71e-3b2d-4d9a-9e20-7f8e3c4b1a50"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [sources]
-FastNorm = {path = "/Users/olly/.julia/dev/FastNorm.jl"}
-OptimizationVariableInterface = {path = "/Users/olly/.julia/dev/OptimizationVariableInterface.jl"}
 SecondOrderOptimization = {path = ".."}
