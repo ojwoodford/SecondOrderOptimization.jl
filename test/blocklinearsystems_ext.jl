@@ -18,11 +18,11 @@ struct SchurTestProblem
     b::Vector{Float64}
     c_dims::Vector{Int}
     p_dims::Vector{Int}
-    observations::Vector{Vector{Int}}
+    couplings::Vector{Vector{Int}}
     cc_pairs::Vector{Tuple{Int, Int}}   # retained-retained block couplings (r > c), beyond the diagonal
 end
 
-function SchurTestProblem(rng, c_dims, p_dims, observations; cc_pairs=Tuple{Int, Int}[])
+function SchurTestProblem(rng, c_dims, p_dims, couplings; cc_pairs=Tuple{Int, Int}[])
     nc, np = sum(c_dims), sum(p_dims)
     n = nc + np
     coff = cumsum([1; c_dims[1:end-1]])
@@ -37,7 +37,7 @@ function SchurTestProblem(rng, c_dims, p_dims, observations; cc_pairs=Tuple{Int,
     for (l, d) in enumerate(p_dims)
         fillblock!(poff[l], d, poff[l], d)
     end
-    for (l, cams) in enumerate(observations), c in cams
+    for (l, cams) in enumerate(couplings), c in cams
         fillblock!(coff[c], c_dims[c], poff[l], p_dims[l])
     end
     for (r, c) in cc_pairs
@@ -49,13 +49,13 @@ function SchurTestProblem(rng, c_dims, p_dims, observations; cc_pairs=Tuple{Int,
     for i in 1:n
         H[i, i] = sum(abs, view(H, i, :)) - abs(H[i, i]) + 0.5 + rand(rng)
     end
-    return SchurTestProblem(H, randn(rng, n), c_dims, p_dims, observations, cc_pairs)
+    return SchurTestProblem(H, randn(rng, n), c_dims, p_dims, couplings, cc_pairs)
 end
 
 nc(p::SchurTestProblem) = sum(p.c_dims)
 
 function schur_structure(p::SchurTestProblem; nchunks=1)
-    return SchurStructure(p.c_dims, p.p_dims, p.observations; nchunks)
+    return SchurStructure(p.c_dims, p.p_dims, p.couplings; nchunks)
 end
 
 function fill_cp!(p::SchurTestProblem, structure::SchurStructure, C_data, E_data)
@@ -89,11 +89,11 @@ end
 
 function sparse_schur_matrix(p::SchurTestProblem; nchunks=1)
     structure = schur_structure(p; nchunks)
-    covis = build_schur_covisibility(structure)
+    pattern = build_schur_pattern(structure)
     coords = Tuple{Int, Int}[]
-    cb = covis.block_colptr
+    cb = pattern.block_colptr
     for c in 1:structure.ncblocks, k in cb[c]:cb[c+1]-1
-        r = covis.block_rowval[k]       # r <= c in the upper-triangle covisibility
+        r = pattern.block_rowval[k]       # r <= c in the upper-triangle pattern
         push!(coords, (c, r))           # store lower-triangle block (row = c, col = r)
     end
     append!(coords, p.cc_pairs)
@@ -128,13 +128,13 @@ function standard_problem(seed=1; cc_pairs=Tuple{Int, Int}[])
     rng = Random.Xoshiro(seed)
     c_dims = [6, 6, 6, 6]
     p_dims = [3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1]
-    # Cameras 1-2 and 3-4 observe landmarks together; 2-3 are linked through a few landmarks
-    observations = [
+    # Retained blocks 1-2 and 3-4 are coupled to eliminated blocks together; 2-3 are linked through a few eliminated blocks
+    couplings = [
         [1, 2], [1, 2], [1, 2, 3], [2, 3], [3, 4], [3, 4], [1, 4],
         [1, 2], [2, 3], [3, 4], [1, 2, 3, 4], [4],
         [1], [2], [3], [4], [1, 2], [3, 4], [2, 3], [1, 4],
     ]
-    return SchurTestProblem(rng, c_dims, p_dims, observations; cc_pairs)
+    return SchurTestProblem(rng, c_dims, p_dims, couplings; cc_pairs)
 end
 
 @testset "BlockLinearSystemsExt: Schur solve equals full Cholesky solve" begin
@@ -204,14 +204,14 @@ end
     end
 end
 
-# Two groups of cameras ({1, 2} and {3, 4}) that share no landmark with each other, coupled only by
+# Two groups of retained blocks ({1, 2} and {3, 4}) that share no eliminated block with each other, coupled only by
 # direct retained-retained blocks (odometry / loop-closure style), which have no eliminated variable.
 function coupled_groups_problem(seed=3)
     rng = Random.Xoshiro(seed)
     c_dims = [6, 6, 6, 6]
     p_dims = [3, 3, 3, 3, 2, 2, 1, 1]
-    observations = [[1, 2], [1, 2], [3, 4], [3, 4], [1], [4], [2, 1], [3, 4]]
-    return SchurTestProblem(rng, c_dims, p_dims, observations; cc_pairs=[(3, 1), (4, 2), (2, 1)])
+    couplings = [[1, 2], [1, 2], [3, 4], [3, 4], [1], [4], [2, 1], [3, 4]]
+    return SchurTestProblem(rng, c_dims, p_dims, couplings; cc_pairs=[(3, 1), (4, 2), (2, 1)])
 end
 
 @testset "BlockLinearSystemsExt: retained-retained couplings without a shared eliminated variable (B4)" begin
@@ -220,20 +220,20 @@ end
     structure = schur_structure(p)
 
     # Pattern: the extra pairs get slots, in either order, and nothing else changes
-    plain = build_schur_covisibility(structure)
-    withextra = build_schur_covisibility(structure; extra_blocks=[(3, 1), (2, 4)])
-    @test !plain.block_covis[1, 3] && !plain.block_covis[2, 4]
-    @test withextra.block_covis[1, 3] && withextra.block_covis[2, 4]
-    @test nnz(withextra.block_covis) == nnz(plain.block_covis) + 2
-    @test_throws ArgumentError build_schur_covisibility(structure; extra_blocks=[(1, 5)])
+    plain = build_schur_pattern(structure)
+    withextra = build_schur_pattern(structure; extra_blocks=[(3, 1), (2, 4)])
+    @test !plain.block_pattern[1, 3] && !plain.block_pattern[2, 4]
+    @test withextra.block_pattern[1, 3] && withextra.block_pattern[2, 4]
+    @test nnz(withextra.block_pattern) == nnz(plain.block_pattern) + 2
+    @test_throws ArgumentError build_schur_pattern(structure; extra_blocks=[(1, 5)])
 
     # The sparse system fails to build a slot for B's coupling without the extra pairs ...
     H = sparse_schur_matrix(p)
     @test Set(retained_block_pairs(H.B)) ⊇ Set([(3, 1), (4, 2)])
     @test_throws AssertionError build_b_to_s_map(H.B, plain.S_sparse, structure.boffsets_c)
     # ... and builds one with them
-    covis = build_schur_covisibility(structure; extra_blocks=retained_block_pairs(H.B))
-    b_to_s = build_b_to_s_map(H.B, covis.S_sparse, structure.boffsets_c)
+    pattern = build_schur_pattern(structure; extra_blocks=retained_block_pairs(H.B))
+    b_to_s = build_b_to_s_map(H.B, pattern.S_sparse, structure.boffsets_c)
     # every upper-triangle entry of the diagonal blocks (21 each) and all 36 entries of each off-diagonal block
     @test count(>(0), b_to_s) == 4 * 21 + 36 * length(retained_block_pairs(H.B))
 
@@ -248,25 +248,25 @@ end
     end
 end
 
-@testset "build_schur_covisibility scales to many observations (B8) and can be reused" begin
-    # Many cameras, each landmark seen by a window of consecutive cameras
-    ncam, nlm = 3000, 6000
-    obs = [collect(c:min(c + 3, ncam)) for c in (min.(1 .+ (0:nlm-1) .* ncam .÷ nlm, ncam))]
-    structure = SchurStructure(fill(6, ncam), fill(3, nlm), obs)
-    build_schur_covisibility(structure)   # compile
-    t = @elapsed covis = build_schur_covisibility(structure)
+@testset "build_schur_pattern scales to many couplings (B8) and can be reused" begin
+    # Many retained blocks, each eliminated block coupled to a window of consecutive retained blocks
+    nret, nelim = 3000, 6000
+    coupled = [collect(c:min(c + 3, nret)) for c in (min.(1 .+ (0:nelim-1) .* nret .÷ nelim, nret))]
+    structure = SchurStructure(fill(6, nret), fill(3, nelim), coupled)
+    build_schur_pattern(structure)   # compile
+    t = @elapsed pattern = build_schur_pattern(structure)
     @test t < 5
-    @test nnz(covis.block_covis) == length(covis.block_rowval)
+    @test nnz(pattern.block_pattern) == length(pattern.block_rowval)
     # Upper triangle with the diagonal; the sliding window gives bandwidth 3
-    @test all(covis.block_rowval[k] <= c for c in 1:ncam for k in covis.block_colptr[c]:covis.block_colptr[c+1]-1)
-    @test nnz(covis.block_covis) <= ncam * 4
+    @test all(pattern.block_rowval[k] <= c for c in 1:nret for k in pattern.block_colptr[c]:pattern.block_colptr[c+1]-1)
+    @test nnz(pattern.block_pattern) <= nret * 4
 
-    # Passing a precomputed covis to the constructor gives the same system
+    # Passing a precomputed pattern to the constructor gives the same system
     p = coupled_groups_problem()
     H = sparse_schur_matrix(p)
-    pre = build_schur_covisibility(H.structure; extra_blocks=retained_block_pairs(H.B))
+    pre = build_schur_pattern(H.structure; extra_blocks=retained_block_pairs(H.B))
     ls1 = SOOExt.SparseSchurLinearSystem(H, copy(p.b), zeros(length(p.b)))
-    ls2 = SOOExt.SparseSchurLinearSystem(H, copy(p.b), zeros(length(p.b)); covis=pre)
+    ls2 = SOOExt.SparseSchurLinearSystem(H, copy(p.b), zeros(length(p.b)); pattern=pre)
     @test ls1.S == ls2.S && ls1.b_to_s_map == ls2.b_to_s_map
 end
 
@@ -458,8 +458,8 @@ function mixed_dims_problem(seed=11)
     c_dims = [6, 3, 9, 6]
     p_dims = [12, 12, 9, 9, 8, 8, 5, 5, 4, 4, 3, 3, 2, 2, 1, 1]
     cams = 1:4
-    observations = [sort(unique([rand(rng, cams) for _ in 1:3])) for _ in p_dims]
-    return SchurTestProblem(rng, c_dims, p_dims, observations)
+    couplings = [sort(unique([rand(rng, cams) for _ in 1:3])) for _ in p_dims]
+    return SchurTestProblem(rng, c_dims, p_dims, couplings)
 end
 
 
@@ -516,7 +516,7 @@ end
         ls = SOOExt.DenseSchurLinearSystem(H, copy(q.b), zeros(length(q.b)))
         SecondOrderOptimization.dampen!(ls, 0.0)
         @test SecondOrderOptimization.solve!(ls) == SecondOrderOptimization.NotPositiveDefinite
-        @test ls.workspace.failed_landmark[] == 2
+        @test ls.workspace.failed_block[] == 2
         # Damping repairs it
         SecondOrderOptimization.dampen!(ls, 1.0)
         @test SecondOrderOptimization.solve!(ls) == SecondOrderOptimization.Success
@@ -557,17 +557,17 @@ end
     @test tr.S_chol !== ls.S_chol
 end
 
-# A gauge-deficient problem: every observation constrains only the *difference* x_camera[1:3] - x_landmark, so
-# translating all cameras and landmarks together changes nothing and H is singular along that direction.
-# Camera dimensions 4:6 only have a tiny prior, which makes H ill conditioned.
+# A gauge-deficient problem: every coupling constrains only the *difference* x_retained[1:3] - x_eliminated, so
+# translating all retained and eliminated blocks together changes nothing and H is singular along that direction.
+# Dimensions 4:6 of the retained blocks only have a tiny prior, which makes H ill conditioned.
 function gauge_problem(seed=21; prior=1e-8)
     rng = Random.Xoshiro(seed)
     c_dims = [6, 6, 6, 6]
     p_dims = [3, 3, 3, 3, 3, 3]
-    observations = [[1, 2], [1, 2, 3], [2, 3, 4], [3, 4], [1, 4], [1, 2, 3, 4]]
+    couplings = [[1, 2], [1, 2, 3], [2, 3, 4], [3, 4], [1, 4], [1, 2, 3, 4]]
     nc_, np_ = sum(c_dims), sum(p_dims)
     H = zeros(nc_ + np_, nc_ + np_)
-    for (l, cams) in enumerate(observations), c in cams
+    for (l, cams) in enumerate(couplings), c in cams
         w = 0.5 + rand(rng)
         ci = 6 * (c - 1) .+ (1:3)
         li = nc_ + 3 * (l - 1) .+ (1:3)
@@ -578,7 +578,7 @@ function gauge_problem(seed=21; prior=1e-8)
         ci = 6 * (c - 1) .+ (4:6)
         H[ci, ci] .+= prior * I(3)
     end
-    return SchurTestProblem(H, randn(rng, nc_ + np_), c_dims, p_dims, observations, Tuple{Int, Int}[])
+    return SchurTestProblem(H, randn(rng, nc_ + np_), c_dims, p_dims, couplings, Tuple{Int, Int}[])
 end
 
 @testset "BlockLinearSystemsExt: well-conditioned problems, forward error of x_c and x_p (T1)" begin

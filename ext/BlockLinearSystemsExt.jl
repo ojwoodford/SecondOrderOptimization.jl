@@ -1,6 +1,6 @@
 module BlockLinearSystemsExt
 
-# Schur-complement linear systems for bipartite problems (bundle adjustment and similar), built on the
+# Schur-complement linear systems for bipartite problems, built on the
 # block data structures and reduction kernels of BlockLinearSystems.jl. Loaded when both packages are.
 
 using SecondOrderOptimization
@@ -8,7 +8,7 @@ import SecondOrderOptimization: OptimizationLinearSolver
 import SecondOrderOptimization: AbstractLinearSystem, solve!, dampen!, sharex, getA, getb, getx, SolveStatus, Success, NotPositiveDefinite, Indefinite, makelinearsystem, max_diag, updatescaling!, AnyMarquardtData, is_indefinite
 import SecondOrderOptimization.LDLFactorizations: ldl_analyze, ldl_factorize!, factorized
 import BlockLinearSystems
-import BlockLinearSystems: SchurBlockMatrix, SchurReductionWorkspace, SparseBlockLinearSystem, reset_schur_dense!, reset_schur_sparse!, reduce_schur_dense!, reduce_schur_sparse!, backsubstitute!, build_schur_covisibility, build_b_to_s_map, retained_block_pairs, trial_workspace
+import BlockLinearSystems: SchurBlockMatrix, SchurReductionWorkspace, SparseBlockLinearSystem, reset_schur_dense!, reset_schur_sparse!, reduce_schur_dense!, reduce_schur_sparse!, backsubstitute!, build_schur_pattern, build_b_to_s_map, retained_block_pairs, trial_workspace
 using LinearAlgebra, SparseArrays, Static
 
 """
@@ -97,7 +97,7 @@ function SparseSchurLinearSystem(
     b::Vector{T}, x::Vector{T},
     scaling::Vector{T}=ones(T, length(b));
     nchunks::Int=0,
-    covis=nothing
+    pattern=nothing
 ) where T
     nc = H.structure.nc
     tot_dim = length(b)
@@ -110,18 +110,18 @@ function SparseSchurLinearSystem(
     scaling_c = view(scaling, 1:nc)
     scaling_p = view(scaling, nc+1:tot_dim)
 
-    # 1. Build co-visibility graph and sparsity structures. Retained-retained couplings stored in B
+    # 1. Build the reduced-system pattern and sparsity structures. Retained-retained couplings stored in B
     # that do not go through an eliminated block need slots in S too.
-    # A precomputed `covis` (the result of an earlier build_schur_covisibility call with the same
+    # A precomputed `pattern` (the result of an earlier build_schur_pattern call with the same
     # extra blocks) can be passed in to avoid rebuilding it.
-    if covis === nothing
-        covis = build_schur_covisibility(H.structure, T; extra_blocks=retained_block_pairs(H.B))
+    if pattern === nothing
+        pattern = build_schur_pattern(H.structure, T; extra_blocks=retained_block_pairs(H.B))
     end
-    S = covis.S_sparse
-    Ti = eltype(covis.block_rowval)
+    S = pattern.S_sparse
+    Ti = eltype(pattern.block_rowval)
 
     # 2. Map B to S
-    b_to_s_map = build_b_to_s_map(H.B, covis, H.structure.boffsets_c)
+    b_to_s_map = build_b_to_s_map(H.B, pattern, H.structure.boffsets_c)
 
     # 3. Pre-analyze CHOLMOD symbolic factor and LDLFactorizations symbolic factor
     S_chol = SparseArrays.CHOLMOD.Sparse(Symmetric(S, :U))
@@ -135,8 +135,8 @@ function SparseSchurLinearSystem(
 
     return SparseSchurLinearSystem{T, Ti, typeof(S_factor_ldl), typeof(S_factor), typeof(S_chol)}(
         H, b, x, b_c, b_p, x_c, x_p, g_S, S, S_factor, S_factor_ldl, S_chol,
-        b_to_s_map, covis.diag_inds,
-        covis.block_rowval, covis.block_colptr, covis.block_row_offsets, covis.col_heights,
+        b_to_s_map, pattern.diag_inds,
+        pattern.block_rowval, pattern.block_colptr, pattern.block_row_offsets, pattern.col_heights,
         zero(T), scaling, scaling_c, scaling_p, ws
     )
 end
