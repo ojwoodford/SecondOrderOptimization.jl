@@ -60,6 +60,15 @@ end
     x_opt0, res0 = optimize(rosenbrock_cost, rosenbrock_fdf!, x_at_min, opts_gtol)
     @test res0.niterations == 0
     @test (res0.termination & TERMINATION_GRAD_TOL) != 0
+    # M18: termination reasons without the raw bits
+    @test termination_reasons(res0) == [:grad_tol]
+    @test :grad_tol in termination_reasons(res)
+    @test occursin("Gradient norm below threshold.", sprint(show, res0))
+    bits = [bit for (bit, _, _) in SecondOrderOptimization.TERMINATION_REASONS]
+    @test allunique(bits) && all(ispow2, bits) && reduce(|, bits) == (1 << 15) - 1
+    _, res_cb = optimize(rosenbrock_cost, rosenbrock_fdf!, copy(x0_dense), OptimizationOptions(maxiters=50); callback=(c, args...) -> (c, 1))
+    @test termination_reasons(res_cb) == [:callback]
+    @test !isconverged(res_cb)
 
     # Test OptimizationResult addition order
     r_sum = res + res0
@@ -72,7 +81,11 @@ end
     x_opt, res = optimize(rosenbrock_cost, rosenbrock_fdf!, x0_static, opts_cb; callback=storecostscallback(traj))
     @test length(traj.costs) > 0
     @test length(traj.times_ns) == length(traj.costs)
-    @test length(traj.trajectory) == length(traj.costs)
+    @test length(traj.steps) == length(traj.costs)
+    # M16: `steps` holds the step vectors; the old name still works, with a deprecation warning
+    @test all(length(s) == 2 for s in traj.steps)
+    @test (@test_deprecated traj.trajectory) === traj.steps
+    @test :steps in propertynames(traj) && !(:trajectory in propertynames(traj))
 
     # Test zero-allocation on SVector with OptimizationWorkspace
     opts_alloc = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=30)

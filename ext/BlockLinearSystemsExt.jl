@@ -377,7 +377,7 @@ end
 SecondOrderOptimization.solve!(ls::SparseSchurLinearSystem, s::Symbol) = SecondOrderOptimization.solve!(ls, static(s))
 SecondOrderOptimization.solve!(ls::SparseSchurLinearSystem, s::OptimizationLinearSolver) = SecondOrderOptimization.solve!(ls, static(SecondOrderOptimization.linsolver_symbol(s)))
 
-# `quadratic_model_reduction` is intentionally not specialised: SecondOrderOptimization's generic method
+# `quadratic_model_change` is intentionally not specialised: SecondOrderOptimization's generic method
 # (0.5 * fast_bAb(getA(ls), dx) + fast_dot(getb(ls), dx)) is the undamped model change, and works with
 # the `fast_bAb` for `SchurBlockMatrix` defined above. (An earlier override added the damping term with
 # the wrong sign, and used a damping value the iterators have already reset to zero when a step is scored.)

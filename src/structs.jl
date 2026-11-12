@@ -44,6 +44,25 @@ const TERMINATION_LINSOLVER_FAILED  = 1 << 14
 const SUCCESS_CONVERGENCE_MASK = TERMINATION_REL_DCOST | TERMINATION_ABS_DCOST | TERMINATION_STEP_SIZE | TERMINATION_GRAD_TOL
 const FAILURE_TERMINATION_MASK = TERMINATION_COST_INF | TERMINATION_COST_NAN | TERMINATION_STEP_INF | TERMINATION_STEP_NAN | TERMINATION_MAX_FAILS | TERMINATION_MAX_ITERS | TERMINATION_MAX_TIME | TERMINATION_COST_DISCREPANCY | TERMINATION_START_NOT_FINITE | TERMINATION_GRAD_NOT_FINITE | TERMINATION_LINSOLVER_FAILED
 
+# Each termination bit, a symbol naming it, and the message shown for it
+const TERMINATION_REASONS = (
+    (TERMINATION_COST_INF,         :cost_inf,           "Cost is infinite."),
+    (TERMINATION_COST_NAN,         :cost_nan,           "Cost is NaN."),
+    (TERMINATION_REL_DCOST,        :rel_dcost,          "Relative decrease in cost below threshold."),
+    (TERMINATION_ABS_DCOST,        :abs_dcost,          "Absolute decrease in cost below threshold."),
+    (TERMINATION_STEP_INF,         :step_inf,           "Step contains an infinite value."),
+    (TERMINATION_STEP_NAN,         :step_nan,           "Step contains a NaN."),
+    (TERMINATION_STEP_SIZE,        :step_size,          "Step size below threshold."),
+    (TERMINATION_MAX_FAILS,        :max_fails,          "Too many consecutive iterations increasing the cost."),
+    (TERMINATION_MAX_ITERS,        :max_iters,          "Maximum number of outer iterations reached."),
+    (TERMINATION_MAX_TIME,         :max_time,           "Maximum allowed computation time exceeded."),
+    (TERMINATION_COST_DISCREPANCY, :cost_discrepancy,   "Internal discrepancy in cost computations."),
+    (TERMINATION_START_NOT_FINITE, :start_not_finite,   "Cost or gradient not finite at the start point."),
+    (TERMINATION_GRAD_NOT_FINITE,  :grad_not_finite,    "Gradient not finite."),
+    (TERMINATION_GRAD_TOL,         :grad_tol,           "Gradient norm below threshold."),
+    (TERMINATION_LINSOLVER_FAILED, :linsolver_failed,   "Linear solver failed to solve the linear system."),
+)
+
 const LINSOLVER_FAILED = reinterpret(Float64, 0x7ff8000000000001)
 
 function OptimizationOptions(;
@@ -167,6 +186,26 @@ function isconverged(x::OptimizationResult)
     return ((t & TERMINATION_GRAD_TOL) != 0) || (((t & SUCCESS_CONVERGENCE_MASK) != 0) && ((t & FAILURE_TERMINATION_MASK) == 0))
 end
 
+"""
+    termination_reasons(result::OptimizationResult) -> Vector{Symbol}
+
+The reasons the optimization stopped, as symbols: `:cost_inf`, `:cost_nan`, `:rel_dcost`,
+`:abs_dcost`, `:step_inf`, `:step_nan`, `:step_size`, `:max_fails`, `:max_iters`, `:max_time`,
+`:cost_discrepancy`, `:start_not_finite`, `:grad_not_finite`, `:grad_tol`, `:linsolver_failed`,
+and `:callback` when a callback asked to stop (its flags are `result.termination >> 16`).
+
+Use this, or [`isconverged`](@ref), rather than testing bits of `result.termination` directly:
+the bit layout is an implementation detail, and copies of it in other packages go stale.
+"""
+function termination_reasons(x::OptimizationResult)
+    reasons = Symbol[]
+    for (bit, sym, _) in TERMINATION_REASONS
+        0 != x.termination & bit && push!(reasons, sym)
+    end
+    0 != x.termination >> 16 && push!(reasons, :callback)
+    return reasons
+end
+
 function Base.show(io::IO, x::OptimizationResult)
     optimtime = x.timetotal - x.timeinit
     timedoptim = max(x.timecost + x.timegradient + x.timesolver, optimtime)
@@ -186,21 +225,9 @@ function Base.show(io::IO, x::OptimizationResult)
     @printf(io, "        %d linear solver computations accounted for %.2f%%.\n",
         x.linearsolves, 100.0 * x.timesolver / timedoptim)
     if 0 != x.termination;            println(io, "Reason(s) for termination:"); end
-    if 0 != x.termination & TERMINATION_COST_INF;         println(io, "   Cost is infinite."); end
-    if 0 != x.termination & TERMINATION_COST_NAN;         println(io, "   Cost is NaN."); end
-    if 0 != x.termination & TERMINATION_REL_DCOST;        println(io, "   Relative decrease in cost below threshold."); end
-    if 0 != x.termination & TERMINATION_ABS_DCOST;        println(io, "   Absolute decrease in cost below threshold."); end
-    if 0 != x.termination & TERMINATION_STEP_INF;         println(io, "   Step contains an infinite value."); end
-    if 0 != x.termination & TERMINATION_STEP_NAN;         println(io, "   Step contains a NaN."); end
-    if 0 != x.termination & TERMINATION_STEP_SIZE;        println(io, "   Step size below threshold."); end
-    if 0 != x.termination & TERMINATION_MAX_FAILS;        println(io, "   Too many consecutive iterations increasing the cost."); end
-    if 0 != x.termination & TERMINATION_MAX_ITERS;        println(io, "   Maximum number of outer iterations reached."); end
-    if 0 != x.termination & TERMINATION_MAX_TIME;         println(io, "   Maximum allowed computation time exceeded."); end
-    if 0 != x.termination & TERMINATION_COST_DISCREPANCY; println(io, "   Internal discrepancy in cost computations."); end
-    if 0 != x.termination & TERMINATION_START_NOT_FINITE; println(io, "   Cost or gradient not finite at the start point."); end
-    if 0 != x.termination & TERMINATION_GRAD_NOT_FINITE;  println(io, "   Gradient not finite."); end
-    if 0 != x.termination & TERMINATION_GRAD_TOL;         println(io, "   Gradient norm below threshold."); end
-    if 0 != x.termination & TERMINATION_LINSOLVER_FAILED; println(io, "   Linear solver failed to solve the linear system."); end
+    for (bit, _, message) in TERMINATION_REASONS
+        0 != x.termination & bit && println(io, "   ", message)
+    end
     userflags = x.termination >> 16
     if 0 != userflags; println(io, "   Terminated by user-defined callback, with flags: ", string(userflags, base=2)); end
 end

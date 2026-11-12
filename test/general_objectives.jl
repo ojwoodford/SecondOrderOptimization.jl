@@ -93,9 +93,9 @@ using SecondOrderOptimization, StaticArrays, LinearAlgebra, SparseArrays, Test
     # 7. CostTrajectory stores step trajectory
     ct = CostTrajectory()
     x_opt, res = optimize(offset_cost, offset_fdf!, x0, OptimizationOptions(iterator=:newton); callback=storecostscallback(ct))
-    @test length(ct.trajectory) > 0
-    @test length(ct.trajectory) == length(ct.costs)
-    @test all(x -> length(x) == 2, ct.trajectory)
+    @test length(ct.steps) > 0
+    @test length(ct.steps) == length(ct.costs)
+    @test all(x -> length(x) == 2, ct.steps)
 
     # 5. B5: Levenberg-Marquardt damping update stays bounded when the predicted change is
     # not negative (indefinite Hessian)

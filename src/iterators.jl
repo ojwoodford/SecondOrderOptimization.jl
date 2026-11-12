@@ -43,7 +43,6 @@ construct(::StaticSymbol{:newton}, ls, ::True) = NewtonData()
 reset!(::NewtonData) = nothing
 
 @inline function iterate!(::NewtonData, data, f, fdf!, options::OptimizationOptions)::Float64
-    gethessian(data.linsystem)
     status = Success
     data.solves += @elapsed_ns begin
         status = solve!(data.linsystem, options.linsolver)
@@ -79,7 +78,6 @@ construct(::StaticSymbol{:newton}, ls, ::False) = NewtonDataRelinearize(0.0)
 reset!(::NewtonDataRelinearize) = nothing
 
 @inline function iterate!(nd::NewtonDataRelinearize, data, f, fdf!, options::OptimizationOptions)::Float64
-    gethessian(data.linsystem)
     status = Success
     data.solves += @elapsed_ns begin
         status = solve!(data.linsystem, options.linsolver)
@@ -221,7 +219,7 @@ end
         newton_dot_g = fast_dot(gradient, dd.newton)
         if isfinite(newton_norm) && newton_dot_g < 0
             # Validity = positive predicted model reduction under the true (undamped) H
-            newton_pred = -newton_dot_g - 0.5 * fast_bAb(hessian, dd.newton)
+            newton_pred = -quadratic_model_change(data.linsystem, dd.newton)
             newton_valid = isfinite(newton_pred) && newton_pred > 0
         end
     end
@@ -276,7 +274,7 @@ end
             if tau == 0.0
                 step_norm = cauchy_norm
             end
-            pred_red = -fast_dot(gradient, x) - 0.5 * fast_bAb(hessian, x)
+            pred_red = -quadratic_model_change(data.linsystem, x)
         else
             # Newton unavailable: full Cauchy step
             x .= dd.cauchy
@@ -433,7 +431,6 @@ end
 
 @inline function iterate!(levmardata::LevMarData, data, f, fdf!, options::OptimizationOptions)::Float64
     @assert levmardata.lambda >= 0.0
-    hessian, gradient = gethessgrad(data.linsystem)
     updatescaling!(levmardata, data.linsystem)
     mu = 2.0
     inner_iters = 0
@@ -450,7 +447,7 @@ end
                 end
                 levmardata.lambda *= mu
                 mu *= 2.0
-                if levmardata.lambda > 1e16 || inner_iters > 100
+                if levmardata.lambda > 1e16
                     dampen!(data.linsystem, 0.0)
                     break
                 end
@@ -469,7 +466,7 @@ end
         if cost_ <= data.bestcost || !(step_sz >= options.dstep) || inner_iters > 100 || levmardata.lambda > 1e16
             dampen!(data.linsystem, 0.0)
             if cost_ <= data.bestcost
-                predicted = 0.5 * fast_bAb(hessian, getx(data.linsystem)) + fast_dot(gradient, getx(data.linsystem))
+                predicted = quadratic_model_change(data.linsystem, getx(data.linsystem))
                 levmardata.lambda = max(levmardata.lambda * lambda_update_factor(cost_ - data.bestcost, predicted), 1e-12)
             end
             return cost_
@@ -481,7 +478,7 @@ end
 
 @inline function iterate!(levmardata::LevMarDataTrial, data, f, fdf!, options::OptimizationOptions)::Float64
     @assert levmardata.lambda >= 0.0
-    hessian, gradient = gethessgrad(data.linsystem)
+    gradient = getgrad(data.linsystem)
     updatescaling!(levmardata, data.linsystem)
     mu = 2.0
     levmardata.trialready = false
@@ -501,7 +498,7 @@ end
                 levmardata.trialready = false
                 levmardata.lambda *= mu
                 mu *= 2.0
-                if levmardata.lambda > 1e16 || inner_iters > 100
+                if levmardata.lambda > 1e16
                     dampen!(data.linsystem, 0.0)
                     break
                 end
@@ -531,7 +528,7 @@ end
         if cost_ <= data.bestcost || !(step_sz >= options.dstep) || inner_iters > 100 || levmardata.lambda > 1e16
             dampen!(data.linsystem, 0.0)
             if cost_ <= data.bestcost
-                predicted = 0.5 * fast_bAb(hessian, getx(data.linsystem)) + fast_dot(gradient, getx(data.linsystem))
+                predicted = quadratic_model_change(data.linsystem, getx(data.linsystem))
                 levmardata.lambda = max(levmardata.lambda * lambda_update_factor(cost_ - data.bestcost, predicted), 1e-12)
             end
             return cost_
@@ -570,7 +567,9 @@ reset!(gdd::GradientDescentData) = (gdd.stepsize = 1.0)
             coststep = fast_dot(getx(data.linsystem), gradient)
             costdiff = data.bestcost + coststep - costc
             if costdiff != 0.0
-                gddata.stepsize *= 0.5 * coststep / costdiff
+                # Minimiser of the quadratic through the cost and slope at 0 and the cost at the
+                # trial step, as a fraction of the step, safeguarded to [0.1, 0.5]
+                gddata.stepsize *= clamp(0.5 * coststep / costdiff, 0.1, 0.5)
             else
                 gddata.stepsize *= 0.5
             end

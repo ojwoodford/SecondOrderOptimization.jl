@@ -267,4 +267,10 @@ using SecondOrderOptimization, SparseArrays, StaticArrays, LinearAlgebra, Test, 
     @test SecondOrderOptimization.solve!(ls_spc, static(:cholesky)) == SecondOrderOptimization.Success
     @test ls_spc.x === x_before
     @test isapprox(ls_spc.x, x_true; rtol=1e-8)
+
+    # M17: the quadratic model change, 0.5 dx'H dx + g'dx; the old name is deprecated
+    ls_q = SecondOrderOptimization.DenseLinearSystem{Float64}(copy(A_spd), copy(b_vec), zeros(5))
+    dx_q = randn(5)
+    @test quadratic_model_change(ls_q, dx_q) ≈ 0.5 * dot(dx_q, A_spd * dx_q) + dot(b_vec, dx_q)
+    @test (@test_deprecated SecondOrderOptimization.quadratic_model_reduction(ls_q, dx_q)) == quadratic_model_change(ls_q, dx_q)
 end

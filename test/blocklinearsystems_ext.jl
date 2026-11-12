@@ -303,7 +303,7 @@ end
     end
 end
 
-@testset "quadratic_model_reduction uses the undamped model on the full system (B10)" begin
+@testset "quadratic_model_change uses the undamped model on the full system (B10)" begin
     p = standard_problem()
     n = length(p.b)
     dx = randn(Random.Xoshiro(6), n)
@@ -311,7 +311,7 @@ end
     for kind in (:dense, :sparse), lambda in (0.0, 0.7)
         ls = make_schur_ls(kind, p, abs.(diag(p.H)))
         SecondOrderOptimization.dampen!(ls, lambda)
-        @test SecondOrderOptimization.quadratic_model_reduction(ls, dx) ≈ expected rtol = 1e-12
+        @test SecondOrderOptimization.quadratic_model_change(ls, dx) ≈ expected rtol = 1e-12
     end
 end
 

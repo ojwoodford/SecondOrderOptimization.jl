@@ -7,10 +7,10 @@ import OptimizationVariableInterface: nvars, update, update!, copyvars, syncvars
 
 # Exported public API
 export optimize, optimize!
-export OptimizationOptions, OptimizationResult, OptimizationWorkspace, isconverged
+export OptimizationOptions, OptimizationResult, OptimizationWorkspace, isconverged, termination_reasons
 export CostTrajectory
 export nullcallback, printoutcallback, storecostscallback
-export AbstractLinearSystem, solve!, dampen!, validatelinsolver, zero!, makelinearsystem, copy_structure, sharex, fast_bAb, fast_dot, quadratic_model_reduction
+export AbstractLinearSystem, solve!, dampen!, validatelinsolver, zero!, makelinearsystem, copy_structure, sharex, fast_bAb, fast_dot, quadratic_model_change
 export SolveStatus, Success, NotPositiveDefinite, Indefinite
 export OptimizationLinearSolver, auto_solver, cholesky_solver, ldl_solver, qr_solver
 export OptimizationIterator, newton, levenbergmarquardt, levenbergmarquardt_dtd, dogleg, gradientdescent, getiterator
@@ -46,5 +46,8 @@ include("optimize.jl")
 
 # API docstrings
 include("docstrings.jl")
+
+# Deprecated names
+Base.@deprecate quadratic_model_reduction(ls, dx) quadratic_model_change(ls, dx)
 
 end # module SecondOrderOptimization

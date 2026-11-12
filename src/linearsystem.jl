@@ -288,6 +288,8 @@ function damp_marquardt!(ls::SparseLinearSystem, scaling, dlambda)
 end
 damp_marquardt!(ls, scaling, dlambda) = damp_marquardt!(getA(ls), scaling, dlambda)
 
-function quadratic_model_reduction(ls::AbstractLinearSystem, dx)
+# Change in the undamped quadratic model, 0.5 dx'H dx + g'dx, for a step dx (negative for a
+# descent step)
+function quadratic_model_change(ls::AbstractLinearSystem, dx)
     return 0.5 * fast_bAb(getA(ls), dx) + fast_dot(getb(ls), dx)
 end
