@@ -6,7 +6,7 @@ using SparseArrays
 using LinearAlgebra
 using Static
 
-import SecondOrderOptimization: validatelinsolver, makesparsews, solve!
+import SecondOrderOptimization: validatelinsolver, makesparsews, makedensews, solve!
 import SecondOrderOptimization: AbstractLinearSystem, SparseLinearSystem, DenseLinearSystem
 import SecondOrderOptimization: SolveStatus, Success, NotPositiveDefinite, Indefinite
 import SecondOrderOptimization: uniformscaling!, damp_marquardt!
@@ -22,6 +22,12 @@ makesparsews(A, ::StaticSymbol{:cg}) = Krylov.CgWorkspace(A, zeros(eltype(A), si
 makesparsews(A, ::StaticSymbol{:minres}) = Krylov.MinresWorkspace(A, zeros(eltype(A), size(A, 1)))
 makesparsews(A, ::StaticSymbol{:lsmr}) = Krylov.LsmrWorkspace(A, zeros(eltype(A), size(A, 1)))
 makesparsews(A, ::StaticSymbol{:krylov}) = makesparsews(A, static(:cg))
+
+# Preallocated workspace creation for DenseLinearSystem
+makedensews(n, ::StaticSymbol{:cg}) = Krylov.CgWorkspace(n, n, Vector{Float64})
+makedensews(n, ::StaticSymbol{:minres}) = Krylov.MinresWorkspace(n, n, Vector{Float64})
+makedensews(n, ::StaticSymbol{:lsmr}) = Krylov.LsmrWorkspace(n, n, Vector{Float64})
+makedensews(n, ::StaticSymbol{:krylov}) = makedensews(n, static(:cg))
 
 # The sparse workspace is built once, by `makesparsews`, and `solver_ws` is a `const` field,
 # so it cannot be replaced when it doesn't match the requested solver.
@@ -108,6 +114,13 @@ function solve!(ls::DenseLinearSystem, ::StaticSymbol{:cg})
             damp_marquardt!(ls.A_scratch, ls.scaling, ls.lambda)
         end
     end
+    ws = ls.solver_ws
+    if ws isa Krylov.CgWorkspace
+        Krylov.cg!(ws, ls.A_scratch, ls.b; linesearch=true)
+        copyto!(ls.x, ws.x)
+        return cg_status(ws.stats)
+    end
+    # Not built by `makelinearsystem` for :cg, so no preallocated workspace
     (x, stats) = Krylov.cg(ls.A_scratch, ls.b; linesearch=true)
     copyto!(ls.x, x)
     return cg_status(stats)
@@ -122,6 +135,12 @@ function solve!(ls::DenseLinearSystem, ::StaticSymbol{:minres})
             damp_marquardt!(ls.A_scratch, ls.scaling, ls.lambda)
         end
     end
+    ws = ls.solver_ws
+    if ws isa Krylov.MinresWorkspace
+        Krylov.minres!(ws, ls.A_scratch, ls.b)
+        copyto!(ls.x, ws.x)
+        return ws.stats.solved ? Success : NotPositiveDefinite
+    end
     (x, stats) = Krylov.minres(ls.A_scratch, ls.b)
     copyto!(ls.x, x)
     return stats.solved ? Success : NotPositiveDefinite
@@ -135,6 +154,12 @@ function solve!(ls::DenseLinearSystem, ::StaticSymbol{:lsmr})
         else
             damp_marquardt!(ls.A_scratch, ls.scaling, ls.lambda)
         end
+    end
+    ws = ls.solver_ws
+    if ws isa Krylov.LsmrWorkspace
+        Krylov.lsmr!(ws, ls.A_scratch, ls.b)
+        copyto!(ls.x, ws.x)
+        return ws.stats.solved ? Success : NotPositiveDefinite
     end
     (x, stats) = Krylov.lsmr(ls.A_scratch, ls.b)
     copyto!(ls.x, x)

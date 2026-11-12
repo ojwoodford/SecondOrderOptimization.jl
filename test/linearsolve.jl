@@ -225,4 +225,46 @@ using SecondOrderOptimization, SparseArrays, StaticArrays, LinearAlgebra, Test, 
     SecondOrderOptimization.is_indefinite(bk_big)
     @test (@allocated SecondOrderOptimization.is_indefinite(bk_big)) < 8 * n_big * n_big ÷ 10
     @test SecondOrderOptimization.is_indefinite(bk_big) == (eigmin(Symmetric(A_big)) < 0)
+
+    # M9: dense :ldl with the preallocated workspace matches Bunch-Kaufman and doesn't allocate
+    for A_t in (A_spd, A_indef, [0.0 1.0 0.0; 1.0 0.0 0.0; 0.0 0.0 -2.0])
+        n_t = size(A_t, 1)
+        x_t = randn(n_t)
+        b_t = A_t * x_t
+        ls_ws = SecondOrderOptimization.makelinearsystem(zeros(n_t), copy(A_t), static(:ldl))
+        @test ls_ws.solver_ws isa SecondOrderOptimization.DenseLDLWorkspace
+        ls_ws.b .= b_t
+        ls_ref = SecondOrderOptimization.DenseLinearSystem{Float64}(copy(A_t), copy(b_t), zeros(n_t))
+        @test ls_ref.solver_ws === nothing
+        st_ws = SecondOrderOptimization.solve!(ls_ws, static(:ldl))
+        @test st_ws == SecondOrderOptimization.solve!(ls_ref, static(:ldl))
+        @test st_ws == (eigmin(Symmetric(A_t)) < 0 ? SecondOrderOptimization.Indefinite : SecondOrderOptimization.Success)
+        @test isapprox(ls_ws.x, x_t; rtol=1e-8)
+        dense_ldl_allocs(ls) = @allocated SecondOrderOptimization.solve!(ls, static(:ldl))
+        dense_ldl_allocs(ls_ws)
+        @test dense_ldl_allocs(ls_ws) == 0
+        # copy_structure and sharex keep the workspace
+        @test SecondOrderOptimization.copy_structure(ls_ws).solver_ws === ls_ws.solver_ws
+    end
+    # An exactly singular matrix fails
+    ls_sing = SecondOrderOptimization.makelinearsystem(zeros(2), [1.0 1.0; 1.0 1.0], static(:ldl))
+    ls_sing.b .= [1.0, 0.0]
+    @test SecondOrderOptimization.solve!(ls_sing, static(:ldl)) == SecondOrderOptimization.NotPositiveDefinite
+    # The packed-factor check gives the inertia's answer, for both triangles
+    for trial in 1:20
+        M_t = randn(8, 8)
+        A_t = M_t + M_t'
+        for uplo in (:U, :L)
+            bk_t = bunchkaufman(Symmetric(A_t, uplo))
+            @test SecondOrderOptimization.is_indefinite(bk_t) == (eigmin(Symmetric(A_t)) < 0)
+        end
+    end
+
+    # M9: sparse :cholesky solves in place on Julia 1.12 and later
+    ls_spc = SecondOrderOptimization.makelinearsystem(zeros(5), sparse(A_spd), static(:cholesky))
+    ls_spc.b .= b_vec
+    x_before = ls_spc.x
+    @test SecondOrderOptimization.solve!(ls_spc, static(:cholesky)) == SecondOrderOptimization.Success
+    @test ls_spc.x === x_before
+    @test isapprox(ls_spc.x, x_true; rtol=1e-8)
 end

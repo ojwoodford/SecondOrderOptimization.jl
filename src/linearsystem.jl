@@ -33,23 +33,31 @@ function StaticLinearSystem{N, T}() where {N, T}
 end
 StaticLinearSystem{N}() where N = StaticLinearSystem{N, Float64}()
 
-# Dense linear system
-mutable struct DenseLinearSystem{T} <: AbstractLinearSystem
+# Dense linear system. `solver_ws` holds preallocated factorization or Krylov workspaces
+# (`nothing` when the solver needs none), built by `makedensews`.
+mutable struct DenseLinearSystem{T, W} <: AbstractLinearSystem
     const A::Matrix{T}
     const b::Vector{T}
     const x::Vector{T}
     const A_scratch::Matrix{T}
+    const solver_ws::W
     lambda::T
     scaling::Union{Nothing, Vector{T}}
 end
-function DenseLinearSystem{T}(n::Integer) where T
-    return DenseLinearSystem{T}(Matrix{T}(undef, n, n), Vector{T}(undef, n), Vector{T}(undef, n), Matrix{T}(undef, n, n), zero(T), nothing)
+function DenseLinearSystem{T}(A::Matrix{T}, b::Vector{T}, x::Vector{T}, A_scratch::Matrix{T}, solver_ws::W, lambda, scaling) where {T, W}
+    return DenseLinearSystem{T, W}(A, b, x, A_scratch, solver_ws, lambda, scaling)
 end
-function DenseLinearSystem{T}(A::Matrix{T}, b::Vector{T}, x::Vector{T}, A_scratch::Matrix{T}=Matrix{T}(undef, size(A))) where T
-    return DenseLinearSystem{T}(A, b, x, A_scratch, zero(T), nothing)
+function DenseLinearSystem{T}(A::Matrix{T}, b::Vector{T}, x::Vector{T}, A_scratch::Matrix{T}, lambda, scaling) where T
+    return DenseLinearSystem{T, Nothing}(A, b, x, A_scratch, nothing, lambda, scaling)
 end
-DenseLinearSystem(n::Integer) = DenseLinearSystem{Float64}(n)
-DenseLinearSystem(A::Matrix{T}, b::Vector{T}, x::Vector{T}) where T = DenseLinearSystem{T}(A, b, x)
+function DenseLinearSystem{T}(n::Integer; solver_ws=nothing) where T
+    return DenseLinearSystem{T}(Matrix{T}(undef, n, n), Vector{T}(undef, n), Vector{T}(undef, n), Matrix{T}(undef, n, n), solver_ws, zero(T), nothing)
+end
+function DenseLinearSystem{T}(A::Matrix{T}, b::Vector{T}, x::Vector{T}, A_scratch::Matrix{T}=Matrix{T}(undef, size(A)); solver_ws=nothing) where T
+    return DenseLinearSystem{T}(A, b, x, A_scratch, solver_ws, zero(T), nothing)
+end
+DenseLinearSystem(n::Integer; kwargs...) = DenseLinearSystem{Float64}(n; kwargs...)
+DenseLinearSystem(A::Matrix{T}, b::Vector{T}, x::Vector{T}; kwargs...) where T = DenseLinearSystem{T}(A, b, x; kwargs...)
 
 # Sparse linear system
 mutable struct SparseLinearSystem{T, Ti, SWS} <: AbstractLinearSystem
@@ -152,14 +160,19 @@ function makelinearsystem(x0, H::StaticMatrix{N, N}, linsolver) where N
     return StaticLinearSystem{N, Float64}()
 end
 
+# Preallocated workspace for a dense solve, or `nothing`. Extensions add methods for their solvers.
+makedensews(n, s) = makedensews(n, static(linsolver_symbol(s)))
+makedensews(n, ::StaticSymbol{:ldl}) = DenseLDLWorkspace(n)
+makedensews(n, ::StaticSymbol) = nothing
+
 function makelinearsystem(x0, H::Matrix{Float64}, linsolver)
     n = size(H, 1)
-    return DenseLinearSystem{Float64}(H, zeros(Float64, n), zeros(Float64, n))
+    return DenseLinearSystem{Float64}(H, zeros(Float64, n), zeros(Float64, n); solver_ws=makedensews(n, linsolver))
 end
 
 function makelinearsystem(x0, H::AbstractMatrix, linsolver)
     n = size(H, 1)
-    return DenseLinearSystem{Float64}(Matrix{Float64}(H), zeros(Float64, n), zeros(Float64, n))
+    return DenseLinearSystem{Float64}(Matrix{Float64}(H), zeros(Float64, n), zeros(Float64, n); solver_ws=makedensews(n, linsolver))
 end
 
 function makelinearsystem(x0::Number, ::Nothing, linsolver)
@@ -175,7 +188,7 @@ function makelinearsystem(x0, ::Nothing, linsolver)
     if dynamic(is_static(nv)) && nv <= 16
         return StaticLinearSystem{dynamic(nv), Float64}()
     end
-    return DenseLinearSystem{Float64}(dynamic(nv))
+    return DenseLinearSystem{Float64}(dynamic(nv); solver_ws=makedensews(dynamic(nv), linsolver))
 end
 
 getA(ls::AbstractLinearSystem) = ls.A
@@ -211,7 +224,7 @@ dampen!(ls::AbstractLinearSystem, lambda::Real, scaling) = (ls.lambda = convert(
 
 # Copy structure for trial relinearization (LevMarDataTrial)
 copy_structure(ls::StaticLinearSystem{N, N2, T}) where {N, N2, T} = StaticLinearSystem{N, N2, T}(MMatrix{N, N, T, N2}(undef), MVector{N, T}(undef), ls.x, ls.lambda, ls.scaling)
-copy_structure(ls::DenseLinearSystem{T}) where T = DenseLinearSystem{T}(Matrix{T}(undef, size(ls.A)), Vector{T}(undef, length(ls.b)), ls.x, Matrix{T}(undef, size(ls.A)), ls.lambda, ls.scaling)
+copy_structure(ls::DenseLinearSystem{T, W}) where {T, W} = DenseLinearSystem{T, W}(Matrix{T}(undef, size(ls.A)), Vector{T}(undef, length(ls.b)), ls.x, Matrix{T}(undef, size(ls.A)), ls.solver_ws, ls.lambda, ls.scaling)
 copy_structure(ls::SparseLinearSystem{T, Ti, SWS}) where {T, Ti, SWS} = SparseLinearSystem{T, Ti, SWS}(
     SparseMatrixCSC(ls.A.m, ls.A.n, ls.A.colptr, ls.A.rowval, Vector{T}(undef, length(ls.A.nzval))),
     Vector{T}(undef, length(ls.b)),
@@ -224,7 +237,7 @@ copy_structure(ls::SparseLinearSystem{T, Ti, SWS}) where {T, Ti, SWS} = SparseLi
 )
 
 sharex(ls::StaticLinearSystem{N, N2, T}, from) where {N, N2, T} = ls.x === from.x ? ls : StaticLinearSystem{N, N2, T}(ls.A, ls.b, from.x, ls.lambda, ls.scaling)
-sharex(ls::DenseLinearSystem{T}, from) where T = ls.x === from.x ? ls : DenseLinearSystem{T}(ls.A, ls.b, from.x, ls.A_scratch, ls.lambda, ls.scaling)
+sharex(ls::DenseLinearSystem{T, W}, from) where {T, W} = ls.x === from.x ? ls : DenseLinearSystem{T, W}(ls.A, ls.b, from.x, ls.A_scratch, ls.solver_ws, ls.lambda, ls.scaling)
 sharex(ls::SparseLinearSystem{T, Ti, SWS}, from) where {T, Ti, SWS} = ls.x === from.x ? ls : SparseLinearSystem{T, Ti, SWS}(ls.A, ls.b, from.x, ls.diag_inds, ls.solver_ws, ls.diag_cache, ls.lambda, ls.scaling)
 
 # Diagonal operations for damping

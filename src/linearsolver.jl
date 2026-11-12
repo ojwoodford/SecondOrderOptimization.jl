@@ -67,11 +67,39 @@ getlinsolver(s::StaticSymbol) = getlinsolver(dynamic(s))
     return m - r, m + r
 end
 
+# Indefiniteness of the block-diagonal factor of a (non-rook) Bunch-Kaufman factorization, read
+# straight from the packed factor `LD` and pivots `ipiv` as LAPACK's `sytrf` leaves them: a
+# negative `ipiv[k]` starts a 2x2 block at (k, k+1), whose off-diagonal entry is stored in the
+# triangle `uplo`. Reading the packed factor avoids materialising `bk.D`.
+function is_indefinite_packed(LD::AbstractMatrix, ipiv::AbstractVector, uplo::Char, rtol::Float64=1e-6)
+    n = length(ipiv)
+    # The largest pivot magnitude, and the smallest pivot (eigenvalue, for 2x2 blocks)
+    maxabs = 0.0
+    minpivot = Inf
+    k = 1
+    @inbounds while k <= n
+        if ipiv[k] < 0 && k < n
+            off = uplo == 'U' ? LD[k, k+1] : LD[k+1, k]
+            lo, hi = eig2x2(LD[k, k], off, LD[k+1, k+1])
+            maxabs = max(maxabs, abs(lo), abs(hi))
+            minpivot = min(minpivot, lo)
+            k += 2
+        else
+            d = LD[k, k]
+            maxabs = max(maxabs, abs(d))
+            minpivot = min(minpivot, d)
+            k += 1
+        end
+    end
+    return minpivot < -rtol * maxabs
+end
+
 function is_indefinite(bk::BunchKaufman, rtol::Float64=1e-6)
-    # `bk.D` rebuilds the block-diagonal matrix on every access, so materialise it once
+    bk.rook || return is_indefinite_packed(bk.LD, bk.ipiv, bk.uplo, rtol)
+    # Rook pivoting stores its pivots differently, so go through `bk.D`, materialised once
+    # (it rebuilds the block-diagonal matrix on every access)
     D = bk.D
     n = length(bk.ipiv)
-    # Pass 1: the largest pivot magnitude; pass 2: any pivot below -rtol times it
     maxabs = 0.0
     minpivot = Inf
     k = 1
@@ -202,6 +230,61 @@ function solve!(ls::DenseLinearSystem, ::Union{StaticSymbol{:auto}, StaticSymbol
     return NotPositiveDefinite
 end
 
+const BlasInt = LinearAlgebra.BlasInt
+
+# Preallocated pivots and LAPACK work array for dense Bunch-Kaufman (`dsytrf`), so the
+# factorization doesn't allocate in the loop
+struct DenseLDLWorkspace
+    ipiv::Vector{BlasInt}
+    work::Vector{Float64}
+end
+function DenseLDLWorkspace(n::Integer)
+    ipiv = Vector{BlasInt}(undef, n)
+    work = Vector{Float64}(undef, 1)
+    if n > 0
+        # Workspace size query (lwork = -1): only the dimensions are read
+        A = Matrix{Float64}(undef, n, n)
+        info = Ref{BlasInt}()
+        ccall((LinearAlgebra.BLAS.@blasfunc(dsytrf_), LinearAlgebra.BLAS.libblastrampoline), Cvoid,
+              (Ref{UInt8}, Ref{BlasInt}, Ptr{Float64}, Ref{BlasInt},
+               Ptr{BlasInt}, Ptr{Float64}, Ref{BlasInt}, Ref{BlasInt}, Clong),
+              'U', n, A, max(1, n), ipiv, work, BlasInt(-1), info, 1)
+        resize!(work, max(1, Int(work[1])))
+    end
+    return DenseLDLWorkspace(ipiv, work)
+end
+
+# Bunch-Kaufman factorization of the upper triangle of `A` in place; returns LAPACK's `info`
+# (positive when the block-diagonal factor is exactly singular)
+function sytrf_ws!(A::Matrix{Float64}, ws::DenseLDLWorkspace)
+    n = LinearAlgebra.checksquare(A)
+    length(ws.ipiv) == n || throw(DimensionMismatch("DenseLDLWorkspace is for size $(length(ws.ipiv)), got $n"))
+    n == 0 && return BlasInt(0)
+    info = Ref{BlasInt}()
+    ccall((LinearAlgebra.BLAS.@blasfunc(dsytrf_), LinearAlgebra.BLAS.libblastrampoline), Cvoid,
+          (Ref{UInt8}, Ref{BlasInt}, Ptr{Float64}, Ref{BlasInt},
+           Ptr{BlasInt}, Ptr{Float64}, Ref{BlasInt}, Ref{BlasInt}, Clong),
+          'U', n, A, max(1, stride(A, 2)), ws.ipiv, ws.work, BlasInt(length(ws.work)), info, 1)
+    LinearAlgebra.LAPACK.chkargsok(info[])
+    return info[]
+end
+
+function solve!(ls::DenseLinearSystem{Float64, DenseLDLWorkspace}, ::StaticSymbol{:ldl})
+    copyto!(ls.A_scratch, ls.A)
+    if ls.lambda > 0
+        if isnothing(ls.scaling)
+            uniformscaling!(ls.A_scratch, ls.lambda)
+        else
+            damp_marquardt!(ls.A_scratch, ls.scaling, ls.lambda)
+        end
+    end
+    sytrf_ws!(ls.A_scratch, ls.solver_ws) == 0 || return NotPositiveDefinite
+    copyto!(ls.x, ls.b)
+    LinearAlgebra.LAPACK.sytrs!('U', ls.A_scratch, ls.solver_ws.ipiv, ls.x)
+    return is_indefinite_packed(ls.A_scratch, ls.solver_ws.ipiv, 'U') ? Indefinite : Success
+end
+
+# Without a preallocated workspace (a system not built by `makelinearsystem`)
 function solve!(ls::DenseLinearSystem, ::StaticSymbol{:ldl})
     copyto!(ls.A_scratch, ls.A)
     if ls.lambda > 0
@@ -277,7 +360,11 @@ function solve!(ls::SparseLinearSystem, ::StaticSymbol{:cholesky})
         end
     end
     if issuccess(cholfac)
-        ls.x .= cholfac \ ls.b
+        @static if VERSION >= v"1.12.0-"
+            ldiv!(ls.x, cholfac, ls.b)   # in place; this method first appears in Julia 1.12
+        else
+            ls.x .= cholfac \ ls.b
+        end
         return Success
     end
     return NotPositiveDefinite

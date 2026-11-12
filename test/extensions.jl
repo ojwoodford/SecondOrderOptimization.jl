@@ -73,6 +73,15 @@ using SecondOrderOptimization, SparseArrays, LinearAlgebra, Test, Static
     end
 
     for solver in (:cg, :minres, :lsmr)
+        # M9: dense Krylov solves use a preallocated workspace
+        ls_dk = SecondOrderOptimization.makelinearsystem(zeros(3), copy(A_dense), static(solver))
+        @test ls_dk.solver_ws isa Krylov.KrylovWorkspace
+        ls_dk.b .= b_vec
+        @test SecondOrderOptimization.solve!(ls_dk, static(solver)) == Success
+        @test isapprox(ls_dk.x, x_exact; rtol=1e-5)
+        dense_krylov_allocs(ls, s) = @allocated SecondOrderOptimization.solve!(ls, s)
+        dense_krylov_allocs(ls_dk, static(solver))
+        @test dense_krylov_allocs(ls_dk, static(solver)) == 0
         opts = OptimizationOptions(iterator=:newton, linsolver=solver, maxiters=10, gtol=1e-6)
         x_dense, res_dense = optimize(quad_dense_cost, quad_dense_fdf!, [0.0, 0.0, 0.0], opts; H=copy(A_dense))
         @test isconverged(res_dense)
