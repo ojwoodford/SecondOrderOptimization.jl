@@ -70,4 +70,36 @@ end
     allocs_sp = @allocated optimize!(quad_cost, quad_fdf!, x_buf, opts_sparse; H=H_sparse, workspace=ws_sp)
     @test ws_sp.data[1].variables !== ws_sp.data[1].varnext
     @test allocs_sp == 0
+
+    # B7: block vectors with the same type and total dimension but different block layouts
+    # must not share a cached workspace
+    BlockT = Union{SVector{2, Float64}, SVector{3, Float64}}
+    blk_cost(x) = 0.5 * sum(sum(abs2, xi) for xi in x)
+    function blk_fdf!(g, H, x)
+        k = 0
+        for xi in x, v in xi
+            k += 1
+            g[k] = v
+        end
+        fill!(H, 0.0)
+        for i in axes(H, 1)
+            H[i, i] = 1.0
+        end
+        return blk_cost(x)
+    end
+    xa = BlockT[SVector(1.0, 2.0, 3.0), SVector(4.0, 5.0, 6.0)]
+    xb = BlockT[SVector(1.0, 2.0), SVector(3.0, 4.0), SVector(5.0, 6.0)]
+    xc = BlockT[SVector(1.0, 2.0, 3.0), SVector(4.0, 5.0), SVector(6.0, 7.0)]
+    xd = BlockT[SVector(1.0, 2.0), SVector(3.0, 4.0, 5.0), SVector(6.0, 7.0)]
+    opts_blk = OptimizationOptions(iterator=:levenbergmarquardt)
+    ws_blk = OptimizationWorkspace()
+    for x0 in (xa, xb, xa, xc, xd)
+        x_blk, res_blk = optimize(blk_cost, blk_fdf!, x0, opts_blk; workspace=ws_blk)
+        @test length(x_blk) == length(x0)
+        @test all(length(x_blk[i]) == length(x0[i]) for i in eachindex(x0))
+        @test isapprox(blk_cost(x_blk), 0.0; atol=1e-12)
+    end
+    @test SecondOrderOptimization.cachekey(xa, opts_blk, nothing) != SecondOrderOptimization.cachekey(xb, opts_blk, nothing)
+    @test SecondOrderOptimization.cachekey(xc, opts_blk, nothing) != SecondOrderOptimization.cachekey(xd, opts_blk, nothing)
+    @test SecondOrderOptimization.cachekey(xa, opts_blk, nothing) == SecondOrderOptimization.cachekey(copy(xa), opts_blk, nothing)
 end

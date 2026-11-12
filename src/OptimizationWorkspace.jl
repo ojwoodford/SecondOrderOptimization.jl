@@ -21,8 +21,20 @@ h_structure_key(::Nothing) = nothing
 h_structure_key(H::AbstractMatrix) = (typeof(H), size(H))
 h_structure_key(H::SparseMatrixCSC) = (typeof(H), size(H), hash(H.colptr), hash(H.rowval), length(H.nzval))
 
+# A `Vector` of variable blocks of one type and total dimension can still differ in the number
+# and sizes of its blocks (e.g. two 3-vectors versus three 2-vectors), so key on those too.
+blocklayout_key(x0) = nothing
+blocklayout_key(x0::Vector{<:Number}) = nothing
+function blocklayout_key(x0::Vector)
+    h = hash(length(x0))
+    for xi in x0
+        h = hash(dynamic(nvars(xi)), h)
+    end
+    return (length(x0), h)
+end
+
 function cachekey(x0, options::OptimizationOptions, H)
-    return (typeof(x0), dynamic(nvars(x0)), typeof(options), h_structure_key(H))
+    return (typeof(x0), dynamic(nvars(x0)), blocklayout_key(x0), typeof(options), h_structure_key(H))
 end
 
 workspacevalid(ws::OptimizationWorkspace, x0, options::OptimizationOptions, H) = keyvalid(ws.key, x0, options, H)
