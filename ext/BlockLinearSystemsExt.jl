@@ -113,19 +113,25 @@ function SparseSchurLinearSystem(
     # 1. Build the reduced-system pattern and sparsity structures. Retained-retained couplings stored in B
     # that do not go through an eliminated block need slots in S too.
     # A precomputed `pattern` (the result of an earlier build_schur_pattern call with the same
-    # extra blocks) can be passed in to avoid rebuilding it.
+    # extra blocks, typically carried by `H` itself) can be passed in to avoid rebuilding it. It is
+    # used as structure only: it may be shared with other systems, so S gets its own copy of
+    # `S_sparse`, whose values this system writes.
     if pattern === nothing
         pattern = build_schur_pattern(H.structure, T; extra_blocks=retained_block_pairs(H.B))
+        S = pattern.S_sparse
+    else
+        S = copy(pattern.S_sparse)
     end
-    S = pattern.S_sparse
     Ti = eltype(pattern.block_rowval)
 
     # 2. Map B to S
     b_to_s_map = build_b_to_s_map(H.B, pattern, H.structure.boffsets_c)
 
     # 3. Pre-analyze CHOLMOD symbolic factor and LDLFactorizations symbolic factor
+    # A caller can add an analysed factor to the pattern (`merge(pattern, (S_factor = fac,))`);
+    # `hasproperty` on a NamedTuple is resolved at compile time.
     S_chol = SparseArrays.CHOLMOD.Sparse(Symmetric(S, :U))
-    S_factor = SparseArrays.CHOLMOD.analyze(S_chol)
+    S_factor = hasproperty(pattern, :S_factor) ? pattern.S_factor : SparseArrays.CHOLMOD.analyze(S_chol)
     S_factor_ldl = ldl_analyze(Symmetric(S, :U))
 
     g_S = zeros(T, nc)
@@ -474,7 +480,10 @@ function SecondOrderOptimization.makelinearsystem(x0, H::SchurBlockMatrix{T}, li
         throw(ArgumentError("linsolver = :dense_schur requires a SchurBlockMatrix whose B is a dense Matrix, got $(typeof(H.B))"))
     end
     # :schur (and any other symbol) picks the system from the storage of B
-    return sparse_B ? SparseSchurLinearSystem(H, b, x) : DenseSchurLinearSystem(H, b, x)
+    # The sparse system reuses a Schur pattern carried by H (BlockLinearSystems versions that
+    # predate the field have none); the dense system has no use for one.
+    pattern = hasfield(typeof(H), :pattern) ? H.pattern : nothing
+    return sparse_B ? SparseSchurLinearSystem(H, b, x; pattern) : DenseSchurLinearSystem(H, b, x)
 end
 
-end # module SecondOrderOptimizationExt
+end # module BlockLinearSystemsExt

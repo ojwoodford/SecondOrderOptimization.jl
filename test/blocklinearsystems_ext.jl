@@ -651,3 +651,57 @@ end
         @test ls.lambda == lambda0
     end
 end
+
+@testset "Sparse Schur system takes its pattern from H (M26)" begin
+    p = coupled_groups_problem()
+    n = length(p.b)
+    H0 = sparse_schur_matrix(p)
+    pre = build_schur_pattern(H0.structure; extra_blocks=retained_block_pairs(H0.B))
+    Hp = SchurBlockMatrix(H0.structure, H0.B, H0.C_data, H0.E_data; pattern=pre)
+    x_ref = reference_solve(p, 0.3, ones(n))
+    mk(H) = SecondOrderOptimization.makelinearsystem(nothing, H, :sparse_schur)
+
+    # With and without a pattern on H: the same solution
+    for H in (H0, Hp)
+        ls = mk(H)
+        ls.b .= p.b
+        SecondOrderOptimization.dampen!(ls, 0.3)
+        @test SecondOrderOptimization.solve!(ls) == SecondOrderOptimization.Success
+        @test norm(ls.x - x_ref) <= 1e-10 * norm(x_ref)
+    end
+
+    # The pattern was used, not rebuilt: its block structure is shared, S is a copy
+    ls_a = mk(Hp)
+    @test ls_a.block_rowval === pre.block_rowval
+    @test ls_a.S !== pre.S_sparse && ls_a.S == pre.S_sparse
+    @test mk(H0).block_rowval !== pre.block_rowval
+    # ...and building the system does less work than rebuilding the pattern
+    mk(Hp); mk(H0)
+    @test (@allocated mk(Hp)) < (@allocated mk(H0))
+
+    # Two systems from one H don't share S: solving the first leaves the second's untouched
+    ls_b = mk(Hp)
+    S_b = copy(ls_b.S)
+    S_pre = copy(pre.S_sparse)
+    ls_a.b .= p.b
+    SecondOrderOptimization.dampen!(ls_a, 0.3)
+    @test SecondOrderOptimization.solve!(ls_a) == SecondOrderOptimization.Success
+    @test ls_b.S == S_b
+    @test pre.S_sparse == S_pre
+    @test ls_a.S != S_b   # the first system did write its own S
+
+    # An analysed factor carried by the pattern is reused
+    fac = SparseArrays.CHOLMOD.analyze(SparseArrays.CHOLMOD.Sparse(Symmetric(copy(pre.S_sparse), :U)))
+    Hf = SchurBlockMatrix(H0.structure, H0.B, H0.C_data, H0.E_data; pattern=merge(pre, (S_factor = fac,)))
+    ls_f = mk(Hf)
+    @test ls_f.S_factor === fac
+    ls_f.b .= p.b
+    SecondOrderOptimization.dampen!(ls_f, 0.3)
+    @test SecondOrderOptimization.solve!(ls_f) == SecondOrderOptimization.Success
+    @test norm(ls_f.x - x_ref) <= 1e-10 * norm(x_ref)
+
+    # The dense system ignores a pattern
+    Hd = dense_schur_matrix(p)
+    Hdp = SchurBlockMatrix(Hd.structure, Hd.B, Hd.C_data, Hd.E_data; pattern=build_schur_pattern(Hd.structure))
+    @test SecondOrderOptimization.makelinearsystem(nothing, Hdp, :schur) isa SOOExt.DenseSchurLinearSystem
+end
