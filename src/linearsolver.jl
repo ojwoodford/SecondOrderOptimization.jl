@@ -47,39 +47,48 @@ end
 getlinsolver(s::OptimizationLinearSolver) = s
 getlinsolver(s::StaticSymbol) = getlinsolver(dynamic(s))
 
-function is_indefinite(bk::BunchKaufman, tol::Float64=1e-6)
+# Indefiniteness tests on a factorization's pivots. A pivot counts as negative when it is below
+# `-rtol` times the largest pivot magnitude, so the test is independent of the matrix's scale.
+
+# Eigenvalues of the symmetric 2x2 block [a b; b c], smallest first
+@inline function eig2x2(a, b, c)
+    m = 0.5 * (a + c)
+    r = hypot(0.5 * (a - c), b)
+    return m - r, m + r
+end
+
+function is_indefinite(bk::BunchKaufman, rtol::Float64=1e-6)
     # `bk.D` rebuilds the block-diagonal matrix on every access, so materialise it once
     D = bk.D
     n = length(bk.ipiv)
+    # Pass 1: the largest pivot magnitude; pass 2: any pivot below -rtol times it
+    maxabs = 0.0
+    minpivot = Inf
     k = 1
     @inbounds while k <= n
         if bk.ipiv[k] < 0
-            d11 = D[k, k]
-            d22 = D[k+1, k+1]
-            d12 = D[k, k+1]
-            tr = d11 + d22
-            det = d11 * d22 - d12 * d12
-            if det < -tol || tr < -tol
-                return true
-            end
+            lo, hi = eig2x2(D[k, k], D[k, k+1], D[k+1, k+1])
+            maxabs = max(maxabs, abs(lo), abs(hi))
+            minpivot = min(minpivot, lo)
             k += 2
         else
-            if D[k, k] < -tol
-                return true
-            end
+            d = D[k, k]
+            maxabs = max(maxabs, abs(d))
+            minpivot = min(minpivot, d)
             k += 1
         end
     end
-    return false
+    return minpivot < -rtol * maxabs
 end
 
-function is_indefinite(F::LDLFactorizations.LDLFactorization, tol::Float64=1e-6)
+function is_indefinite(F::LDLFactorizations.LDLFactorization, rtol::Float64=1e-6)
+    maxabs = 0.0
+    minpivot = Inf
     @inbounds for d in F.d
-        if d < -tol
-            return true
-        end
+        maxabs = max(maxabs, abs(d))
+        minpivot = min(minpivot, d)
     end
-    return false
+    return minpivot < -rtol * maxabs
 end
 
 @inline function has_positive_pivots(C::Cholesky)
@@ -116,7 +125,7 @@ solve!(ls) = solve!(ls, static(:auto))
 solve!(ls, solver::OptimizationLinearSolver) = solve!(ls, static(linsolver_symbol(solver)))
 
 # StaticLinearSystem
-function solve!(ls::StaticLinearSystem, ::Union{StaticSymbol{:auto}, StaticSymbol{:cholesky}, StaticSymbol{:ldl}})
+@inline function damped_static(ls::StaticLinearSystem)
     A_ = SMatrix(ls.A)
     if ls.lambda > 0
         if isnothing(ls.scaling)
@@ -125,6 +134,11 @@ function solve!(ls::StaticLinearSystem, ::Union{StaticSymbol{:auto}, StaticSymbo
             A_ = A_ + Diagonal(ls.lambda .* ls.scaling)
         end
     end
+    return A_
+end
+
+function solve!(ls::StaticLinearSystem, ::Union{StaticSymbol{:auto}, StaticSymbol{:cholesky}})
+    A_ = damped_static(ls)
     cholfac = cholesky(Symmetric(A_); check=false)
     if issuccess(cholfac) && has_positive_pivots(cholfac)
         ls.x .= cholfac \ SVector(ls.b)
@@ -133,15 +147,29 @@ function solve!(ls::StaticLinearSystem, ::Union{StaticSymbol{:auto}, StaticSymbo
     return NotPositiveDefinite
 end
 
-function solve!(ls::StaticLinearSystem, ::StaticSymbol{:qr})
-    A_ = SMatrix(ls.A)
-    if ls.lambda > 0
-        if isnothing(ls.scaling)
-            A_ = A_ + ls.lambda * I
-        else
-            A_ = A_ + Diagonal(ls.lambda .* ls.scaling)
-        end
+# Static `:ldl`: Cholesky when positive definite, otherwise LU (StaticArrays has no
+# Bunch-Kaufman, and its `eigen` allocates above 3x3). Once Cholesky has failed, a nonsingular
+# symmetric matrix has a negative eigenvalue, so the solve is reported as `Indefinite`, as the
+# dense and sparse `:ldl` do.
+function solve!(ls::StaticLinearSystem, ::StaticSymbol{:ldl})
+    A_ = damped_static(ls)
+    cholfac = cholesky(Symmetric(A_); check=false)
+    if issuccess(cholfac) && has_positive_pivots(cholfac)
+        ls.x .= cholfac \ SVector(ls.b)
+        return Success
     end
+    all(isfinite, A_) || return NotPositiveDefinite
+    lufac = lu(A_; check=false)
+    issuccess(lufac) || return NotPositiveDefinite
+    x_ = lufac \ SVector(ls.b)
+    all(isfinite, x_) || return NotPositiveDefinite
+    ls.x .= x_
+    return Indefinite
+end
+
+# Static `:qr` uses LU (`\`): StaticArrays has no pivoted QR
+function solve!(ls::StaticLinearSystem, ::StaticSymbol{:qr})
+    A_ = damped_static(ls)
     ls.x .= A_ \ SVector(ls.b)
     return Success
 end

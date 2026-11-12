@@ -183,4 +183,46 @@ using SecondOrderOptimization, SparseArrays, StaticArrays, LinearAlgebra, Test, 
     @test SecondOrderOptimization.initial_shift(ls_nan) == 1e-6
     ls_big = SecondOrderOptimization.DenseLinearSystem{Float64}([1e4 0.0; 0.0 1.0], zeros(2), zeros(2))
     @test SecondOrderOptimization.initial_shift(ls_big) == 1.0
+
+    # M2: static :ldl solves an indefinite system and reports it, like dense and sparse :ldl
+    ls_static_ldl = SecondOrderOptimization.StaticLinearSystem{5, 25, Float64}(MMatrix{5, 5}(A_indef), MVector{5}(b_indef), zeros(MVector{5, Float64}))
+    @test SecondOrderOptimization.solve!(ls_static_ldl, static(:ldl)) == SecondOrderOptimization.Indefinite
+    @test isapprox(ls_static_ldl.x, x_true; rtol=1e-8)
+    ls_static_ldl_pd = SecondOrderOptimization.StaticLinearSystem{5, 25, Float64}(MMatrix{5, 5}(A_spd), MVector{5}(b_vec), zeros(MVector{5, Float64}))
+    @test SecondOrderOptimization.solve!(ls_static_ldl_pd, static(:ldl)) == SecondOrderOptimization.Success
+    @test isapprox(ls_static_ldl_pd.x, x_true; rtol=1e-8)
+    ls_static_sing = SecondOrderOptimization.StaticLinearSystem{2, 4, Float64}(MMatrix{2, 2}([1.0 1.0; 1.0 1.0]), MVector(1.0, 0.0), zeros(MVector{2, Float64}))
+    @test SecondOrderOptimization.solve!(ls_static_sing, static(:ldl)) == SecondOrderOptimization.NotPositiveDefinite
+    static_ldl_allocs(ls) = @allocated SecondOrderOptimization.solve!(ls, static(:ldl))
+    static_ldl_allocs(ls_static_ldl)
+    @test static_ldl_allocs(ls_static_ldl) == 0
+
+    # M3: indefiniteness is detected relative to the scale of the matrix
+    for scale in (1e-9, 1.0, 1e9)
+        A_sc = scale .* A_indef
+        b_sc = A_sc * x_true
+        ls_d = SecondOrderOptimization.DenseLinearSystem{Float64}(copy(A_sc), copy(b_sc), zeros(5))
+        @test SecondOrderOptimization.solve!(ls_d, static(:ldl)) == SecondOrderOptimization.Indefinite
+        ls_s = SecondOrderOptimization.makelinearsystem(zeros(5), sparse(A_sc), static(:ldl))
+        ls_s.b .= b_sc
+        @test SecondOrderOptimization.solve!(ls_s, static(:ldl)) == SecondOrderOptimization.Indefinite
+        ls_st = SecondOrderOptimization.StaticLinearSystem{5, 25, Float64}(MMatrix{5, 5}(A_sc), MVector{5}(b_sc), zeros(MVector{5, Float64}))
+        @test SecondOrderOptimization.solve!(ls_st, static(:ldl)) == SecondOrderOptimization.Indefinite
+        # and a positive definite matrix at the same scale is not flagged
+        ls_p = SecondOrderOptimization.DenseLinearSystem{Float64}(scale .* A_spd, scale .* b_vec, zeros(5))
+        @test SecondOrderOptimization.solve!(ls_p, static(:ldl)) == SecondOrderOptimization.Success
+    end
+    # A 2x2 Bunch-Kaufman pivot block with one negative eigenvalue is flagged
+    bk2 = bunchkaufman(Symmetric([0.0 1.0; 1.0 0.0]))
+    @test SecondOrderOptimization.is_indefinite(bk2)
+    @test !SecondOrderOptimization.is_indefinite(bunchkaufman(Symmetric([2.0 1.0; 1.0 2.0])))
+
+    # B2/M21: the indefiniteness check on a dense :ldl factorization costs O(n), not O(n^2), memory
+    n_big = 300
+    M_big = randn(n_big, n_big)
+    A_big = M_big + M_big'
+    bk_big = bunchkaufman(Symmetric(A_big))
+    SecondOrderOptimization.is_indefinite(bk_big)
+    @test (@allocated SecondOrderOptimization.is_indefinite(bk_big)) < 8 * n_big * n_big ÷ 10
+    @test SecondOrderOptimization.is_indefinite(bk_big) == (eigmin(Symmetric(A_big)) < 0)
 end
