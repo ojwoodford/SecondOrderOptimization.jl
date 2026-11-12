@@ -30,6 +30,12 @@ function check_krylov_ws(ws, ::Type{W}, s::Symbol) where W
     throw(ArgumentError("This linear system was not built for linsolver=:$s; construct it with `makelinearsystem(x0, H, :$s)`."))
 end
 
+# With `linesearch=true`, nonpositive curvature sets both `indefinite` and `solved`, so check it first
+function cg_status(stats)
+    stats.indefinite && return Indefinite
+    return stats.solved ? Success : NotPositiveDefinite
+end
+
 # SparseLinearSystem execution
 function solve!(ls::SparseLinearSystem, ::StaticSymbol{:cg})
     ws = check_krylov_ws(ls.solver_ws, Krylov.CgWorkspace, :cg)
@@ -40,20 +46,16 @@ function solve!(ls::SparseLinearSystem, ::StaticSymbol{:cg})
             damp_marquardt!(ls, ls.scaling, ls.lambda)
         end
     end
-    Krylov.cg!(ws, ls.A, ls.b)
+    # `linesearch=true` makes CG stop and flag `stats.indefinite` on nonpositive curvature;
+    # without it, CG keeps iterating on an indefinite matrix.
+    Krylov.cg!(ws, ls.A, ls.b; linesearch=true)
     copyto!(ls.x, ws.x)
     if ls.lambda > 0
         @inbounds for (i, idx) in enumerate(ls.diag_inds)
             ls.A.nzval[idx] = ls.diag_cache[i]
         end
     end
-    if ws.stats.solved
-        return Success
-    elseif occursin("negative curvature", ws.stats.status)
-        return Indefinite
-    else
-        return NotPositiveDefinite
-    end
+    return cg_status(ws.stats)
 end
 
 function solve!(ls::SparseLinearSystem, ::StaticSymbol{:minres})
@@ -106,15 +108,9 @@ function solve!(ls::DenseLinearSystem, ::StaticSymbol{:cg})
             damp_marquardt!(ls.A_scratch, ls.scaling, ls.lambda)
         end
     end
-    (x, stats) = Krylov.cg(ls.A_scratch, ls.b)
+    (x, stats) = Krylov.cg(ls.A_scratch, ls.b; linesearch=true)
     copyto!(ls.x, x)
-    if stats.solved
-        return Success
-    elseif occursin("negative curvature", stats.status)
-        return Indefinite
-    else
-        return NotPositiveDefinite
-    end
+    return cg_status(stats)
 end
 
 function solve!(ls::DenseLinearSystem, ::StaticSymbol{:minres})

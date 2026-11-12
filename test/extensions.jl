@@ -78,8 +78,18 @@ using SecondOrderOptimization, SparseArrays, LinearAlgebra, Test, Static
         H .= A_indef
         return 0.5 * dot(x, A_indef * x)
     end
-    # With Newton, indefinite Hessian causes CG to detect negative curvature, returning Indefinite,
-    # prompting Newton to regularize with spectral shift
+    # B4: CG reports nonpositive curvature as Indefinite, on both sparse and dense systems
+    for H_indef in (copy(A_indef), Matrix(A_indef))
+        ls_indef = SecondOrderOptimization.makelinearsystem(zeros(3), H_indef, static(:cg))
+        ls_indef.b .= [1.0, 0.0, 0.0]
+        @test SecondOrderOptimization.solve!(ls_indef, static(:cg)) == Indefinite
+        # Damping enough to make it positive definite gives Success
+        dampen!(ls_indef, 10.0)
+        @test SecondOrderOptimization.solve!(ls_indef, static(:cg)) == Success
+        @test isapprox(ls_indef.x, (Matrix(A_indef) + 10I) \ [1.0, 0.0, 0.0]; rtol=1e-6)
+    end
+    # With Newton, the indefinite Hessian makes CG return Indefinite, prompting Newton to
+    # regularize with a diagonal shift
     opts_indef = OptimizationOptions(iterator=:newton, linsolver=:cg, maxiters=10)
     x_indef, res_indef = optimize(indef_cost, indef_fdf!, [1.0, 1.0, 1.0], opts_indef; H=copy(A_indef))
     @test isfinite(res_indef.bestcost)
