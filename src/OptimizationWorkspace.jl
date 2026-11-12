@@ -44,6 +44,7 @@ function keyvalid(key::Tuple, x0, options::OptimizationOptions, H)
 end
 
 function OptimizationWorkspace(x0, options::OptimizationOptions=OptimizationOptions(); H=nothing, startstats::Stats=Stats())
+    checkhessianforsolver(H, options.linsolver)
     ls = makelinearsystem(x0, H, options.linsolver)
     data = OptimizationInternal(ls, x0, startstats)
     iteratedata = construct(options.iterator, ls, options.callbackchangesstate)

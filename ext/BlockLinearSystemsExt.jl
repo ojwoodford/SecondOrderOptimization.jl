@@ -454,6 +454,12 @@ function SecondOrderOptimization.sharex(ls::SparseSchurLinearSystem{T, Ti, TL, T
     )
 end
 
+# The Schur solvers, valid only with a SchurBlockMatrix Hessian
+SecondOrderOptimization.validatelinsolver(::StaticSymbol{:schur}) = true
+SecondOrderOptimization.validatelinsolver(::StaticSymbol{:dense_schur}) = true
+SecondOrderOptimization.validatelinsolver(::StaticSymbol{:sparse_schur}) = true
+SecondOrderOptimization.checkhessianforsolver(::SchurBlockMatrix, linsolver) = nothing
+
 function SecondOrderOptimization.makelinearsystem(x0, H::SchurBlockMatrix{T}, linsolver) where T
     nc = H.structure.nc
     np = sum(Int, H.structure.p_dims; init=0)

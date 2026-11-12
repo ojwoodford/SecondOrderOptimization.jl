@@ -370,6 +370,23 @@ end
     # A request that contradicts the storage of B is an error, not silently ignored or a MethodError
     @test_throws ArgumentError mk(Hd, :sparse_schur)
     @test_throws ArgumentError mk(Hs, :dense_schur)
+    # B9: the extension registers the Schur symbols, and they need a SchurBlockMatrix Hessian
+    for s in (:schur, :dense_schur, :sparse_schur)
+        @test SecondOrderOptimization.validatelinsolver(s)
+        opts_s = OptimizationOptions(linsolver=s)
+        @test SecondOrderOptimization.checkhessianforsolver(Hd, opts_s.linsolver) === nothing
+        for H_other in (zeros(3, 3), spzeros(3, 3), nothing)
+            err = try
+                optimize(x -> sum(abs2, x), (g, H, x) -> sum(abs2, x), zeros(3), opts_s; H=H_other)
+                nothing
+            catch e
+                e
+            end
+            @test err isa ArgumentError
+            @test occursin("SchurBlockMatrix", sprint(showerror, err))
+            @test_throws ArgumentError OptimizationWorkspace(zeros(3), opts_s; H=H_other)
+        end
+    end
 
     # solve! accepts Symbols, static symbols and the OptimizationLinearSolver enum without ambiguity
     n = length(p.b)

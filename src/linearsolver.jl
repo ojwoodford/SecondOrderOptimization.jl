@@ -4,12 +4,23 @@ validatelinsolver(::StaticSymbol{:auto}) = true
 validatelinsolver(::StaticSymbol{:cholesky}) = true
 validatelinsolver(::StaticSymbol{:ldl}) = true
 validatelinsolver(::StaticSymbol{:qr}) = true
-validatelinsolver(::StaticSymbol{:schur}) = true
-validatelinsolver(::StaticSymbol{:dense_schur}) = true
-validatelinsolver(::StaticSymbol{:sparse_schur}) = true
 validatelinsolver(::StaticSymbol{S}) where S = false
 validatelinsolver(s::Symbol) = validatelinsolver(static(s))
 validatelinsolver(s::OptimizationLinearSolver) = true
+
+# Implemented by the BlockLinearSystems extension, for a `SchurBlockMatrix` Hessian only
+const SCHUR_SOLVERS = (:schur, :dense_schur, :sparse_schur)
+
+# Checked before the linear system is built, so a Schur solver with another Hessian type fails
+# with a clear message rather than a `MethodError` in the first `solve!`. The BlockLinearSystems
+# extension adds the method that accepts a `SchurBlockMatrix`.
+function checkhessianforsolver(H, linsolver)
+    sym = linsolver_symbol(linsolver)
+    if sym in SCHUR_SOLVERS
+        throw(ArgumentError("Linear solver :$sym requires H to be a BlockLinearSystems.SchurBlockMatrix, got $(typeof(H))."))
+    end
+    return nothing
+end
 
 function checklinsolver(s::Symbol)
     validatelinsolver(s) && return true
@@ -17,6 +28,8 @@ function checklinsolver(s::Symbol)
         throw(ArgumentError("Linear solver :pardiso requires Pardiso.jl. Please run `using Pardiso` first."))
     elseif s in (:cg, :minres, :lsmr, :krylov)
         throw(ArgumentError("Linear solver :$s requires Krylov.jl. Please run `using Krylov` first."))
+    elseif s in SCHUR_SOLVERS
+        throw(ArgumentError("Linear solver :$s requires BlockLinearSystems.jl. Please run `using BlockLinearSystems` first."))
     end
     throw(ArgumentError("Unknown linear solver: $s"))
 end

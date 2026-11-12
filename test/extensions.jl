@@ -6,6 +6,15 @@ using SecondOrderOptimization, SparseArrays, LinearAlgebra, Test, Static
     # 1. Validation error before loading extensions
     # (Testing that unregistered solver symbols throw informative ArgumentErrors)
     @test_throws ArgumentError OptimizationOptions(linsolver=:not_a_solver)
+    # B9: the Schur solvers need BlockLinearSystems, and the error says so
+    if Base.get_extension(SecondOrderOptimization, :BlockLinearSystemsExt) === nothing
+        for s in (:schur, :dense_schur, :sparse_schur)
+            @test !SecondOrderOptimization.validatelinsolver(s)
+            err = try OptimizationOptions(linsolver=s); nothing catch e; e end
+            @test err isa ArgumentError
+            @test occursin("BlockLinearSystems", sprint(showerror, err))
+        end
+    end
 
     # 2. KrylovExt testing
     using Krylov
