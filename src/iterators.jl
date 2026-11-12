@@ -29,6 +29,13 @@ end
 # Default linearization is at data.variables
 linearize!(::Any, data, fdf!) = computelinearization!(data, fdf!, data.variables)
 
+# First diagonal shift tried when an undamped Newton solve fails. `max_diag` is NaN if the
+# diagonal holds a NaN, and `dampen!` ignores a NaN shift, so fall back to a fixed value.
+function initial_shift(ls)
+    md = max_diag(ls)
+    return isfinite(md) ? max(md * 1e-4, 1e-6) : 1e-6
+end
+
 # Newton optimization
 struct NewtonData
 end
@@ -42,7 +49,7 @@ reset!(::NewtonData) = nothing
         status = solve!(data.linsystem, options.linsolver)
         if status == Success
         else
-            mu = max(max_diag(data.linsystem) * 1e-4, 1e-6)
+            mu = initial_shift(data.linsystem)
             shift_iters = 30
             while status != Success && shift_iters > 0
                 shift_iters -= 1
@@ -78,7 +85,7 @@ reset!(::NewtonDataRelinearize) = nothing
         status = solve!(data.linsystem, options.linsolver)
         if status == Success
         else
-            mu = max(max_diag(data.linsystem) * 1e-4, 1e-6)
+            mu = initial_shift(data.linsystem)
             shift_iters = 30
             while status != Success && shift_iters > 0
                 shift_iters -= 1
@@ -196,8 +203,7 @@ end
     data.solves += @elapsed_ns begin
         status = solve!(data.linsystem, options.linsolver)
         if status != Success
-            md = max_diag(data.linsystem)
-            mu = isfinite(md) ? max(md * 1e-4, 1e-6) : 1e-6
+            mu = initial_shift(data.linsystem)
             shifts = 20
             while status != Success && shifts > 0
                 shifts -= 1

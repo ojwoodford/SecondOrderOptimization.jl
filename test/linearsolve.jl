@@ -178,4 +178,9 @@ using SecondOrderOptimization, SparseArrays, StaticArrays, LinearAlgebra, Test, 
         @test isapprox(ls.x, Matrix(ls.A) \ [1.0, 2.0, 3.0]; rtol=1e-10)
     end
 
+    # B10: the first Newton shift is finite even when the diagonal contains NaN
+    ls_nan = SecondOrderOptimization.DenseLinearSystem{Float64}([NaN 0.0; 0.0 1.0], zeros(2), zeros(2))
+    @test SecondOrderOptimization.initial_shift(ls_nan) == 1e-6
+    ls_big = SecondOrderOptimization.DenseLinearSystem{Float64}([1e4 0.0; 0.0 1.0], zeros(2), zeros(2))
+    @test SecondOrderOptimization.initial_shift(ls_big) == 1.0
 end
