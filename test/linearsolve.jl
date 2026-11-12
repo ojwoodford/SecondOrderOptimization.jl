@@ -160,4 +160,22 @@ using SecondOrderOptimization, SparseArrays, StaticArrays, LinearAlgebra, Test, 
         @test (res.termination & TERMINATION_LINSOLVER_FAILED) != 0
         @test !isconverged(res)
     end
+
+    # B6: a sparse prototype with missing diagonal entries keeps its index type
+    for Ti in (Int32, Int64)
+        H_missing = SparseMatrixCSC{Float64, Ti}(sparse(Ti[1, 2, 3, 1], Ti[1, 2, 1, 3], [4.0, 5.0, 1.0, 1.0], 3, 3))
+        @test nnz(H_missing) == 4   # (3, 3) is missing
+        A_fixed, dinds = SecondOrderOptimization.ensure_diag_and_inds(H_missing)
+        @test A_fixed isa SparseMatrixCSC{Float64, Ti}
+        @test eltype(dinds) == Ti
+        @test all(A_fixed.rowval[dinds[c]] == c for c in 1:3)
+        @test A_fixed == H_missing
+        ls = SecondOrderOptimization.makelinearsystem(zeros(3), H_missing, static(:auto))
+        @test ls isa SecondOrderOptimization.SparseLinearSystem{Float64, Ti}
+        ls.A[3, 3] = 6.0
+        ls.b .= [1.0, 2.0, 3.0]
+        @test SecondOrderOptimization.solve!(ls, static(:auto)) == SecondOrderOptimization.Success
+        @test isapprox(ls.x, Matrix(ls.A) \ [1.0, 2.0, 3.0]; rtol=1e-10)
+    end
+
 end

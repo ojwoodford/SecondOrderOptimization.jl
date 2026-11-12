@@ -1,3 +1,10 @@
+const H_PROTOTYPE_DOC = """
+  A sparse prototype should store every diagonal entry (explicit zeros are fine). If one is missing, a new matrix with
+  explicit zeros on the diagonal is built and handed to `fdf!` in place of the prototype; its
+  `nzval` layout differs from the prototype's, so an `fdf!` that writes by precomputed `nzval`
+  positions of its own prototype would write to the wrong entries. Writing through `H[i, j]`
+  works either way."""
+
 """
     OptimizationOptions(; kwargs...)
 
@@ -326,7 +333,7 @@ In-place variant of [`optimize`](@ref). Minimizes scalar objective `f(x)` updati
 - `options::OptimizationOptions`: Optimization settings and stopping criteria.
 
 # Keyword Arguments
-- `H = nothing`: Optional prototype matrix for the Hessian (e.g. `SparseMatrixCSC` or `Matrix`).
+- `H = nothing`: Optional prototype matrix for the Hessian (e.g. `SparseMatrixCSC` or `Matrix`). $(H_PROTOTYPE_DOC)
 - `callback = nullcallback`: Callback invoked per iteration: `callback(cost, x_trial, data, iteratedata) -> (cost, terminate_flags)`.
 - `workspace = nothing`: Optional [`OptimizationWorkspace`](@ref) for memory reuse.
 
@@ -349,7 +356,7 @@ Does not mutate `x0` (allocates a copy of `x0` and delegates to [`optimize!`](@r
 - `options::OptimizationOptions`: Optimization settings and stopping criteria.
 
 # Keyword Arguments
-- `H = nothing`: Optional prototype matrix for the Hessian (e.g. `SparseMatrixCSC` or `Matrix`).
+- `H = nothing`: Optional prototype matrix for the Hessian (e.g. `SparseMatrixCSC` or `Matrix`). $(H_PROTOTYPE_DOC)
 - `callback = nullcallback`: Callback invoked per iteration: `callback(cost, x_trial, data, iteratedata) -> (cost, terminate_flags)`.
 - `workspace = nothing`: Optional [`OptimizationWorkspace`](@ref) for memory reuse.
 

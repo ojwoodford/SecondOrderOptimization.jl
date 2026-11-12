@@ -90,9 +90,10 @@ function ensure_diag_and_inds(A::SparseMatrixCSC{T, Ti}) where {T, Ti}
         return A, diag_inds
     end
 
-    # Insert structural zeros on the diagonal
-    I = Int[]
-    J = Int[]
+    # Insert structural zeros on the diagonal. The result is a new matrix with a different
+    # `nzval` layout from `A`, so `fdf!` is then handed this matrix, not the caller's prototype.
+    I = Ti[]
+    J = Ti[]
     V = T[]
     sizehint!(I, nnz(A) + n)
     sizehint!(J, nnz(A) + n)
@@ -114,7 +115,7 @@ function ensure_diag_and_inds(A::SparseMatrixCSC{T, Ti}) where {T, Ti}
             push!(V, zero(T))
         end
     end
-    new_A = sparse(I, J, V, n, n)
+    new_A = sparse(I, J, V, n, n)::SparseMatrixCSC{T, Ti}
     new_diag_inds = Vector{Ti}(undef, n)
     for col in 1:n
         for idx in nzrange(new_A, col)
