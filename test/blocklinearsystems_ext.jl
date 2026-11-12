@@ -556,3 +556,81 @@ end
     tr = SecondOrderOptimization.copy_structure(ls)
     @test tr.S_chol !== ls.S_chol
 end
+
+# A gauge-deficient problem: every observation constrains only the *difference* x_camera[1:3] - x_landmark, so
+# translating all cameras and landmarks together changes nothing and H is singular along that direction.
+# Camera dimensions 4:6 only have a tiny prior, which makes H ill conditioned.
+function gauge_problem(seed=21; prior=1e-8)
+    rng = Random.Xoshiro(seed)
+    c_dims = [6, 6, 6, 6]
+    p_dims = [3, 3, 3, 3, 3, 3]
+    observations = [[1, 2], [1, 2, 3], [2, 3, 4], [3, 4], [1, 4], [1, 2, 3, 4]]
+    nc_, np_ = sum(c_dims), sum(p_dims)
+    H = zeros(nc_ + np_, nc_ + np_)
+    for (l, cams) in enumerate(observations), c in cams
+        w = 0.5 + rand(rng)
+        ci = 6 * (c - 1) .+ (1:3)
+        li = nc_ + 3 * (l - 1) .+ (1:3)
+        H[ci, ci] .+= w * I(3); H[li, li] .+= w * I(3)
+        H[ci, li] .-= w * I(3); H[li, ci] .-= w * I(3)
+    end
+    for c in 1:4
+        ci = 6 * (c - 1) .+ (4:6)
+        H[ci, ci] .+= prior * I(3)
+    end
+    return SchurTestProblem(H, randn(rng, nc_ + np_), c_dims, p_dims, observations, Tuple{Int, Int}[])
+end
+
+@testset "BlockLinearSystemsExt: well-conditioned problems, forward error of x_c and x_p (T1)" begin
+    for p in (standard_problem(), coupled_groups_problem(), mixed_dims_problem())
+        @test cond(p.H) <= 1e4
+        n = length(p.b)
+        nc_ = sum(p.c_dims)
+        for kind in (:dense, :sparse), solver in (:auto, :cholesky, :ldl), lambda in (0.0, 0.3)
+            ls = make_schur_ls(kind, p)
+            SecondOrderOptimization.dampen!(ls, lambda)
+            @test SecondOrderOptimization.solve!(ls, solver) == SecondOrderOptimization.Success
+            x_ref = reference_solve(p, lambda, ones(n))
+            @test norm(ls.x_c - x_ref[1:nc_]) <= 1e-10 * norm(x_ref[1:nc_])
+            @test norm(ls.x_p - x_ref[nc_+1:end]) <= 1e-10 * norm(x_ref[nc_+1:end])
+        end
+    end
+end
+
+@testset "BlockLinearSystemsExt: gauge-deficient, ill-conditioned problem: relative residual (T1)" begin
+    p = gauge_problem()
+    n = length(p.b)
+    @test cond(p.H) > 1e7
+    for kind in (:dense, :sparse), solver in (:auto, :ldl), lambda in (1e-6, 1e-3, 0.1)
+        ls = make_schur_ls(kind, p)
+        SecondOrderOptimization.dampen!(ls, lambda)
+        @test SecondOrderOptimization.solve!(ls, solver) == SecondOrderOptimization.Success
+        Hd = p.H + lambda * Diagonal(ones(n))
+        rel_res = norm(Hd * ls.x - p.b) / (opnorm(Hd) * norm(ls.x) + norm(p.b))
+        @test rel_res <= 1e-13
+    end
+end
+
+@testset "BlockLinearSystemsExt: no damping drift across rejected trials (T2)" begin
+    p = standard_problem()
+    n = length(p.b)
+    for kind in (:dense, :sparse)
+        ls = make_schur_ls(kind, p, abs.(diag(p.H)))      # Marquardt scaling
+        snapshot(H) = (copy(H.C_data), copy(H.E_data), H.B isa Matrix ? copy(H.B) : copy(H.B.data), copy(ls.b), copy(ls.scaling))
+        before = snapshot(ls.H)
+        lambda0 = 1e-3
+        SecondOrderOptimization.dampen!(ls, lambda0)
+        @test SecondOrderOptimization.solve!(ls) == SecondOrderOptimization.Success
+        x_first = copy(ls.x)
+        # 100 increasing damping values, as in a run of rejected trial steps
+        for lambda in lambda0 .* 1.5 .^ (1:100)
+            SecondOrderOptimization.dampen!(ls, lambda)
+            @test SecondOrderOptimization.solve!(ls) == SecondOrderOptimization.Success
+        end
+        SecondOrderOptimization.dampen!(ls, lambda0)
+        @test SecondOrderOptimization.solve!(ls) == SecondOrderOptimization.Success
+        @test ls.x == x_first                                   # bit for bit
+        @test all(snapshot(ls.H) .== before)                     # B, C, E, b and the scaling are untouched
+        @test ls.lambda == lambda0
+    end
+end
