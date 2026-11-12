@@ -14,23 +14,30 @@ Static = "aedffcd0-7271-4cad-89d0-dc628f76c6d3"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [weakdeps]
+BlockLinearSystems = "a7d4e89f-9c3b-4d0e-8f5a-5b8c7d1e4f28"
 Krylov = "ba0b0d4f-ebba-5204-a429-3ac8c609bfb7"
 Pardiso = "46dd5b70-b6fb-5a00-ae2d-e8fea33afaf2"
 
+[extras]
+BlockLinearSystems = "a7d4e89f-9c3b-4d0e-8f5a-5b8c7d1e4f28"
+
 [sources]
+BlockLinearSystems = {path = "/Users/olly/.julia/dev/BlockLinearSystems.jl"}
 FastNorm = {path = "/Users/olly/.julia/dev/FastNorm.jl"}
 OptimizationVariableInterface = {path = "/Users/olly/.julia/dev/OptimizationVariableInterface.jl"}
 
 [extensions]
+BlockLinearSystemsExt = "BlockLinearSystems"
 KrylovExt = "Krylov"
 PardisoExt = "Pardiso"
 
 [compat]
+BlockLinearSystems = "0.2"
 FastNorm = "0.2, 0.3"
 Krylov = "0.9, 0.10"
 LDLFactorizations = "0.10"
 LinearAlgebra = "1.10"
-OptimizationVariableInterface = "0.1, 0.2"
+OptimizationVariableInterface = "0.1, 0.2, 0.3"
 Pardiso = "0.5, 1"
 Printf = "1.10"
 SparseArrays = "1.10"

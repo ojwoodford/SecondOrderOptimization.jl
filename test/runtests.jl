@@ -13,4 +13,5 @@ using Test
     include("general_objectives.jl")
     include("dogleg_trustregion.jl")
     include("extensions.jl")
+    include("blocklinearsystems_ext.jl")
 end
