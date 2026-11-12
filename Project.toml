@@ -21,11 +21,6 @@ Pardiso = "46dd5b70-b6fb-5a00-ae2d-e8fea33afaf2"
 [extras]
 BlockLinearSystems = "a7d4e89f-9c3b-4d0e-8f5a-5b8c7d1e4f28"
 
-[sources]
-BlockLinearSystems = {path = "/Users/olly/.julia/dev/BlockLinearSystems.jl"}
-FastNorm = {path = "/Users/olly/.julia/dev/FastNorm.jl"}
-OptimizationVariableInterface = {path = "/Users/olly/.julia/dev/OptimizationVariableInterface.jl"}
-
 [extensions]
 BlockLinearSystemsExt = "BlockLinearSystems"
 KrylovExt = "Krylov"
