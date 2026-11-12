@@ -35,13 +35,15 @@ getlinsolver(s::OptimizationLinearSolver) = s
 getlinsolver(s::StaticSymbol) = getlinsolver(dynamic(s))
 
 function is_indefinite(bk::BunchKaufman, tol::Float64=1e-6)
+    # `bk.D` rebuilds the block-diagonal matrix on every access, so materialise it once
+    D = bk.D
     n = length(bk.ipiv)
     k = 1
     @inbounds while k <= n
         if bk.ipiv[k] < 0
-            d11 = bk.D[k, k]
-            d22 = bk.D[k+1, k+1]
-            d12 = bk.D[k, k+1]
+            d11 = D[k, k]
+            d22 = D[k+1, k+1]
+            d12 = D[k, k+1]
             tr = d11 + d22
             det = d11 * d22 - d12 * d12
             if det < -tol || tr < -tol
@@ -49,7 +51,7 @@ function is_indefinite(bk::BunchKaufman, tol::Float64=1e-6)
             end
             k += 2
         else
-            if bk.D[k, k] < -tol
+            if D[k, k] < -tol
                 return true
             end
             k += 1
