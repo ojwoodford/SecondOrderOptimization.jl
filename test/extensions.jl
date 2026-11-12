@@ -113,9 +113,41 @@ using SecondOrderOptimization, SparseArrays, LinearAlgebra, Test, Static
         end
         ls_wrong = SecondOrderOptimization.makelinearsystem(zeros(3), copy(A_spd), static(:auto))
         @test_throws ArgumentError SecondOrderOptimization.solve!(ls_wrong, static(:pardiso))
+        # B8: damping changes values only, so the analysed pattern is reused
+        dampen!(ls, 2.0)
+        @test SecondOrderOptimization.solve!(ls, static(:pardiso)) == Success
+        @test isapprox(ls.x, (Matrix(A_spd) + 2I) \ b_vec; rtol=1e-8)
+        @test ls.A == A_spd   # damping undone
+        dampen!(ls, 0.0)
+        # B8: an indefinite matrix is reported, not silently solved as indefinite
+        for H_indef in (copy(A_indef), Matrix(A_indef))
+            ls_indef = SecondOrderOptimization.makelinearsystem(zeros(3), H_indef, static(:pardiso))
+            ls_indef.b .= b_vec
+            @test SecondOrderOptimization.solve!(ls_indef, static(:pardiso)) == NotPositiveDefinite
+            dampen!(ls_indef, 10.0)
+            @test SecondOrderOptimization.solve!(ls_indef, static(:pardiso)) == Success
+            @test isapprox(ls_indef.x, (Matrix(A_indef) + 10I) \ b_vec; rtol=1e-8)
+        end
+        # Dense systems
+        x_pd, res_pd = optimize(quad_dense_cost, quad_dense_fdf!, [0.0, 0.0, 0.0], opts_pardiso; H=copy(A_dense))
+        @test isconverged(res_pd)
+        @test isapprox(x_pd, x_exact; rtol=1e-5)
+        # Newton recovers from the indefinite Hessian by shifting
+        x_pi, res_pi = optimize(indef_cost, indef_fdf!, [1.0, 1.0, 1.0], OptimizationOptions(iterator=:newton, linsolver=:pardiso, maxiters=10); H=copy(A_indef))
+        @test isfinite(res_pi.bestcost)
     else
         # When shared library is not installed, attempting to solve throws an informative error
         ls = SecondOrderOptimization.makelinearsystem(zeros(3), copy(A_spd), static(:pardiso))
         @test_throws ErrorException SecondOrderOptimization.solve!(ls, static(:pardiso))
+        ls_dense = SecondOrderOptimization.makelinearsystem(zeros(3), Matrix(A_spd), static(:pardiso))
+        @test_throws ErrorException SecondOrderOptimization.solve!(ls_dense, static(:pardiso))
     end
+
+    # B8: the lower triangle handed to Pardiso, and its map back into the full matrix
+    PExt = Base.get_extension(SecondOrderOptimization, :PardisoExt)
+    A_full = sparse([4.0 1.0 0.0 2.0; 1.0 5.0 3.0 0.0; 0.0 3.0 6.0 0.0; 2.0 0.0 0.0 7.0])
+    L, lmap = PExt.lower_triangle_with_map(A_full, Int32)
+    @test L isa SparseMatrixCSC{Float64, Int32}
+    @test L == tril(A_full)
+    @test L.nzval == A_full.nzval[lmap]
 end

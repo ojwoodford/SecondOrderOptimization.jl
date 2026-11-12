@@ -8,54 +8,94 @@ using Static
 import SecondOrderOptimization: validatelinsolver, makesparsews, solve!
 import SecondOrderOptimization: AbstractLinearSystem, SparseLinearSystem, DenseLinearSystem
 import SecondOrderOptimization: SolveStatus, Success, NotPositiveDefinite, Indefinite
-import SecondOrderOptimization: uniformscaling!, damp_marquardt!
+import SecondOrderOptimization: uniformscaling!, damp_marquardt!, ensure_diag_and_inds
 
 # Validation of Pardiso solver symbol
 validatelinsolver(::StaticSymbol{:pardiso}) = true
+
+pardiso_is_available() = Pardiso.mkl_is_available() || Pardiso.panua_is_available()
 
 function pardiso_unavailable_error()
     error("Pardiso.jl is loaded, but neither Intel MKL Pardiso nor Panua Pardiso native shared library is available.")
 end
 
-# The sparse workspace is built once, by `makesparsews`, and `solver_ws` is a `const` field,
-# so it cannot be replaced here.
-function check_pardiso_ws(ws)
-    ws isa Pardiso.AbstractPardisoSolver && return ws
-    (Pardiso.mkl_is_available() || Pardiso.panua_is_available()) || pardiso_unavailable_error()
-    throw(ArgumentError("This linear system was not built for linsolver=:pardiso; construct it with `makelinearsystem(x0, H, :pardiso)`."))
+# Pardiso reads a symmetric matrix as the upper triangle of a CSR matrix, which is the lower
+# triangle of the same matrix in CSC. `L` holds that triangle, in Pardiso's index type, and
+# `L.nzval[k] == A.nzval[map[k]]`, so the values are refreshed without reallocating.
+function lower_triangle_with_map(A::SparseMatrixCSC{T}, ::Type{Ti}) where {T, Ti}
+    n = size(A, 2)
+    colptr = Vector{Ti}(undef, n + 1)
+    rowval = Ti[]
+    map = Int[]
+    colptr[1] = 1
+    for col in 1:n
+        for idx in nzrange(A, col)
+            r = A.rowval[idx]
+            if r >= col
+                push!(rowval, r)
+                push!(map, idx)
+            end
+        end
+        colptr[col+1] = length(rowval) + 1
+    end
+    L = SparseMatrixCSC{T, Ti}(size(A, 1), n, colptr, rowval, A.nzval[map])
+    return L, map
 end
 
-function get_or_create_pardiso(ws)
-    if ws isa Pardiso.AbstractPardisoSolver
-        return ws
-    end
-    if Pardiso.mkl_is_available()
-        ps = Pardiso.MKLPardisoSolver()
-    elseif Pardiso.panua_is_available()
-        ps = Pardiso.PardisoSolver()
-    else
-        pardiso_unavailable_error()
-    end
+# Workspace for the phased Pardiso API: the symbolic analysis runs once, here, and each solve
+# runs only the numerical factorization and the solve. It is shared by a system and its
+# `copy_structure` copies, which have the same pattern.
+struct PardisoWorkspace{PS <: Pardiso.AbstractPardisoSolver, T, Ti}
+    ps::PS
+    L::SparseMatrixCSC{T, Ti}
+    map::Vector{Int}
+end
+
+function PardisoWorkspace(A::SparseMatrixCSC{Float64})
+    ps = Pardiso.mkl_is_available() ? Pardiso.MKLPardisoSolver() : Pardiso.PardisoSolver()
     Pardiso.set_matrixtype!(ps, Pardiso.REAL_SYM_POSDEF)
-    Pardiso.pardisoinit(ps)
-    return ps
+    Pardiso.pardisoinit(ps)   # also registers a finalizer that releases Pardiso's memory
+    Pardiso.fix_iparm!(ps, :N)
+    L, map = lower_triangle_with_map(A, eltype(ps.iparm))
+    Pardiso.set_phase!(ps, Pardiso.ANALYSIS)
+    Pardiso.pardiso(ps, L, zeros(Float64, size(A, 1)))
+    return PardisoWorkspace(ps, L, map)
 end
 
 function makesparsews(A, ::StaticSymbol{:pardiso})
-    if Pardiso.mkl_is_available()
-        ps = Pardiso.MKLPardisoSolver()
-    elseif Pardiso.panua_is_available()
-        ps = Pardiso.PardisoSolver()
-    else
-        return nothing
+    pardiso_is_available() || return nothing
+    return PardisoWorkspace(A)
+end
+
+# The sparse workspace is built once, by `makesparsews`, and `solver_ws` is a `const` field,
+# so it cannot be replaced here.
+function check_pardiso_ws(ws)
+    ws isa PardisoWorkspace && return ws
+    pardiso_is_available() || pardiso_unavailable_error()
+    throw(ArgumentError("This linear system was not built for linsolver=:pardiso; construct it with `makelinearsystem(x0, H, :pardiso)`."))
+end
+
+# Factorize and solve with the current (already damped) values of `A`, whose pattern must be
+# the one `ws` was analysed with
+function pardiso_solve!(ws::PardisoWorkspace, x, A::SparseMatrixCSC, b)
+    @inbounds for (k, idx) in enumerate(ws.map)
+        ws.L.nzval[k] = A.nzval[idx]
     end
-    Pardiso.set_matrixtype!(ps, Pardiso.REAL_SYM_POSDEF)
-    Pardiso.pardisoinit(ps)
-    return ps
+    try
+        Pardiso.set_phase!(ws.ps, Pardiso.NUM_FACT)
+        Pardiso.pardiso(ws.ps, ws.L, b)
+    catch e
+        # A zero or negative pivot in the positive-definite factorization
+        isa(e, Union{Pardiso.PardisoPosDefException, Pardiso.PardisoException}) || rethrow()
+        return NotPositiveDefinite
+    end
+    Pardiso.set_phase!(ws.ps, Pardiso.SOLVE_ITERATIVE_REFINE)
+    Pardiso.pardiso(ws.ps, x, ws.L, b)
+    return Success
 end
 
 function solve!(ls::SparseLinearSystem, ::StaticSymbol{:pardiso})
-    ps = check_pardiso_ws(ls.solver_ws)
+    ws = check_pardiso_ws(ls.solver_ws)
     if ls.lambda > 0
         if isnothing(ls.scaling)
             uniformscaling!(ls, ls.lambda)
@@ -63,17 +103,8 @@ function solve!(ls::SparseLinearSystem, ::StaticSymbol{:pardiso})
             damp_marquardt!(ls, ls.scaling, ls.lambda)
         end
     end
-    status = Success
     try
-        Pardiso.solve!(ps, ls.x, ls.A, ls.b)
-    catch e
-        if isa(e, Pardiso.PardisoPosDefException)
-            status = NotPositiveDefinite
-        elseif isa(e, Pardiso.PardisoException)
-            status = NotPositiveDefinite
-        else
-            rethrow(e)
-        end
+        return pardiso_solve!(ws, ls.x, ls.A, ls.b)
     finally
         if ls.lambda > 0
             @inbounds for (i, idx) in enumerate(ls.diag_inds)
@@ -81,10 +112,10 @@ function solve!(ls::SparseLinearSystem, ::StaticSymbol{:pardiso})
             end
         end
     end
-    return status
 end
 
 function solve!(ls::DenseLinearSystem, ::StaticSymbol{:pardiso})
+    pardiso_is_available() || pardiso_unavailable_error()
     copyto!(ls.A_scratch, ls.A)
     if ls.lambda > 0
         if isnothing(ls.scaling)
@@ -93,17 +124,14 @@ function solve!(ls::DenseLinearSystem, ::StaticSymbol{:pardiso})
             damp_marquardt!(ls.A_scratch, ls.scaling, ls.lambda)
         end
     end
-    ps = get_or_create_pardiso(nothing)
-    A_sp = sparse(ls.A_scratch)
+    # Pardiso needs every diagonal entry stored, and `sparse` drops zeros
+    A_sp = first(ensure_diag_and_inds(sparse(ls.A_scratch)))
+    ws = PardisoWorkspace(A_sp)
     try
-        Pardiso.solve!(ps, ls.x, A_sp, ls.b)
-        return Success
-    catch e
-        if isa(e, Union{Pardiso.PardisoPosDefException, Pardiso.PardisoException})
-            return NotPositiveDefinite
-        else
-            rethrow(e)
-        end
+        return pardiso_solve!(ws, ls.x, A_sp, ls.b)
+    finally
+        Pardiso.set_phase!(ws.ps, Pardiso.RELEASE_ALL)
+        Pardiso.pardiso(ws.ps)
     end
 end
 
