@@ -47,7 +47,4 @@ include("optimize.jl")
 # API docstrings
 include("docstrings.jl")
 
-# Deprecated names
-Base.@deprecate quadratic_model_reduction(ls, dx) quadratic_model_change(ls, dx)
-
 end # module SecondOrderOptimization

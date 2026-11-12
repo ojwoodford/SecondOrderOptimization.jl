@@ -82,10 +82,8 @@ end
     @test length(traj.costs) > 0
     @test length(traj.times_ns) == length(traj.costs)
     @test length(traj.steps) == length(traj.costs)
-    # M16: `steps` holds the step vectors; the old name still works, with a deprecation warning
+    # M16: `steps` holds the step vectors
     @test all(length(s) == 2 for s in traj.steps)
-    @test (@test_deprecated traj.trajectory) === traj.steps
-    @test :steps in propertynames(traj) && !(:trajectory in propertynames(traj))
 
     # Test zero-allocation on SVector with OptimizationWorkspace
     opts_alloc = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=30)

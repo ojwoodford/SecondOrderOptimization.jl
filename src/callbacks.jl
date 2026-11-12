@@ -34,16 +34,6 @@ struct CostTrajectory
     end
 end
 
-# `trajectory` was the old name of `steps`, which suggested it held the iterates
-function Base.getproperty(ct::CostTrajectory, s::Symbol)
-    if s === :trajectory
-        Base.depwarn("`CostTrajectory.trajectory` is deprecated, use `CostTrajectory.steps`: it holds the step vectors, not the iterates.", :trajectory)
-        return getfield(ct, :steps)
-    end
-    return getfield(ct, s)
-end
-Base.propertynames(::CostTrajectory) = (:costs, :times_ns, :steps)
-
 function Base.empty!(ct::CostTrajectory)
     empty!(ct.costs)
     empty!(ct.times_ns)
