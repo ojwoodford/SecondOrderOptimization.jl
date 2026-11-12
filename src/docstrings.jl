@@ -434,7 +434,7 @@ Solves the linear system `A * x = b` in-place using the specified `solver` and r
 # Supported Solver Identifiers
 - Core solvers: `:auto`, `:cholesky`, `:ldl`, `:qr` (or enum constants [`auto_solver`](@ref), [`cholesky_solver`](@ref), [`ldl_solver`](@ref), [`qr_solver`](@ref)).
 - Extension solvers (when package is loaded):
-  - `using Krylov`: `:cg` (Conjugate Gradient), `:minres` (MINRES), `:lsmr` (LSMR), `:krylov` (defaults to `:cg`).
+  - `using Krylov`: `:cg` (Conjugate Gradient), `:minres` (MINRES), `:lsmr` (LSMR), `:krylov` (defaults to `:cg`). On sparse systems, `:cg` and `:minres` are Jacobi (diagonal) preconditioned whenever the damped diagonal is positive.
   - `using Pardiso`: `:pardiso` (Intel MKL PARDISO or Panua Pardiso multi-threaded direct sparse solver).
 
 Note: On `StaticLinearSystem`, `:qr` executes static LU decomposition via `\`, and `:ldl` uses Cholesky, falling back to LU when the matrix is not positive definite (the solve is then reported as `Indefinite`).

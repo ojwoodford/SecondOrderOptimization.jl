@@ -63,6 +63,27 @@ using SecondOrderOptimization, SparseArrays, LinearAlgebra, Test, Static
         @test isapprox(ls_right.x, x_exact; rtol=1e-5)
     end
 
+    # M11: sparse CG and MINRES are Jacobi preconditioned, which helps on a badly scaled matrix
+    n_sc = 400
+    T_sc = spdiagm(-1 => fill(-1.0, n_sc - 1), 0 => fill(2.1, n_sc), 1 => fill(-1.0, n_sc - 1))
+    D_sc = Diagonal(10.0 .^ range(-3, 3; length=n_sc))
+    A_sc = sparse(D_sc * T_sc * D_sc)
+    b_sc = A_sc * ones(n_sc)
+    for solver in (:cg, :minres)
+        ls_sc = SecondOrderOptimization.makelinearsystem(zeros(n_sc), copy(A_sc), static(solver))
+        ls_sc.b .= b_sc
+        @test SecondOrderOptimization.solve!(ls_sc, static(solver)) == Success
+        @test norm(ls_sc.x .- 1) <= 1e-5 * sqrt(n_sc)
+        # Unpreconditioned, CG doesn't converge and MINRES stops on a residual dominated by the
+        # large rows, both far from the solution
+        ws_plain = solver === :cg ? Krylov.CgWorkspace(A_sc, b_sc) : Krylov.MinresWorkspace(A_sc, b_sc)
+        solver === :cg ? Krylov.cg!(ws_plain, A_sc, b_sc) : Krylov.minres!(ws_plain, A_sc, b_sc)
+        @test norm(ws_plain.x .- 1) > 1e-2 * sqrt(n_sc)
+        sparse_krylov_allocs(ls, s) = @allocated SecondOrderOptimization.solve!(ls, s)
+        sparse_krylov_allocs(ls_sc, static(solver))
+        @test sparse_krylov_allocs(ls_sc, static(solver)) == 0
+    end
+
     # Test Krylov on DenseLinearSystem
     A_dense = Matrix(A_spd)
     quad_dense_cost(x) = 0.5 * dot(x, A_dense * x) - dot(b_vec, x)

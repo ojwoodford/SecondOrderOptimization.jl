@@ -17,9 +17,28 @@ validatelinsolver(::StaticSymbol{:minres}) = true
 validatelinsolver(::StaticSymbol{:lsmr}) = true
 validatelinsolver(::StaticSymbol{:krylov}) = true
 
+# A Krylov workspace plus storage for a Jacobi (diagonal) preconditioner
+struct JacobiWorkspace{W}
+    ws::W
+    invdiag::Vector{Float64}
+end
+JacobiWorkspace(ws, n::Integer) = JacobiWorkspace(ws, Vector{Float64}(undef, n))
+
+# Fill the inverse of the (damped) diagonal of `ls.A`. Returns false, meaning "don't
+# precondition", when a diagonal entry is not positive and finite: the Jacobi preconditioner
+# must be positive definite, and an indefinite matrix should still be reported as such.
+function jacobi!(invdiag::Vector{Float64}, ls::SparseLinearSystem)
+    @inbounds for (i, idx) in enumerate(ls.diag_inds)
+        d = ls.A.nzval[idx]
+        (d > 0 && isfinite(d)) || return false
+        invdiag[i] = inv(d)
+    end
+    return true
+end
+
 # Preallocated workspace creation for SparseLinearSystem
-makesparsews(A, ::StaticSymbol{:cg}) = Krylov.CgWorkspace(A, zeros(eltype(A), size(A, 1)))
-makesparsews(A, ::StaticSymbol{:minres}) = Krylov.MinresWorkspace(A, zeros(eltype(A), size(A, 1)))
+makesparsews(A, ::StaticSymbol{:cg}) = JacobiWorkspace(Krylov.CgWorkspace(A, zeros(eltype(A), size(A, 1))), size(A, 1))
+makesparsews(A, ::StaticSymbol{:minres}) = JacobiWorkspace(Krylov.MinresWorkspace(A, zeros(eltype(A), size(A, 1))), size(A, 1))
 makesparsews(A, ::StaticSymbol{:lsmr}) = Krylov.LsmrWorkspace(A, zeros(eltype(A), size(A, 1)))
 makesparsews(A, ::StaticSymbol{:krylov}) = makesparsews(A, static(:cg))
 
@@ -44,7 +63,8 @@ end
 
 # SparseLinearSystem execution
 function solve!(ls::SparseLinearSystem, ::StaticSymbol{:cg})
-    ws = check_krylov_ws(ls.solver_ws, Krylov.CgWorkspace, :cg)
+    jws = check_krylov_ws(ls.solver_ws, JacobiWorkspace{<:Krylov.CgWorkspace}, :cg)
+    ws = jws.ws
     if ls.lambda > 0
         if isnothing(ls.scaling)
             uniformscaling!(ls, ls.lambda)
@@ -53,8 +73,13 @@ function solve!(ls::SparseLinearSystem, ::StaticSymbol{:cg})
         end
     end
     # `linesearch=true` makes CG stop and flag `stats.indefinite` on nonpositive curvature;
-    # without it, CG keeps iterating on an indefinite matrix.
-    Krylov.cg!(ws, ls.A, ls.b; linesearch=true)
+    # without it, CG keeps iterating on an indefinite matrix. Jacobi-preconditioned when the
+    # diagonal is positive (`M` is applied as a product, so it holds the inverse diagonal).
+    if jacobi!(jws.invdiag, ls)
+        Krylov.cg!(ws, ls.A, ls.b; M=Diagonal(jws.invdiag), linesearch=true)
+    else
+        Krylov.cg!(ws, ls.A, ls.b; linesearch=true)
+    end
     copyto!(ls.x, ws.x)
     if ls.lambda > 0
         @inbounds for (i, idx) in enumerate(ls.diag_inds)
@@ -65,7 +90,8 @@ function solve!(ls::SparseLinearSystem, ::StaticSymbol{:cg})
 end
 
 function solve!(ls::SparseLinearSystem, ::StaticSymbol{:minres})
-    ws = check_krylov_ws(ls.solver_ws, Krylov.MinresWorkspace, :minres)
+    jws = check_krylov_ws(ls.solver_ws, JacobiWorkspace{<:Krylov.MinresWorkspace}, :minres)
+    ws = jws.ws
     if ls.lambda > 0
         if isnothing(ls.scaling)
             uniformscaling!(ls, ls.lambda)
@@ -73,7 +99,11 @@ function solve!(ls::SparseLinearSystem, ::StaticSymbol{:minres})
             damp_marquardt!(ls, ls.scaling, ls.lambda)
         end
     end
-    Krylov.minres!(ws, ls.A, ls.b)
+    if jacobi!(jws.invdiag, ls)
+        Krylov.minres!(ws, ls.A, ls.b; M=Diagonal(jws.invdiag))
+    else
+        Krylov.minres!(ws, ls.A, ls.b)
+    end
     copyto!(ls.x, ws.x)
     if ls.lambda > 0
         @inbounds for (i, idx) in enumerate(ls.diag_inds)
