@@ -23,19 +23,22 @@ makesparsews(A, ::StaticSymbol{:minres}) = Krylov.MinresWorkspace(A, zeros(eltyp
 makesparsews(A, ::StaticSymbol{:lsmr}) = Krylov.LsmrWorkspace(A, zeros(eltype(A), size(A, 1)))
 makesparsews(A, ::StaticSymbol{:krylov}) = makesparsews(A, static(:cg))
 
+# The sparse workspace is built once, by `makesparsews`, and `solver_ws` is a `const` field,
+# so it cannot be replaced when it doesn't match the requested solver.
+function check_krylov_ws(ws, ::Type{W}, s::Symbol) where W
+    ws isa W && return ws
+    throw(ArgumentError("This linear system was not built for linsolver=:$s; construct it with `makelinearsystem(x0, H, :$s)`."))
+end
+
 # SparseLinearSystem execution
 function solve!(ls::SparseLinearSystem, ::StaticSymbol{:cg})
+    ws = check_krylov_ws(ls.solver_ws, Krylov.CgWorkspace, :cg)
     if ls.lambda > 0
         if isnothing(ls.scaling)
             uniformscaling!(ls, ls.lambda)
         else
             damp_marquardt!(ls, ls.scaling, ls.lambda)
         end
-    end
-    ws = ls.solver_ws
-    if !(ws isa Krylov.CgWorkspace)
-        ws = Krylov.CgWorkspace(ls.A, ls.b)
-        ls.solver_ws = ws
     end
     Krylov.cg!(ws, ls.A, ls.b)
     copyto!(ls.x, ws.x)
@@ -54,17 +57,13 @@ function solve!(ls::SparseLinearSystem, ::StaticSymbol{:cg})
 end
 
 function solve!(ls::SparseLinearSystem, ::StaticSymbol{:minres})
+    ws = check_krylov_ws(ls.solver_ws, Krylov.MinresWorkspace, :minres)
     if ls.lambda > 0
         if isnothing(ls.scaling)
             uniformscaling!(ls, ls.lambda)
         else
             damp_marquardt!(ls, ls.scaling, ls.lambda)
         end
-    end
-    ws = ls.solver_ws
-    if !(ws isa Krylov.MinresWorkspace)
-        ws = Krylov.MinresWorkspace(ls.A, ls.b)
-        ls.solver_ws = ws
     end
     Krylov.minres!(ws, ls.A, ls.b)
     copyto!(ls.x, ws.x)
@@ -77,17 +76,13 @@ function solve!(ls::SparseLinearSystem, ::StaticSymbol{:minres})
 end
 
 function solve!(ls::SparseLinearSystem, ::StaticSymbol{:lsmr})
+    ws = check_krylov_ws(ls.solver_ws, Krylov.LsmrWorkspace, :lsmr)
     if ls.lambda > 0
         if isnothing(ls.scaling)
             uniformscaling!(ls, ls.lambda)
         else
             damp_marquardt!(ls, ls.scaling, ls.lambda)
         end
-    end
-    ws = ls.solver_ws
-    if !(ws isa Krylov.LsmrWorkspace)
-        ws = Krylov.LsmrWorkspace(ls.A, ls.b)
-        ls.solver_ws = ws
     end
     Krylov.lsmr!(ws, ls.A, ls.b)
     copyto!(ls.x, ws.x)

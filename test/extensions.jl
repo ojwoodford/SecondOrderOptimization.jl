@@ -42,6 +42,18 @@ using SecondOrderOptimization, SparseArrays, LinearAlgebra, Test, Static
         @test isapprox(x_lm, x_exact; rtol=1e-5)
     end
 
+    # B1: a sparse system built for another solver throws an informative error rather than
+    # trying to replace the `const` workspace field
+    for solver in (:cg, :minres, :lsmr)
+        ls_wrong = SecondOrderOptimization.makelinearsystem(zeros(3), copy(A_spd), static(:auto))
+        ls_wrong.b .= b_vec
+        @test_throws ArgumentError SecondOrderOptimization.solve!(ls_wrong, static(solver))
+        ls_right = SecondOrderOptimization.makelinearsystem(zeros(3), copy(A_spd), static(solver))
+        ls_right.b .= b_vec
+        @test SecondOrderOptimization.solve!(ls_right, static(solver)) == Success
+        @test isapprox(ls_right.x, x_exact; rtol=1e-5)
+    end
+
     # Test Krylov on DenseLinearSystem
     A_dense = Matrix(A_spd)
     quad_dense_cost(x) = 0.5 * dot(x, A_dense * x) - dot(b_vec, x)
@@ -82,6 +94,15 @@ using SecondOrderOptimization, SparseArrays, LinearAlgebra, Test, Static
         x_pardiso, res_pardiso = optimize(quad_cost, quad_fdf!, [0.0, 0.0, 0.0], opts_pardiso; H=copy(A_spd))
         @test isconverged(res_pardiso)
         @test isapprox(x_pardiso, x_exact; rtol=1e-5)
+        # B1: repeated solves on one system must not try to reassign the const workspace field
+        ls = SecondOrderOptimization.makelinearsystem(zeros(3), copy(A_spd), static(:pardiso))
+        ls.b .= b_vec
+        for _ in 1:3
+            @test SecondOrderOptimization.solve!(ls, static(:pardiso)) == Success
+            @test isapprox(ls.x, x_exact; rtol=1e-8)
+        end
+        ls_wrong = SecondOrderOptimization.makelinearsystem(zeros(3), copy(A_spd), static(:auto))
+        @test_throws ArgumentError SecondOrderOptimization.solve!(ls_wrong, static(:pardiso))
     else
         # When shared library is not installed, attempting to solve throws an informative error
         ls = SecondOrderOptimization.makelinearsystem(zeros(3), copy(A_spd), static(:pardiso))

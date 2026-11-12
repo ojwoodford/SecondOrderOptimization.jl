@@ -13,6 +13,18 @@ import SecondOrderOptimization: uniformscaling!, damp_marquardt!
 # Validation of Pardiso solver symbol
 validatelinsolver(::StaticSymbol{:pardiso}) = true
 
+function pardiso_unavailable_error()
+    error("Pardiso.jl is loaded, but neither Intel MKL Pardiso nor Panua Pardiso native shared library is available.")
+end
+
+# The sparse workspace is built once, by `makesparsews`, and `solver_ws` is a `const` field,
+# so it cannot be replaced here.
+function check_pardiso_ws(ws)
+    ws isa Pardiso.AbstractPardisoSolver && return ws
+    (Pardiso.mkl_is_available() || Pardiso.panua_is_available()) || pardiso_unavailable_error()
+    throw(ArgumentError("This linear system was not built for linsolver=:pardiso; construct it with `makelinearsystem(x0, H, :pardiso)`."))
+end
+
 function get_or_create_pardiso(ws)
     if ws isa Pardiso.AbstractPardisoSolver
         return ws
@@ -22,7 +34,7 @@ function get_or_create_pardiso(ws)
     elseif Pardiso.panua_is_available()
         ps = Pardiso.PardisoSolver()
     else
-        error("Pardiso.jl is loaded, but neither Intel MKL Pardiso nor Panua Pardiso native shared library is available.")
+        pardiso_unavailable_error()
     end
     Pardiso.set_matrixtype!(ps, Pardiso.REAL_SYM_POSDEF)
     Pardiso.pardisoinit(ps)
@@ -43,8 +55,7 @@ function makesparsews(A, ::StaticSymbol{:pardiso})
 end
 
 function solve!(ls::SparseLinearSystem, ::StaticSymbol{:pardiso})
-    ps = get_or_create_pardiso(ls.solver_ws)
-    ls.solver_ws = ps
+    ps = check_pardiso_ws(ls.solver_ws)
     if ls.lambda > 0
         if isnothing(ls.scaling)
             uniformscaling!(ls, ls.lambda)
