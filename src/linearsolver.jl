@@ -22,6 +22,16 @@ function checkhessianforsolver(H, linsolver)
     return nothing
 end
 
+checkhessiansize(x0, H) = nothing
+function checkhessiansize(x0, H::AbstractMatrix)
+    n = dynamic(nvars(x0))
+    size(H) == (n, n) || throw(DimensionMismatch("Hessian prototype H has size $(size(H)), but the variables have $n degrees of freedom, so H must be $n×$n."))
+    return nothing
+end
+
+# Checks on the Hessian prototype, run before the linear system is built
+checkhessian(x0, H, linsolver) = (checkhessiansize(x0, H); checkhessianforsolver(H, linsolver))
+
 function checklinsolver(s::Symbol)
     validatelinsolver(s) && return true
     if s === :pardiso

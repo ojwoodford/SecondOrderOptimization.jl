@@ -66,7 +66,9 @@ function OptimizationOptions(;
     getiterator(iter_sym) # validates iterator symbol
     linsolv_sym = linsolver_symbol(linsolver)
     checklinsolver(linsolv_sym) # validates linear solver symbol
-    maxtime_ns = isfinite(maxtime) ? UInt64(round(max(maxtime, 0.0) * 1e9)) : typemax(UInt64)
+    # Saturate: anything at or beyond the UInt64 nanosecond range means no time limit
+    maxtime_s = max(Float64(maxtime), 0.0)
+    maxtime_ns = maxtime_s * 1e9 < Float64(typemax(UInt64)) ? UInt64(round(maxtime_s * 1e9)) : typemax(UInt64)
     return OptimizationOptions(
         Float64(reldcost), Float64(absdcost), Float64(dstep), Float64(gtol),
         Int(maxfails), Int(maxiters), maxtime_ns,

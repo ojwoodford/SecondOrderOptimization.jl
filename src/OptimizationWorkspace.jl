@@ -12,6 +12,7 @@ function storeworkspace!(ws::OptimizationWorkspace{K, D}, key, data) where {K, D
         ws.key = key
         ws.data = data
     else
+        @warn "OptimizationWorkspace{$K, $D} can't hold the data for this problem, so it was emptied and every call with it pays the full setup cost. Use `OptimizationWorkspace()` for a workspace that adapts to any problem." maxlog=1
         empty!(ws)
     end
     return ws
@@ -44,7 +45,7 @@ function keyvalid(key::Tuple, x0, options::OptimizationOptions, H)
 end
 
 function OptimizationWorkspace(x0, options::OptimizationOptions=OptimizationOptions(); H=nothing, startstats::Stats=Stats())
-    checkhessianforsolver(H, options.linsolver)
+    checkhessian(x0, H, options.linsolver)
     ls = makelinearsystem(x0, H, options.linsolver)
     data = OptimizationInternal(ls, x0, startstats)
     iteratedata = construct(options.iterator, ls, options.callbackchangesstate)

@@ -11,7 +11,7 @@ function optimize!(
     if !isnothing(workspace) && workspacevalid(workspace, x, options, H)
         return run_cached_optimize!(something(workspace.data), x, f, fdf!, options, callback, startstats)
     else
-        checkhessianforsolver(H, options.linsolver)
+        checkhessian(x, H, options.linsolver)
         ls = makelinearsystem(x, H, options.linsolver)
         data = OptimizationInternal(ls, x, startstats)
         iteratedata = construct(options.iterator, ls, options.callbackchangesstate)

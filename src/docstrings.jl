@@ -1,9 +1,27 @@
 const H_PROTOTYPE_DOC = """
-  A sparse prototype should store every diagonal entry (explicit zeros are fine). If one is missing, a new matrix with
-  explicit zeros on the diagonal is built and handed to `fdf!` in place of the prototype; its
-  `nzval` layout differs from the prototype's, so an `fdf!` that writes by precomputed `nzval`
-  positions of its own prototype would write to the wrong entries. Writing through `H[i, j]`
-  works either way."""
+  See *The Hessian prototype* below."""
+
+const H_CONTRACT_DOC = """
+# The Hessian prototype
+- **Fill both triangles.** `fdf!` must write the full symmetric Hessian. Some solvers read only
+  the upper triangle (dense Cholesky and Bunch-Kaufman, sparse `:cholesky`), but sparse
+  `:auto`/`:ldl` need both, and `:qr` and the predicted cost reduction read every stored entry,
+  so an upper-triangle-only `H` gives a wrong step or a wrong step-quality estimate.
+- **Size and element type.** `H` must be `n×n`, where `n == nvars(x0)`; a mismatch is a
+  `DimensionMismatch`. The Hessian is `Float64`: a sparse prototype must be
+  `SparseMatrixCSC{Float64}`, and a dense one of another type is copied into a `Matrix{Float64}`.
+- **Missing diagonal entries.** A sparse prototype should store every diagonal entry (explicit
+  zeros are fine). If one is missing, a new matrix with explicit zeros on the diagonal is built
+  and handed to `fdf!` in place of the prototype; its `nzval` layout differs from the
+  prototype's, so an `fdf!` that writes by precomputed `nzval` positions of its own prototype
+  would write to the wrong entries. Writing through `H[i, j]` works either way.
+- **Which matrix holds the final Hessian.** `fdf!` writes into the linear system's own matrix.
+  That is the prototype itself for a `Matrix{Float64}`, `MMatrix` or a sparse matrix with every
+  diagonal entry stored, and a copy otherwise. With a reused `workspace`, the matrix is the one
+  from the call that built the workspace: passing a different `H` object of the same type and
+  size (or, for a sparse `H`, the same pattern) on a later call reuses the cached system, and
+  the new `H` is left untouched.
+"""
 
 """
     OptimizationOptions(; kwargs...)
@@ -74,6 +92,11 @@ OptimizationResult
 
 Preallocated cache for linear systems, solver factorizations, and trial variable buffers,
 enabling zero-allocation repeated optimizations.
+
+The cache is reused when the variable type, dimension and block layout, the options type and the
+Hessian's type and structure all match; otherwise it is rebuilt (and, for a workspace whose type
+parameters can't hold the new data, emptied, with a one-time warning). A reused workspace keeps
+the Hessian matrix of the call that built it: see *The Hessian prototype* in [`optimize`](@ref).
 
 # Example
 ```julia
@@ -340,6 +363,8 @@ In-place variant of [`optimize`](@ref). Minimizes scalar objective `f(x)` updati
 # Returns
 - `x_best`: The optimal variable state found (for mutable vectors, identical to `x` mutated in-place).
 - `result::OptimizationResult`: Detailed optimization statistics.
+
+$(H_CONTRACT_DOC)
 """
 optimize!
 
@@ -363,6 +388,8 @@ Does not mutate `x0` (allocates a copy of `x0` and delegates to [`optimize!`](@r
 # Returns
 - `x_best`: The optimal variable state found.
 - `result::OptimizationResult`: Detailed optimization statistics.
+
+$(H_CONTRACT_DOC)
 
 # Example
 ```julia

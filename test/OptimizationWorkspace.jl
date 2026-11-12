@@ -36,7 +36,8 @@ end
     # 2. Key invalidation when options change (and safe fallback on concretely-typed workspace)
     opts_new = OptimizationOptions(iterator=:levenbergmarquardt)
     @test !SecondOrderOptimization.workspacevalid(ws, x0_static, opts_new, nothing)
-    x_opt_new, _ = optimize(quad_cost, quad_fdf!, x0_static, opts_new; workspace=ws)
+    # M6: a concretely typed workspace that can't hold the new data warns (once) when emptied
+    x_opt_new, _ = @test_logs (:warn, r"emptied") optimize(quad_cost, quad_fdf!, x0_static, opts_new; workspace=ws)
     @test isapprox(x_opt_new, [0.0, 0.0]; atol=1e-8)
     @test isempty(ws)
 
@@ -102,4 +103,13 @@ end
     @test SecondOrderOptimization.cachekey(xa, opts_blk, nothing) != SecondOrderOptimization.cachekey(xb, opts_blk, nothing)
     @test SecondOrderOptimization.cachekey(xc, opts_blk, nothing) != SecondOrderOptimization.cachekey(xd, opts_blk, nothing)
     @test SecondOrderOptimization.cachekey(xa, opts_blk, nothing) == SecondOrderOptimization.cachekey(copy(xa), opts_blk, nothing)
+
+    # M8: a reused workspace keeps the Hessian matrix of the call that built it
+    H1 = zeros(3, 3)
+    H2 = zeros(3, 3)
+    ws_h = OptimizationWorkspace()
+    optimize(quad_cost, quad_fdf!, ones(3), OptimizationOptions(); H=H1, workspace=ws_h)
+    @test H1 == I
+    optimize(quad_cost, quad_fdf!, ones(3), OptimizationOptions(); H=H2, workspace=ws_h)
+    @test all(iszero, H2)
 end

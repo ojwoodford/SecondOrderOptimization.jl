@@ -1,4 +1,4 @@
-using SecondOrderOptimization, StaticArrays, LinearAlgebra, Test
+using SecondOrderOptimization, StaticArrays, LinearAlgebra, SparseArrays, Test
 
 @testset "general_objectives.jl" begin
     # 1. Nonzero minimum / offset cost in Dogleg and all second-order iterators
@@ -46,6 +46,12 @@ using SecondOrderOptimization, StaticArrays, LinearAlgebra, Test
     # 3. maxtime = Inf and zero-time
     opts_inf = OptimizationOptions(maxtime=Inf)
     @test opts_inf.maxtime == typemax(UInt64)
+    # M5: a huge finite maxtime saturates instead of throwing InexactError
+    for t in (1e11, 1e30, floatmax(Float64))
+        @test OptimizationOptions(maxtime=t).maxtime == typemax(UInt64)
+    end
+    @test OptimizationOptions(maxtime=1e9).maxtime == UInt64(1e18)
+    @test OptimizationOptions(maxtime=-1.0).maxtime == 0
     x_opt, res_inf = optimize(offset_cost, offset_fdf!, x0, opts_inf)
     @test isconverged(res_inf)
 
@@ -131,4 +137,16 @@ using SecondOrderOptimization, StaticArrays, LinearAlgebra, Test
         end
         @test abs(sin(3 * x_dw[2])) < 1e-6 && cos(3 * x_dw[2]) > 0
     end
+
+    # M7: the Hessian prototype must match the number of variables
+    sq(x) = sum(abs2, x)
+    sq_fdf!(g, H, x) = (g .= 2 .* x; H .= 2 * I(length(x)); sq(x))
+    for H_bad in (zeros(2, 2), spzeros(4, 4), zeros(3, 2))
+        @test_throws DimensionMismatch optimize(sq, sq_fdf!, ones(3), OptimizationOptions(); H=H_bad)
+        @test_throws DimensionMismatch OptimizationWorkspace(ones(3), OptimizationOptions(); H=H_bad)
+    end
+    # M4: the Hessian is Float64; another sparse element type is a clear error
+    err = try optimize(sq, sq_fdf!, ones(3), OptimizationOptions(); H=sparse(Float32(1) * I(3))); nothing catch e; e end
+    @test err isa ArgumentError
+    @test occursin("Float64", sprint(showerror, err))
 end

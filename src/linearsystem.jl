@@ -135,7 +135,8 @@ makesparsews(A, ::StaticSymbol{S}) where S = nothing
 makesparsews(A, s::Symbol) = makesparsews(A, static(s))
 makesparsews(A, s::OptimizationLinearSolver) = makesparsews(A, static(linsolver_symbol(s)))
 
-function makelinearsystem(x0, H::SparseMatrixCSC, linsolver)
+function makelinearsystem(x0, H::SparseMatrixCSC{T}, linsolver) where T
+    T === Float64 || throw(ArgumentError("The Hessian must be Float64; got a sparse prototype with element type $T. Pass a SparseMatrixCSC{Float64}."))
     A, diag_inds = ensure_diag_and_inds(H)
     sym = static(linsolver_symbol(linsolver))
     ws = makesparsews(A, sym)
