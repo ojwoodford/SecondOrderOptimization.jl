@@ -112,4 +112,33 @@ end
     @test H1 == I
     optimize(quad_cost, quad_fdf!, ones(3), OptimizationOptions(); H=H2, workspace=ws_h)
     @test all(iszero, H2)
+
+    # M12: a sparse H's structure is matched by identity first, then by hashes
+    n_k = 50
+    H_k = spdiagm(-1 => ones(n_k - 1), 0 => fill(4.0, n_k), 1 => ones(n_k - 1))
+    opts_k = OptimizationOptions()
+    key_k = SecondOrderOptimization.cachekey(ones(n_k), opts_k, H_k)
+    @test SecondOrderOptimization.keyvalid(key_k, ones(n_k), opts_k, H_k)                 # same object
+    @test SecondOrderOptimization.keyvalid(key_k, ones(n_k), opts_k, copy(H_k))           # same pattern
+    @test SecondOrderOptimization.keyvalid(key_k, ones(n_k), opts_k, 2 .* H_k)            # values differ
+    @test !SecondOrderOptimization.keyvalid(key_k, ones(n_k), opts_k, spdiagm(0 => ones(n_k)))
+    @test !SecondOrderOptimization.keyvalid(key_k, ones(n_k), opts_k, sparse(Matrix(H_k)'[:, end:-1:1]))
+    @test !SecondOrderOptimization.keyvalid(key_k, ones(n_k), opts_k, Matrix(H_k))
+    @test !SecondOrderOptimization.keyvalid(key_k, ones(n_k + 1), opts_k, H_k)
+    @test key_k == SecondOrderOptimization.cachekey(ones(n_k), opts_k, copy(H_k))
+    keyvalid_allocs(k, x, o, H) = @allocated SecondOrderOptimization.keyvalid(k, x, o, H)
+    x_k = ones(n_k)
+    keyvalid_allocs(key_k, x_k, opts_k, H_k)
+    @test keyvalid_allocs(key_k, x_k, opts_k, H_k) == 0
+    # Same object: the pattern is not rehashed (shown by an in-place change that keeps the count)
+    H_mut = copy(H_k)
+    key_mut = SecondOrderOptimization.cachekey(ones(n_k), opts_k, H_mut)
+    H_mut.rowval[1], H_mut.rowval[2] = H_mut.rowval[2], H_mut.rowval[1]
+    @test SecondOrderOptimization.keyvalid(key_mut, ones(n_k), opts_k, H_mut)
+    @test !SecondOrderOptimization.keyvalid(key_mut, ones(n_k), opts_k, copy(H_mut))
+    # Inserting an entry in place changes the count, so the key no longer matches
+    H_ins = copy(H_k)
+    key_ins = SecondOrderOptimization.cachekey(ones(n_k), opts_k, H_ins)
+    H_ins[1, n_k] = 1.0
+    @test !SecondOrderOptimization.keyvalid(key_ins, ones(n_k), opts_k, H_ins)
 end

@@ -20,7 +20,34 @@ end
 
 h_structure_key(::Nothing) = nothing
 h_structure_key(H::AbstractMatrix) = (typeof(H), size(H))
-h_structure_key(H::SparseMatrixCSC) = (typeof(H), size(H), hash(H.colptr), hash(H.rowval), length(H.nzval))
+
+# The structure of a sparse Hessian. It keeps the arrays it was built from so that a later call
+# passing the same `H` (or one sharing its `colptr` and `rowval`) matches without rehashing the
+# O(nnz) pattern; any other matrix is compared by hashes.
+struct SparseStructureKey{M <: SparseMatrixCSC, Ti}
+    size::Tuple{Int, Int}
+    colptr::Vector{Ti}
+    rowval::Vector{Ti}
+    hcolptr::UInt
+    hrowval::UInt
+    nnz::Int
+end
+h_structure_key(H::SparseMatrixCSC{Tv, Ti}) where {Tv, Ti} =
+    SparseStructureKey{typeof(H), Ti}(size(H), H.colptr, H.rowval, hash(H.colptr), hash(H.rowval), length(H.nzval))
+
+function Base.:(==)(a::SparseStructureKey, b::SparseStructureKey)
+    return typeof(a) === typeof(b) && a.size == b.size && a.nnz == b.nnz && a.hcolptr == b.hcolptr && a.hrowval == b.hrowval
+end
+Base.hash(k::SparseStructureKey, h::UInt) = hash((typeof(k), k.size, k.nnz, k.hcolptr, k.hrowval), h)
+
+hkeyvalid(key, H) = key == h_structure_key(H)
+function hkeyvalid(key::SparseStructureKey{M}, H::M) where M <: SparseMatrixCSC
+    (key.size == size(H) && key.nnz == length(H.nzval)) || return false
+    # Same arrays: the pattern is the one that was hashed. Inserting or removing stored entries
+    # in place changes the entry count, which was checked above.
+    key.colptr === H.colptr && key.rowval === H.rowval && return true
+    return key.hcolptr == hash(H.colptr) && key.hrowval == hash(H.rowval)
+end
 
 # A `Vector` of variable blocks of one type and total dimension can still differ in the number
 # and sizes of its blocks (e.g. two 3-vectors versus three 2-vectors), so key on those too.
@@ -41,7 +68,11 @@ end
 workspacevalid(ws::OptimizationWorkspace, x0, options::OptimizationOptions, H) = keyvalid(ws.key, x0, options, H)
 keyvalid(key, x0, options::OptimizationOptions, H) = false
 function keyvalid(key::Tuple, x0, options::OptimizationOptions, H)
-    return key == cachekey(x0, options, H)
+    key[1] === typeof(x0) || return false
+    key[2] == dynamic(nvars(x0)) || return false
+    key[3] == blocklayout_key(x0) || return false
+    key[4] === typeof(options) || return false
+    return hkeyvalid(key[5], H)
 end
 
 function OptimizationWorkspace(x0, options::OptimizationOptions=OptimizationOptions(); H=nothing, startstats::Stats=Stats())
