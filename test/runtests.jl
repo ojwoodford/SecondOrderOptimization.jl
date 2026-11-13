@@ -9,6 +9,7 @@ using Test
     include("objectives.jl")
     include("jacobianobjective.jl")
     include("conformance.jl")
+    include("tallsystem.jl")
     include("staticrule.jl")
     include("functional.jl")
     include("nantrial.jl")

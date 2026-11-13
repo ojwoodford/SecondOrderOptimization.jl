@@ -37,6 +37,7 @@ include("linearsolver.jl")
 # Core options, results, and internal data structures
 include("structs.jl")
 include("objectives.jl")
+include("tallsystem.jl")
 include("OptimizationWorkspace.jl")
 
 # Callbacks
