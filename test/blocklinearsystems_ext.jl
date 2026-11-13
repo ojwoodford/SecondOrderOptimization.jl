@@ -16,32 +16,32 @@ variables first and eliminated variables second, in full dense form plus everyth
 struct SchurTestProblem
     H::Matrix{Float64}
     b::Vector{Float64}
-    c_dims::Vector{Int}
-    p_dims::Vector{Int}
+    r_dims::Vector{Int}
+    e_dims::Vector{Int}
     couplings::Vector{Vector{Int}}
-    cc_pairs::Vector{Tuple{Int, Int}}   # retained-retained block couplings (r > c), beyond the diagonal
+    rr_pairs::Vector{Tuple{Int, Int}}   # retained-retained block couplings (r > r), beyond the diagonal
 end
 
-function SchurTestProblem(rng, c_dims, p_dims, couplings; cc_pairs=Tuple{Int, Int}[])
-    nc, np = sum(c_dims), sum(p_dims)
-    n = nc + np
-    coff = cumsum([1; c_dims[1:end-1]])
-    poff = nc .+ cumsum([1; p_dims[1:end-1]])
+function SchurTestProblem(rng, r_dims, e_dims, couplings; rr_pairs=Tuple{Int, Int}[])
+    nr, ne = sum(r_dims), sum(e_dims)
+    n = nr + ne
+    roff = cumsum([1; r_dims[1:end-1]])
+    eoff = nr .+ cumsum([1; e_dims[1:end-1]])
     H = zeros(n, n)
-    function fillblock!(r0, nr, c0, ncol)
-        H[r0:r0+nr-1, c0:c0+ncol-1] .= 2 .* rand(rng, nr, ncol) .- 1
+    function fillblock!(r0, nrow, c0, ncol)
+        H[r0:r0+nrow-1, c0:c0+ncol-1] .= 2 .* rand(rng, nrow, ncol) .- 1
     end
-    for (c, d) in enumerate(c_dims)
-        fillblock!(coff[c], d, coff[c], d)
+    for (r, d) in enumerate(r_dims)
+        fillblock!(roff[r], d, roff[r], d)
     end
-    for (l, d) in enumerate(p_dims)
-        fillblock!(poff[l], d, poff[l], d)
+    for (e, d) in enumerate(e_dims)
+        fillblock!(eoff[e], d, eoff[e], d)
     end
-    for (l, cams) in enumerate(couplings), c in cams
-        fillblock!(coff[c], c_dims[c], poff[l], p_dims[l])
+    for (e, coupled) in enumerate(couplings), r in coupled
+        fillblock!(roff[r], r_dims[r], eoff[e], e_dims[e])
     end
-    for (r, c) in cc_pairs
-        fillblock!(coff[r], c_dims[r], coff[c], c_dims[c])
+    for (r1, r2) in rr_pairs
+        fillblock!(roff[r1], r_dims[r1], roff[r2], r_dims[r2])
     end
     # Symmetrize from the upper triangle (block diagonals are symmetrized element-wise)
     H = Matrix(Symmetric(H, :U))
@@ -49,29 +49,29 @@ function SchurTestProblem(rng, c_dims, p_dims, couplings; cc_pairs=Tuple{Int, In
     for i in 1:n
         H[i, i] = sum(abs, view(H, i, :)) - abs(H[i, i]) + 0.5 + rand(rng)
     end
-    return SchurTestProblem(H, randn(rng, n), c_dims, p_dims, couplings, cc_pairs)
+    return SchurTestProblem(H, randn(rng, n), r_dims, e_dims, couplings, rr_pairs)
 end
 
-nc(p::SchurTestProblem) = sum(p.c_dims)
+nr(p::SchurTestProblem) = sum(p.r_dims)
 
 function schur_structure(p::SchurTestProblem; nchunks=1)
-    return SchurStructure(p.c_dims, p.p_dims, p.couplings; nchunks)
+    return SchurStructure(p.r_dims, p.e_dims, p.couplings; nchunks)
 end
 
-function fill_cp!(p::SchurTestProblem, structure::SchurStructure, C_data, E_data)
-    nc_ = nc(p)
-    for l in eachindex(p.p_dims)
-        dp = p.p_dims[l]
-        po = structure.ppoffsets[l]
-        poff = nc_ + structure.boffsets_p[l]
-        C_data[po:po+dp^2-1] .= vec(p.H[poff:poff+dp-1, poff:poff+dp-1])
-        for e in structure.cpptr[l]:structure.cpptr[l+1]-1
-            c = structure.cpblock[e]
-            dc = p.c_dims[c]
-            co = structure.boffsets_c[c]
-            eo = structure.cpoffsets[e]
-            # Stored as dp x dc column-major: E_data[eo + (r-1)*dp + i-1] = H[c_r, p_i]
-            E_data[eo:eo+dc*dp-1] .= vec(p.H[co:co+dc-1, poff:poff+dp-1]')
+function fill_ce!(p::SchurTestProblem, structure::SchurStructure, E_data, C_data)
+    nr_ = nr(p)
+    for e in eachindex(p.e_dims)
+        de = p.e_dims[e]
+        eo = structure.eoffsets[e]
+        eoff = nr_ + structure.boffsets_e[e]
+        E_data[eo:eo+de^2-1] .= vec(p.H[eoff:eoff+de-1, eoff:eoff+de-1])
+        for c in structure.eliminated_ptr[e]:structure.eliminated_ptr[e+1]-1
+            r = structure.entry_retained[c]
+            dr = p.r_dims[r]
+            ro = structure.boffsets_r[r]
+            co = structure.coffsets[c]
+            # Stored as de x dr column-major: C_data[co + (r-1)*de + i-1] = H[c_r, p_i]
+            C_data[co:co+dr*de-1] .= vec(p.H[ro:ro+dr-1, eoff:eoff+de-1]')
         end
     end
     return nothing
@@ -79,12 +79,12 @@ end
 
 function dense_schur_matrix(p::SchurTestProblem; nchunks=1)
     structure = schur_structure(p; nchunks)
-    n_c = nc(p)
-    B = p.H[1:n_c, 1:n_c]
-    C_data = zeros(sum(abs2, p.p_dims))
-    E_data = zeros(structure.cpoffsets[end] + Int(structure.c_dims[structure.cpblock[end]]) * Int(structure.p_dims[end]) - 1)
-    fill_cp!(p, structure, C_data, E_data)
-    return SchurBlockMatrix(structure, B, C_data, E_data)
+    n_r = nr(p)
+    R = p.H[1:n_r, 1:n_r]
+    E_data = zeros(sum(abs2, p.e_dims))
+    C_data = zeros(structure.coffsets[end] + Int(structure.r_dims[structure.entry_retained[end]]) * Int(structure.e_dims[end]) - 1)
+    fill_ce!(p, structure, E_data, C_data)
+    return SchurBlockMatrix(structure, R, E_data, C_data)
 end
 
 function sparse_schur_matrix(p::SchurTestProblem; nchunks=1)
@@ -92,21 +92,21 @@ function sparse_schur_matrix(p::SchurTestProblem; nchunks=1)
     pattern = build_schur_pattern(structure)
     coords = Tuple{Int, Int}[]
     cb = pattern.block_colptr
-    for c in 1:structure.ncblocks, k in cb[c]:cb[c+1]-1
-        r = pattern.block_rowval[k]       # r <= c in the upper-triangle pattern
-        push!(coords, (c, r))           # store lower-triangle block (row = c, col = r)
+    for r2 in 1:structure.nrblocks, k in cb[r2]:cb[r2+1]-1
+        r1 = pattern.block_rowval[k]       # r1 <= r2 in the upper-triangle pattern
+        push!(coords, (r2, r1))            # store lower-triangle block (row = r2, col = r1)
     end
-    append!(coords, p.cc_pairs)
+    append!(coords, p.rr_pairs)
     unique!(coords)
-    B = SparseBlockLinearSystem{Float64}(coords, p.c_dims)
-    coff = structure.boffsets_c
-    for (r, c) in coords
-        block(B, r, c) .= p.H[coff[r]:coff[r]+p.c_dims[r]-1, coff[c]:coff[c]+p.c_dims[c]-1]
+    R = SparseBlockLinearSystem{Float64}(coords, p.r_dims)
+    roff = structure.boffsets_r
+    for (r1, r2) in coords
+        block(R, r1, r2) .= p.H[roff[r1]:roff[r1]+p.r_dims[r1]-1, roff[r2]:roff[r2]+p.r_dims[r2]-1]
     end
-    C_data = zeros(sum(abs2, p.p_dims))
-    E_data = zeros(structure.cpoffsets[end] + Int(structure.c_dims[structure.cpblock[end]]) * Int(structure.p_dims[end]) - 1)
-    fill_cp!(p, structure, C_data, E_data)
-    return SchurBlockMatrix(structure, B, C_data, E_data)
+    E_data = zeros(sum(abs2, p.e_dims))
+    C_data = zeros(structure.coffsets[end] + Int(structure.r_dims[structure.entry_retained[end]]) * Int(structure.e_dims[end]) - 1)
+    fill_ce!(p, structure, E_data, C_data)
+    return SchurBlockMatrix(structure, R, E_data, C_data)
 end
 
 function make_schur_ls(kind::Symbol, p::SchurTestProblem, scaling=ones(length(p.b)); nchunks=1)
@@ -124,17 +124,17 @@ function reference_solve(p::SchurTestProblem, lambda, damping)
     return cholesky(Symmetric(Hd)) \ p.b
 end
 
-function standard_problem(seed=1; cc_pairs=Tuple{Int, Int}[])
+function standard_problem(seed=1; rr_pairs=Tuple{Int, Int}[])
     rng = Random.Xoshiro(seed)
-    c_dims = [6, 6, 6, 6]
-    p_dims = [3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1]
+    r_dims = [6, 6, 6, 6]
+    e_dims = [3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1]
     # Retained blocks 1-2 and 3-4 are coupled to eliminated blocks together; 2-3 are linked through a few eliminated blocks
     couplings = [
         [1, 2], [1, 2], [1, 2, 3], [2, 3], [3, 4], [3, 4], [1, 4],
         [1, 2], [2, 3], [3, 4], [1, 2, 3, 4], [4],
         [1], [2], [3], [4], [1, 2], [3, 4], [2, 3], [1, 4],
     ]
-    return SchurTestProblem(rng, c_dims, p_dims, couplings; cc_pairs)
+    return SchurTestProblem(rng, r_dims, e_dims, couplings; rr_pairs)
 end
 
 @testset "BlockLinearSystemsExt: Schur solve equals full Cholesky solve" begin
@@ -159,9 +159,9 @@ end
 
 # Copy the numerical content of `src` (a SchurBlockMatrix) into `dst`
 function copy_content!(dst::SchurBlockMatrix, src::SchurBlockMatrix)
-    dst.B isa Matrix ? copyto!(dst.B, src.B) : copyto!(dst.B.data, src.B.data)
-    copyto!(dst.C_data, src.C_data)
+    dst.R isa Matrix ? copyto!(dst.R, src.R) : copyto!(dst.R.data, src.R.data)
     copyto!(dst.E_data, src.E_data)
+    copyto!(dst.C_data, src.C_data)
     return dst
 end
 
@@ -176,9 +176,9 @@ end
 
             # New storage for the Hessian and gradient, shared x
             @test trial.H !== ls.H
-            @test trial.H.B !== ls.H.B
-            @test trial.H.C_data !== ls.H.C_data
+            @test trial.H.R !== ls.H.R
             @test trial.H.E_data !== ls.H.E_data
+            @test trial.H.C_data !== ls.H.C_data
             @test trial.b !== ls.b
             @test trial.x === ls.x
             @test SecondOrderOptimization.getA(trial) === trial.H
@@ -208,10 +208,10 @@ end
 # direct retained-retained blocks (odometry / loop-closure style), which have no eliminated variable.
 function coupled_groups_problem(seed=3)
     rng = Random.Xoshiro(seed)
-    c_dims = [6, 6, 6, 6]
-    p_dims = [3, 3, 3, 3, 2, 2, 1, 1]
+    r_dims = [6, 6, 6, 6]
+    e_dims = [3, 3, 3, 3, 2, 2, 1, 1]
     couplings = [[1, 2], [1, 2], [3, 4], [3, 4], [1], [4], [2, 1], [3, 4]]
-    return SchurTestProblem(rng, c_dims, p_dims, couplings; cc_pairs=[(3, 1), (4, 2), (2, 1)])
+    return SchurTestProblem(rng, r_dims, e_dims, couplings; rr_pairs=[(3, 1), (4, 2), (2, 1)])
 end
 
 @testset "BlockLinearSystemsExt: retained-retained couplings without a shared eliminated variable (B4)" begin
@@ -227,15 +227,15 @@ end
     @test nnz(withextra.block_pattern) == nnz(plain.block_pattern) + 2
     @test_throws ArgumentError build_schur_pattern(structure; extra_blocks=[(1, 5)])
 
-    # The sparse system fails to build a slot for B's coupling without the extra pairs ...
+    # The sparse system fails to build a slot for R's coupling without the extra pairs ...
     H = sparse_schur_matrix(p)
-    @test Set(retained_block_pairs(H.B)) ⊇ Set([(3, 1), (4, 2)])
-    @test_throws AssertionError build_b_to_s_map(H.B, plain.S_sparse, structure.boffsets_c)
+    @test Set(retained_block_pairs(H.R)) ⊇ Set([(3, 1), (4, 2)])
+    @test_throws AssertionError build_r_to_s_map(H.R, plain.S_sparse, structure.boffsets_r)
     # ... and builds one with them
-    pattern = build_schur_pattern(structure; extra_blocks=retained_block_pairs(H.B))
-    b_to_s = build_b_to_s_map(H.B, pattern.S_sparse, structure.boffsets_c)
+    pattern = build_schur_pattern(structure; extra_blocks=retained_block_pairs(H.R))
+    b_to_s = build_r_to_s_map(H.R, pattern.S_sparse, structure.boffsets_r)
     # every upper-triangle entry of the diagonal blocks (21 each) and all 36 entries of each off-diagonal block
-    @test count(>(0), b_to_s) == 4 * 21 + 36 * length(retained_block_pairs(H.B))
+    @test count(>(0), b_to_s) == 4 * 21 + 36 * length(retained_block_pairs(H.R))
 
     for kind in (:dense, :sparse), lambda in (0.0, 0.5)
         @testset "$kind, lambda=$lambda" begin
@@ -251,23 +251,23 @@ end
 @testset "build_schur_pattern scales to many couplings (B8) and can be reused" begin
     # Many retained blocks, each eliminated block coupled to a window of consecutive retained blocks
     nret, nelim = 3000, 6000
-    coupled = [collect(c:min(c + 3, nret)) for c in (min.(1 .+ (0:nelim-1) .* nret .÷ nelim, nret))]
+    coupled = [collect(r:min(r + 3, nret)) for r in (min.(1 .+ (0:nelim-1) .* nret .÷ nelim, nret))]
     structure = SchurStructure(fill(6, nret), fill(3, nelim), coupled)
     build_schur_pattern(structure)   # compile
     t = @elapsed pattern = build_schur_pattern(structure)
     @test t < 5
     @test nnz(pattern.block_pattern) == length(pattern.block_rowval)
     # Upper triangle with the diagonal; the sliding window gives bandwidth 3
-    @test all(pattern.block_rowval[k] <= c for c in 1:nret for k in pattern.block_colptr[c]:pattern.block_colptr[c+1]-1)
+    @test all(pattern.block_rowval[k] <= r for r in 1:nret for k in pattern.block_colptr[r]:pattern.block_colptr[r+1]-1)
     @test nnz(pattern.block_pattern) <= nret * 4
 
     # Passing a precomputed pattern to the constructor gives the same system
     p = coupled_groups_problem()
     H = sparse_schur_matrix(p)
-    pre = build_schur_pattern(H.structure; extra_blocks=retained_block_pairs(H.B))
+    pre = build_schur_pattern(H.structure; extra_blocks=retained_block_pairs(H.R))
     ls1 = SOOExt.SparseSchurLinearSystem(H, copy(p.b), zeros(length(p.b)))
     ls2 = SOOExt.SparseSchurLinearSystem(H, copy(p.b), zeros(length(p.b)); pattern=pre)
-    @test ls1.S == ls2.S && ls1.b_to_s_map == ls2.b_to_s_map
+    @test ls1.S == ls2.S && ls1.r_to_s_map == ls2.r_to_s_map
 end
 
 @testset "BlockLinearSystemsExt: undamped solves use Cholesky, fall back on failure (B5)" begin
@@ -328,16 +328,16 @@ end
         ws = ls.workspace
         # The reduction and back-substitution kernels allocate nothing when serial
         if kind === :dense
-            run_reduce() = reduce_schur_dense!(ls.S, ls.g_S, ls.b_c, ls.b_p, ls.scaling_p, ls.lambda, H.structure, H.C_data, H.E_data, ws)
+            run_reduce() = reduce_schur_dense!(ls.S, ls.g_S, ls.b_r, ls.b_e, ls.scaling_e, ls.lambda, H.structure, H.E_data, H.C_data, ws)
             @test run_reduce()
             @test (@allocated run_reduce()) == 0
         else
-            run_reduce_s() = reduce_schur_sparse!(ls.S, ls.g_S, ls.b_c, ls.b_p, ls.scaling_p, ls.lambda, H.structure, H.C_data, H.E_data,
+            run_reduce_s() = reduce_schur_sparse!(ls.S, ls.g_S, ls.b_r, ls.b_e, ls.scaling_e, ls.lambda, H.structure, H.E_data, H.C_data,
                 ls.block_colptr, ls.block_rowval, ls.block_row_offsets, ls.col_heights, ws)
             @test run_reduce_s()
             @test (@allocated run_reduce_s()) == 0
         end
-        run_back() = backsubstitute!(ls.x_p, ls.x_c, H.structure, H.E_data, ws.C_inv_data, ws.z_data)
+        run_back() = backsubstitute!(ls.x_e, ls.x_r, H.structure, H.C_data, ws.E_inv_data, ws.z_data)
         run_back()
         @test (@allocated run_back()) == 0
     end
@@ -367,7 +367,7 @@ end
     @test mk(Hs, :sparse_schur) isa SOOExt.SparseSchurLinearSystem
     @test mk(Hd, static(:schur)) isa SOOExt.DenseSchurLinearSystem
     @test mk(Hd, SecondOrderOptimization.auto_solver) isa SOOExt.DenseSchurLinearSystem
-    # A request that contradicts the storage of B is an error, not silently ignored or a MethodError
+    # A request that contradicts the storage of R is an error, not silently ignored or a MethodError
     @test_throws ArgumentError mk(Hd, :sparse_schur)
     @test_throws ArgumentError mk(Hs, :dense_schur)
     # B9: the extension registers the Schur symbols, and they need a SchurBlockMatrix Hessian
@@ -379,8 +379,8 @@ end
             err = try
                 optimize(x -> sum(abs2, x), (g, H, x) -> sum(abs2, x), zeros(3), opts_s; H=H_other)
                 nothing
-            catch e
-                e
+            catch c
+                c
             end
             @test err isa ArgumentError
             @test occursin("SchurBlockMatrix", sprint(showerror, err))
@@ -410,7 +410,7 @@ end
         @test !hasproperty(ws, :thread_dense_S) && !hasproperty(ws, :thread_nzvals)
         # col_chunks tile the retained blocks without overlap
         @test length(ws.col_chunks) == nchunks
-        @test reduce(vcat, collect.(ws.col_chunks)) == collect(1:ls.H.structure.ncblocks)
+        @test reduce(vcat, collect.(ws.col_chunks)) == collect(1:ls.H.structure.nrblocks)
         SecondOrderOptimization.dampen!(ls, 0.4)
         @test SecondOrderOptimization.solve!(ls) == SecondOrderOptimization.Success
         @test norm(ls.x - x_ref) <= 1e-10 * norm(x_ref)
@@ -433,13 +433,13 @@ end
 end
 
 function to_float32(H::SchurBlockMatrix)
-    B = if H.B isa Matrix
-        Float32.(H.B)
+    R = if H.R isa Matrix
+        Float32.(H.R)
     else
-        S = H.B
+        S = H.R
         SparseBlockLinearSystem{Float32}(Float32.(S.data), S.indices, S.indicestransposed, S.rowblocksizes, S.columnblocksizes, S.m, S.n)
     end
-    return SchurBlockMatrix(H.structure, B, Float32.(H.C_data), Float32.(H.E_data))
+    return SchurBlockMatrix(H.structure, R, Float32.(H.E_data), Float32.(H.C_data))
 end
 
 @testset "Schur solve in Float32 (M4)" begin
@@ -472,11 +472,11 @@ end
 # and the dynamic tier above D_STATIC
 function mixed_dims_problem(seed=11)
     rng = Random.Xoshiro(seed)
-    c_dims = [6, 3, 9, 6]
-    p_dims = [12, 12, 9, 9, 8, 8, 5, 5, 4, 4, 3, 3, 2, 2, 1, 1]
-    cams = 1:4
-    couplings = [sort(unique([rand(rng, cams) for _ in 1:3])) for _ in p_dims]
-    return SchurTestProblem(rng, c_dims, p_dims, couplings)
+    r_dims = [6, 3, 9, 6]
+    e_dims = [12, 12, 9, 9, 8, 8, 5, 5, 4, 4, 3, 3, 2, 2, 1, 1]
+    coupled = 1:4
+    couplings = [sort(unique([rand(rng, coupled) for _ in 1:3])) for _ in e_dims]
+    return SchurTestProblem(rng, r_dims, e_dims, couplings)
 end
 
 
@@ -496,9 +496,9 @@ end
     end
 
     # Each size alone, including the largest allowed (255) and sizes at the tier boundaries
-    for dp in (1, 3, 4, 5, 7, 8, 9, 10, 20)
-        rng = Random.Xoshiro(dp)
-        q = SchurTestProblem(rng, [6, 6], [dp, dp], [[1, 2], [1]])
+    for de in (1, 3, 4, 5, 7, 8, 9, 10, 20)
+        rng = Random.Xoshiro(de)
+        q = SchurTestProblem(rng, [6, 6], [de, de], [[1, 2], [1]])
         for kind in (:dense, :sparse)
             ls = make_schur_ls(kind, q)
             SecondOrderOptimization.dampen!(ls, 0.2)
@@ -521,15 +521,15 @@ end
 end
 
 @testset "Large eliminated blocks: singular blocks are reported, kernels do not allocate (M5)" begin
-    for dp in (6, 12)   # generic static tier and dynamic tier
-        rng = Random.Xoshiro(dp)
-        q = SchurTestProblem(rng, [6, 6], [dp, dp], [[1, 2], [1, 2]])
+    for de in (6, 12)   # generic static tier and dynamic tier
+        rng = Random.Xoshiro(de)
+        q = SchurTestProblem(rng, [6, 6], [de, de], [[1, 2], [1, 2]])
         H = dense_schur_matrix(q)
         # Make eliminated block 2 rank deficient: an outer product of one vector
         st = H.structure
-        po = st.ppoffsets[2]
-        v = randn(rng, dp)
-        H.C_data[po:po+dp^2-1] .= vec(v * v')
+        eo = st.eoffsets[2]
+        v = randn(rng, de)
+        H.E_data[eo:eo+de^2-1] .= vec(v * v')
         ls = SOOExt.DenseSchurLinearSystem(H, copy(q.b), zeros(length(q.b)))
         SecondOrderOptimization.dampen!(ls, 0.0)
         @test SecondOrderOptimization.solve!(ls) == SecondOrderOptimization.NotPositiveDefinite
@@ -546,9 +546,9 @@ end
         SecondOrderOptimization.solve!(ls)
         H, ws = ls.H, ls.workspace
         run1 = if kind === :dense
-            () -> reduce_schur_dense!(ls.S, ls.g_S, ls.b_c, ls.b_p, ls.scaling_p, ls.lambda, H.structure, H.C_data, H.E_data, ws)
+            () -> reduce_schur_dense!(ls.S, ls.g_S, ls.b_r, ls.b_e, ls.scaling_e, ls.lambda, H.structure, H.E_data, H.C_data, ws)
         else
-            () -> reduce_schur_sparse!(ls.S, ls.g_S, ls.b_c, ls.b_p, ls.scaling_p, ls.lambda, H.structure, H.C_data, H.E_data,
+            () -> reduce_schur_sparse!(ls.S, ls.g_S, ls.b_r, ls.b_e, ls.scaling_e, ls.lambda, H.structure, H.E_data, H.C_data,
                 ls.block_colptr, ls.block_rowval, ls.block_row_offsets, ls.col_heights, ws)
         end
         @test run1()
@@ -579,37 +579,37 @@ end
 # Dimensions 4:6 of the retained blocks only have a tiny prior, which makes H ill conditioned.
 function gauge_problem(seed=21; prior=1e-8)
     rng = Random.Xoshiro(seed)
-    c_dims = [6, 6, 6, 6]
-    p_dims = [3, 3, 3, 3, 3, 3]
+    r_dims = [6, 6, 6, 6]
+    e_dims = [3, 3, 3, 3, 3, 3]
     couplings = [[1, 2], [1, 2, 3], [2, 3, 4], [3, 4], [1, 4], [1, 2, 3, 4]]
-    nc_, np_ = sum(c_dims), sum(p_dims)
-    H = zeros(nc_ + np_, nc_ + np_)
-    for (l, cams) in enumerate(couplings), c in cams
+    nr_, np_ = sum(r_dims), sum(e_dims)
+    H = zeros(nr_ + np_, nr_ + np_)
+    for (e, coupled) in enumerate(couplings), r in coupled
         w = 0.5 + rand(rng)
-        ci = 6 * (c - 1) .+ (1:3)
-        li = nc_ + 3 * (l - 1) .+ (1:3)
+        ci = 6 * (r - 1) .+ (1:3)
+        li = nr_ + 3 * (e - 1) .+ (1:3)
         H[ci, ci] .+= w * I(3); H[li, li] .+= w * I(3)
         H[ci, li] .-= w * I(3); H[li, ci] .-= w * I(3)
     end
-    for c in 1:4
-        ci = 6 * (c - 1) .+ (4:6)
+    for r in 1:4
+        ci = 6 * (r - 1) .+ (4:6)
         H[ci, ci] .+= prior * I(3)
     end
-    return SchurTestProblem(H, randn(rng, nc_ + np_), c_dims, p_dims, couplings, Tuple{Int, Int}[])
+    return SchurTestProblem(H, randn(rng, nr_ + np_), r_dims, e_dims, couplings, Tuple{Int, Int}[])
 end
 
-@testset "BlockLinearSystemsExt: well-conditioned problems, forward error of x_c and x_p (T1)" begin
+@testset "BlockLinearSystemsExt: well-conditioned problems, forward error of x_r and x_e (T1)" begin
     for p in (standard_problem(), coupled_groups_problem(), mixed_dims_problem())
         @test cond(p.H) <= 1e4
         n = length(p.b)
-        nc_ = sum(p.c_dims)
+        nr_ = sum(p.r_dims)
         for kind in (:dense, :sparse), solver in (:auto, :cholesky, :ldl), lambda in (0.0, 0.3)
             ls = make_schur_ls(kind, p)
             SecondOrderOptimization.dampen!(ls, lambda)
             @test SecondOrderOptimization.solve!(ls, solver) == SecondOrderOptimization.Success
             x_ref = reference_solve(p, lambda, ones(n))
-            @test norm(ls.x_c - x_ref[1:nc_]) <= 1e-10 * norm(x_ref[1:nc_])
-            @test norm(ls.x_p - x_ref[nc_+1:end]) <= 1e-10 * norm(x_ref[nc_+1:end])
+            @test norm(ls.x_r - x_ref[1:nr_]) <= 1e-10 * norm(x_ref[1:nr_])
+            @test norm(ls.x_e - x_ref[nr_+1:end]) <= 1e-10 * norm(x_ref[nr_+1:end])
         end
     end
 end
@@ -633,7 +633,7 @@ end
     n = length(p.b)
     for kind in (:dense, :sparse)
         ls = make_schur_ls(kind, p, abs.(diag(p.H)))      # Marquardt scaling
-        snapshot(H) = (copy(H.C_data), copy(H.E_data), H.B isa Matrix ? copy(H.B) : copy(H.B.data), copy(ls.b), copy(ls.scaling))
+        snapshot(H) = (copy(H.E_data), copy(H.C_data), H.R isa Matrix ? copy(H.R) : copy(H.R.data), copy(ls.b), copy(ls.scaling))
         before = snapshot(ls.H)
         lambda0 = 1e-3
         SecondOrderOptimization.dampen!(ls, lambda0)
@@ -647,7 +647,7 @@ end
         SecondOrderOptimization.dampen!(ls, lambda0)
         @test SecondOrderOptimization.solve!(ls) == SecondOrderOptimization.Success
         @test ls.x == x_first                                   # bit for bit
-        @test all(snapshot(ls.H) .== before)                     # B, C, E, b and the scaling are untouched
+        @test all(snapshot(ls.H) .== before)                     # R, C, E, b and the scaling are untouched
         @test ls.lambda == lambda0
     end
 end
@@ -656,8 +656,8 @@ end
     p = coupled_groups_problem()
     n = length(p.b)
     H0 = sparse_schur_matrix(p)
-    pre = build_schur_pattern(H0.structure; extra_blocks=retained_block_pairs(H0.B))
-    Hp = SchurBlockMatrix(H0.structure, H0.B, H0.C_data, H0.E_data; pattern=pre)
+    pre = build_schur_pattern(H0.structure; extra_blocks=retained_block_pairs(H0.R))
+    Hp = SchurBlockMatrix(H0.structure, H0.R, H0.E_data, H0.C_data; pattern=pre)
     x_ref = reference_solve(p, 0.3, ones(n))
     mk(H) = SecondOrderOptimization.makelinearsystem(nothing, H, :sparse_schur)
 
@@ -692,7 +692,7 @@ end
 
     # An analysed factor carried by the pattern is reused
     fac = SparseArrays.CHOLMOD.analyze(SparseArrays.CHOLMOD.Sparse(Symmetric(copy(pre.S_sparse), :U)))
-    Hf = SchurBlockMatrix(H0.structure, H0.B, H0.C_data, H0.E_data; pattern=merge(pre, (S_factor = fac,)))
+    Hf = SchurBlockMatrix(H0.structure, H0.R, H0.E_data, H0.C_data; pattern=merge(pre, (S_factor = fac,)))
     ls_f = mk(Hf)
     @test ls_f.S_factor === fac
     ls_f.b .= p.b
@@ -702,6 +702,6 @@ end
 
     # The dense system ignores a pattern
     Hd = dense_schur_matrix(p)
-    Hdp = SchurBlockMatrix(Hd.structure, Hd.B, Hd.C_data, Hd.E_data; pattern=build_schur_pattern(Hd.structure))
+    Hdp = SchurBlockMatrix(Hd.structure, Hd.R, Hd.E_data, Hd.C_data; pattern=build_schur_pattern(Hd.structure))
     @test SecondOrderOptimization.makelinearsystem(nothing, Hdp, :schur) isa SOOExt.DenseSchurLinearSystem
 end
