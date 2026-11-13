@@ -167,14 +167,19 @@ SOO.update(x::Rot3, dx, start=1) = Rot3(x.R * expso3(SVector(dx[start], dx[start
         opts = OptimizationOptions(maxiters=500)
         xJ, resJ = optimize(zeros(14), objJ, opts)
         xH, resH = optimize(zeros(14), objH, OptimizationOptions(maxiters=500, linsolver=:cholesky))
-        costmin = Float64(0.5 * sum(abs2, big.(V) * (big.(V) \ big.(yv)) - big.(yv)))
+        # Costs in extended precision: in Float64 the cost of an iterate with coefficients this
+        # large is rounded at about 1e-8 relative
+        exactcost(x) = Float64(0.5 * sum(abs2, big.(V) * big.(x) - big.(yv)))
+        costmin = exactcost(big.(V) \ big.(yv))
         gJ = norm(V' * (V * xJ - yv), Inf)
         gH = norm(V' * (V * xH - yv), Inf)
-        @info "Ill-conditioned fit (cond(J) = $(round(cond(V), sigdigits=2)), least-squares minimum $costmin)" tall_cost=resJ.bestcost tall_gradnorm=gJ tall_iterations=resJ.niterations normal_cost=resH.bestcost normal_gradnorm=gH normal_iterations=resH.niterations
+        @info "Ill-conditioned fit (cond(J) = $(round(cond(V), sigdigits=2)), least-squares minimum $costmin)" tall_cost=resJ.bestcost tall_excess=exactcost(xJ)-costmin tall_gradnorm=gJ tall_iterations=resJ.niterations normal_cost=resH.bestcost normal_excess=exactcost(xH)-costmin normal_gradnorm=gH normal_iterations=resH.niterations
         @test resJ.bestcost <= resH.bestcost
-        @test resJ.bestcost - costmin <= 1e-12 * costmin
-        @test resH.bestcost - costmin > 1e-6 * costmin
+        @test exactcost(xJ) - costmin <= 1e-12 * costmin
+        @test exactcost(xH) - costmin > 1e-6 * costmin
         @test resJ.niterations < resH.niterations
+        # The gradient norm (as the optimizer computes it, in Float64) is at the level of its own
+        # rounding here: the gradient at the exact minimizer, rounded to Float64, is of the same order
         @test gJ < gH
     end
 

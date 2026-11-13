@@ -28,6 +28,14 @@ function conditioned_jacobian(m, n, c; seed=1)
     return U * Diagonal(exp10.(range(0, -log10(c); length=n))) * V'
 end
 
+# Measured in functions: at testset top level Julia 1.10 boxes the captured variables
+tall_damped(ls) = (dampen!(ls, 0.7); solve!(ls, static(:auto)))
+tall_scaled(ls, s) = (dampen!(ls, 0.7, s); solve!(ls, static(:qr)))
+tall_undamped(ls) = (SOO.markstale!(getA(ls)); dampen!(ls, 0.0); solve!(ls, static(:auto)))
+tall_relinearize(ls, w, x) = (zero!(ls); w(getb(ls), getA(ls), x))
+tall_model(ls, v) = SOO.fast_bAb(getA(ls), v) + quadratic_model_change(ls, v) + SOO.max_diag(ls)
+allocations(f::F, args::Vararg{Any, N}) where {F, N} = (f(args...); @allocated f(args...))   # specialized: 1.10 does not specialize a plain vararg here
+
 @testset "tallsystem.jl" begin
     @testset "check_linear_system for m = n, m > n and m < n" begin
         for (m, n) in ((6, 6), (11, 6), (4, 6), (1, 1), (5, 1), (1, 3))
@@ -168,17 +176,11 @@ end
         J = randn(Random.Xoshiro(6), 50, 7); r = randn(Random.Xoshiro(8), 50)
         ls = tallsystem(J, r)
         wrapper = SOO.TallLinearize((r_, J_, x) -> (copyto!(r_, x[1]); copyto!(J_, x[2]); 0.0))
-        damped(ls) = (dampen!(ls, 0.7); solve!(ls, static(:auto)))
-        scaled(ls, s) = (dampen!(ls, 0.7, s); solve!(ls, static(:qr)))
-        undamped(ls) = (SOO.markstale!(SOO.getA(ls)); dampen!(ls, 0.0); solve!(ls, static(:auto)))
-        relinearize(ls, w, x) = (zero!(ls); w(getb(ls), SOO.getA(ls), x))
-        model(ls, v) = SOO.fast_bAb(SOO.getA(ls), v) + quadratic_model_change(ls, v) + SOO.max_diag(ls)
         s = ones(7); v = randn(7); x = (r, J)
-        damped(ls); scaled(ls, s); undamped(ls); relinearize(ls, wrapper, x); model(ls, v)
-        @test (@allocated damped(ls)) == 0
-        @test (@allocated scaled(ls, s)) == 0
-        @test (@allocated undamped(ls)) == 0
-        @test (@allocated relinearize(ls, wrapper, x)) == 0
-        @test (@allocated model(ls, v)) == 0
+        @test allocations(tall_damped, ls) == 0
+        @test allocations(tall_scaled, ls, s) == 0
+        @test allocations(tall_undamped, ls) == 0
+        @test allocations(tall_relinearize, ls, wrapper, x) == 0
+        @test allocations(tall_model, ls, v) == 0
     end
 end
