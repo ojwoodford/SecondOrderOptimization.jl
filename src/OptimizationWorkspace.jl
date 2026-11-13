@@ -19,6 +19,13 @@ function storeworkspace!(ws::OptimizationWorkspace{K, D}, key, data) where {K, D
 end
 
 h_structure_key(::Nothing) = nothing
+
+# The structure of a JacobianObjective's system: the number of residuals. It equals no Hessian
+# key, so a workspace built for one objective kind is never reused for the other.
+struct JacobianStructureKey
+    m::Int
+end
+h_structure_key(k::JacobianStructureKey) = k
 h_structure_key(H::AbstractMatrix) = (typeof(H), size(H))
 
 # The structure of a sparse Hessian. It keeps the arrays it was built from so that a later call
@@ -75,12 +82,12 @@ function keyvalid(key::Tuple, x0, options::OptimizationOptions, H)
     return hkeyvalid(key[5], H)
 end
 
-function OptimizationWorkspace(x0, obj::HessianObjective, options::OptimizationOptions=OptimizationOptions(); startstats::Stats=Stats())
-    H = obj.H
-    checkhessian(x0, H)
-    ls = makelinearsystem(x0, H, options.linsolver)
+function OptimizationWorkspace(x0, obj::Union{HessianObjective, JacobianObjective}, options::OptimizationOptions=OptimizationOptions(); startstats::Stats=Stats())
+    checkentry(x0, obj, options)
+    checkbuild(x0, obj)
+    ls = objective_linearsystem(x0, obj, options.linsolver)
     data = OptimizationInternal(ls, x0, startstats)
     iteratedata = construct(options.iterator, ls, options.callbackchangesstate)
-    key = cachekey(x0, options, H)
+    key = cachekey(x0, options, objective_structure(obj))
     return OptimizationWorkspace{typeof(key), Tuple{typeof(data), typeof(iteratedata)}}(key, (data, iteratedata))
 end

@@ -1,6 +1,8 @@
+const AnyObjective = Union{HessianObjective, JacobianObjective}
+
 function optimize!(
     x0,
-    obj::HessianObjective,
+    obj::AnyObjective,
     options::OptimizationOptions = OptimizationOptions();
     callback::CB = nullcallback,
     workspace::WS = nothing,
@@ -13,7 +15,7 @@ end
 
 function optimize(
     x0,
-    obj::HessianObjective,
+    obj::AnyObjective,
     options::OptimizationOptions = OptimizationOptions();
     callback::CB = nullcallback,
     workspace::WS = nothing,
@@ -22,20 +24,35 @@ function optimize(
     return optimize_internal!(copyvars(x0), obj, options, callback, workspace, startstats)
 end
 
+# What differs between the objective kinds: the checks at entry, the checks before a linear
+# system is built, the linear system, the structure the workspace is keyed on, and the function
+# the iterators call to linearize, `fdf!(b, A, x)`
+checkentry(x, obj::HessianObjective, options::OptimizationOptions) = nothing
+checkentry(x, obj::JacobianObjective, options::OptimizationOptions) = checkobjective(x, obj, options)
+checkbuild(x, obj::HessianObjective) = checkhessian(x, obj.H)
+checkbuild(x, obj::JacobianObjective) = nothing
+objective_linearsystem(x, obj::HessianObjective, linsolver) = makelinearsystem(x, obj.H, linsolver)
+objective_linearsystem(x, obj::JacobianObjective, linsolver) = makelinearsystem(x, obj, linsolver)
+objective_structure(obj::HessianObjective) = obj.H
+objective_structure(obj::JacobianObjective) = JacobianStructureKey(nresiduals(obj))
+linearizer(obj::HessianObjective) = obj.fdf!
+linearizer(obj::JacobianObjective) = TallLinearize(obj.resjac!)
+
 # Runs on `x` (updated in place when it is mutable) and returns `(x, result)`
-function optimize_internal!(x, obj::HessianObjective, options::OptimizationOptions, callback::CB, workspace::WS, startstats::Stats) where {CB, WS}
-    H = obj.H
-    if !isnothing(workspace) && workspacevalid(workspace, x, options, H)
-        return run_cached_optimize!(something(workspace.data), x, obj.f, obj.fdf!, options, callback, startstats)
+function optimize_internal!(x, obj::AnyObjective, options::OptimizationOptions, callback::CB, workspace::WS, startstats::Stats) where {CB, WS}
+    checkentry(x, obj, options)
+    structure = objective_structure(obj)
+    if !isnothing(workspace) && workspacevalid(workspace, x, options, structure)
+        return run_cached_optimize!(something(workspace.data), x, obj.f, linearizer(obj), options, callback, startstats)
     else
-        checkhessian(x, H)
-        ls = makelinearsystem(x, H, options.linsolver)
+        checkbuild(x, obj)
+        ls = objective_linearsystem(x, obj, options.linsolver)
         data = OptimizationInternal(ls, x, startstats)
         iteratedata = construct(options.iterator, ls, options.callbackchangesstate)
         if !isnothing(workspace)
-            storeworkspace!(workspace, cachekey(x, options, H), (data, iteratedata))
+            storeworkspace!(workspace, cachekey(x, options, structure), (data, iteratedata))
         end
-        return run_optimize!(data, iteratedata, x, obj.f, obj.fdf!, options, callback)
+        return run_optimize!(data, iteratedata, x, obj.f, linearizer(obj), options, callback)
     end
 end
 
