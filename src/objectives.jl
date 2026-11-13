@@ -110,7 +110,7 @@ struct JacobianObjective{F, RJ, JM}
 end
 
 # The iterators accepted with a JacobianObjective
-const JACOBIAN_ITERATORS = (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg)
+const JACOBIAN_ITERATORS = (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton)
 
 const JACOBIAN_SUPPORT = "JacobianObjective supports a Matrix{Float64} Jacobian prototype or an integer number of residuals m, with iterator = " *
     join((":$s" for s in JACOBIAN_ITERATORS), ", ", " or ") * " and linsolver = :auto or :qr"

@@ -6,7 +6,7 @@ using SecondOrderOptimization: getA, getb, getx, solve!   # explicit: Krylov, lo
 # against the normal equations built from the same J
 
 # The iterators widened to in section W, each tested in both variants
-const W_ITERATORS = (:levenbergmarquardt_dtd, :dogleg)
+const W_ITERATORS = (:levenbergmarquardt_dtd, :dogleg, :newton)
 
 # Both objectives of a least-squares problem: the HessianObjective forms the normal equations
 # from the same J
@@ -104,7 +104,14 @@ end
             cH, sH, _, cbH = w_trace()
             _, resJ = optimize(x0, objJ, w_opts(it, :callbackchangesstate => ccs); callback=cbJ)
             _, resH = optimize(x0, objH, w_opts(it, :callbackchangesstate => ccs, :linsolver => :cholesky); callback=cbH)
-            @test isconverged(resJ) && isconverged(resH)
+            if it === :newton
+                # undamped Newton rejects no step, so at the minimum the cost's rounding noise
+                # counts as failures, and it may stop on max_fails (in both formulations alike)
+                @test all(r -> r in (:rel_dcost, :abs_dcost, :step_size, :max_fails, :grad_tol), termination_reasons(resJ))
+                @test all(r -> r in (:rel_dcost, :abs_dcost, :step_size, :max_fails, :grad_tol), termination_reasons(resH))
+            else
+                @test isconverged(resJ) && isconverged(resH)
+            end
             # the cost at every iteration both runs share, which may end a few iterations apart
             # once the decreases are at the level of rounding
             k = min(length(cJ), length(cH))
@@ -115,7 +122,7 @@ end
             # above 1e-6 (rounding in the actual decrease compounds through the update after that)
             prev = [resJ.startcost; cJ[1:k-1]]
             lead = something(findfirst(prev .- cH[1:k] .<= 1e-6 .* abs.(cH[1:k])), k + 1) - 1
-            @test lead >= 1
+            it === :newton || @test lead >= 1     # Newton has no damping or radius to compare
             @test all(isapprox.(sJ[1:lead], sH[1:lead]; rtol=1e-8))
             @test resJ.bestcost ≈ resH.bestcost rtol=1e-8 atol=1e-20
         end
@@ -290,6 +297,47 @@ end
         @test solve!(ls, :auto) == Success && getx(ls) ≈ (J' * J) \ (J' * r)
     end
 
+    @testset "Newton (Gauss-Newton): a linear problem in one iteration" begin
+        rng = Xoshiro(21)
+        A = randn(rng, 12, 4); b = randn(rng, 12)
+        obj = JacobianObjective(x -> 0.5 * sum(abs2, A * x - b), (r, J, x) -> (r .= A * x - b; J .= A; 0.5 * sum(abs2, r)), 12)
+        for x0 in (zeros(4), 1e3 * randn(rng, 4)), ccs in (false, true)
+            _, _, xs, cb = w_trace()
+            x, res = optimize(x0, obj, w_opts(:newton, :callbackchangesstate => ccs); callback=cb)
+            @test xs[1] ≈ A \ b rtol=1e-11
+            @test x ≈ A \ b rtol=1e-11
+            @test :linsolver_failed ∉ termination_reasons(res)
+        end
+    end
+
+    @testset "Newton's diagonal shift on the tall system, and dampen!(ls, 0.0) restoring it" begin
+        rng = Xoshiro(29)
+        # full rank: undamped, shifted, then undamped again gives the identical x
+        J = randn(rng, 10, 4); r = randn(rng, 10)
+        ls = SOO.DenseTallLinearSystem(copy(J))
+        getA(ls).r .= r; mul!(getb(ls), J', r); SOO.markstale!(getA(ls))
+        dampen!(ls, 0.0)
+        @test solve!(ls, :auto) == Success
+        x0 = copy(getx(ls))
+        mu = SOO.initial_shift(ls)
+        @test mu ≈ max(maximum(sum(abs2, J; dims=1)) * 1e-4, 1e-6) rtol=1e-14
+        dampen!(ls, mu)
+        @test solve!(ls, :auto) == Success && getx(ls) ≈ (J' * J + mu * I) \ (J' * r)
+        dampen!(ls, 0.0)
+        @test solve!(ls, :auto) == Success && getx(ls) == x0
+        # rank deficient: the undamped solve fails, the shift succeeds, and dampen!(ls, 0.0) is
+        # undamped (failing) again
+        J[:, 4] = J[:, 2]
+        ls = SOO.DenseTallLinearSystem(copy(J))
+        getA(ls).r .= r; mul!(getb(ls), J', r); SOO.markstale!(getA(ls))
+        @test solve!(ls, :auto) == NotPositiveDefinite
+        dampen!(ls, SOO.initial_shift(ls))
+        @test solve!(ls, :auto) == Success
+        dampen!(ls, 0.0)
+        @test solve!(ls, :auto) == NotPositiveDefinite
+        @test getA(ls).J == J && getA(ls).r == r
+    end
+
     @testset "Scaled damped solve against (JᵀJ + λ Diagonal(s)) \\ Jᵀr" begin
         rng = Xoshiro(17)
         for (m, n) in ((20, 5), (6, 6), (3, 5))
@@ -369,8 +417,11 @@ end
             @test x ≈ [1.0, 1.0]
             @inferred optimize!([-1.2, 1.0], obj, opts; workspace=ws)
             @inferred optimize([-1.2, 1.0], obj, opts)
-            res = optimize!([-1.2, 1.0], obj, opts)
-            @test res.optimizeallocations == 0 && res.niterations > 5 && isconverged(res)
+            # From (-1.2, 1) the first Gauss-Newton step raises the cost, and the outer loop then
+            # copies the best variables once (not per iteration); from (0.9, 0.8) it descends
+            res = optimize!(it === :newton ? [0.9, 0.8] : [-1.2, 1.0], obj, opts)
+            @test res.optimizeallocations == 0 && isconverged(res)
+            @test res.niterations >= (it === :newton ? 2 : 6)     # Gauss-Newton solves Rosenbrock's residuals in two steps
         end
     end
 
@@ -392,11 +443,13 @@ end
         if it === :levenbergmarquardt_dtd
             @test exJ > 1e-3 && exH > 1e-3
         end
-        # Dogleg's Gauss-Newton step is undamped: from QR it reaches the minimum in a few
-        # iterations; from Cholesky of the normal equations it does not (measured: tall 1.8e-14
-        # in 8 iterations, normal 6.5e4 at maxiters on Julia 1.13; 4.2e-15 in 6 and 1.8e-3 in 396
-        # on 1.10)
-        if it === :dogleg
+        # The Gauss-Newton step of dogleg and Newton is undamped: from QR it reaches the minimum
+        # in a few iterations; from Cholesky of the normal equations it does not. Measured on
+        # Julia 1.13 / 1.10: dogleg tall 1.8e-14 in 8 iterations / 4.2e-15 in 6, normal 6.5e4 at
+        # maxiters / 1.8e-3 in 396; Newton tall 1.3e-14 in 7 / 2.5e-15 in 8, normal 6.5e4 / 2.2e-4,
+        # both at maxiters. (Newton stops on max_fails at the minimum: it rejects no step, and the
+        # cost's rounding noise counts as failures.)
+        if it in (:dogleg, :newton)
             @test exJ <= 1e-12
             @test exH > 1e-6
             @test resJ.niterations < resH.niterations
