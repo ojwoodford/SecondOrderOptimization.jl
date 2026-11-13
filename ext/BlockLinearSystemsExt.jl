@@ -170,16 +170,19 @@ SecondOrderOptimization.getx(ls::SparseSchurLinearSystem) = ls.x
 
 SecondOrderOptimization.fast_bAb(H::SchurBlockMatrix, dx::AbstractVector) = BlockLinearSystems.fast_bAb(H, dx)
 
+# As for every linear system: `dampen!(ls, λ)` means λI and `dampen!(ls, λ, s)` means λ·Diagonal(s),
+# each replacing the damping set before. The reduction always applies λ·scaling, so uniform damping
+# is stored as scaling = 1.
 function SecondOrderOptimization.dampen!(ls::Union{DenseSchurLinearSystem{T}, SparseSchurLinearSystem{T}}, lambda::Real) where T
     ls.lambda = convert(T, lambda)
+    fill!(ls.scaling, one(T))
     return ls
 end
 
 function SecondOrderOptimization.dampen!(ls::Union{DenseSchurLinearSystem{T}, SparseSchurLinearSystem{T}}, lambda::Real, scaling) where T
+    scaling === nothing && return SecondOrderOptimization.dampen!(ls, lambda)
     ls.lambda = convert(T, lambda)
-    if scaling !== nothing
-        copyto!(ls.scaling, scaling)
-    end
+    copyto!(ls.scaling, scaling)
     return ls
 end
 
@@ -472,6 +475,44 @@ function SecondOrderOptimization.sharex(ls::SparseSchurLinearSystem{T, Ti, TL, T
         ls.scaling_r, ls.scaling_e,
         ls.workspace
     )
+end
+
+# The full matrix [R C'; C E] a SchurBlockMatrix represents, read and written as a dense matrix (for
+# check_linear_system). R is a dense Matrix, or a SparseBlockLinearSystem storing the lower-triangle
+# blocks; each E_e is stored column-major; each C_er (eliminated rows, retained columns) column-major.
+function schur_blocks(f, H::SchurBlockMatrix)
+    st = H.structure
+    rrange(r) = st.boffsets_r[r]:(st.boffsets_r[r] + Int(st.r_dims[r]) - 1)
+    erange(e) = st.nr + st.boffsets_e[e] .+ (0:Int(st.e_dims[e]) - 1)
+    if H.R isa Matrix
+        f(H.R, 1:st.nr, 1:st.nr)
+    else
+        for r2 in 1:st.nrblocks, r1 in r2:st.nrblocks
+            BlockLinearSystems.validblock(H.R, r1, r2) && f(BlockLinearSystems.block(H.R, r1, r2), rrange(r1), rrange(r2))
+        end
+    end
+    for e in 1:st.neblocks
+        de = Int(st.e_dims[e])
+        f(reshape(view(H.E_data, st.eoffsets[e] .+ (0:de * de - 1)), de, de), erange(e), erange(e))
+        for c in st.eliminated_ptr[e]:(st.eliminated_ptr[e + 1] - 1)
+            r = st.entry_retained[c]
+            f(reshape(view(H.C_data, st.coffsets[c] .+ (0:de * Int(st.r_dims[r]) - 1)), de, Int(st.r_dims[r])), erange(e), rrange(r))
+        end
+    end
+    return nothing
+end
+function SecondOrderOptimization.conformance_matrix(H::SchurBlockMatrix)
+    n = H.structure.nr + sum(Int, H.structure.e_dims; init=0)
+    M = zeros(n, n)
+    schur_blocks(H) do blk, rows, cols
+        M[rows, cols] .= blk
+        rows != cols && (M[cols, rows] .= blk')
+    end
+    return M
+end
+function SecondOrderOptimization.conformance_fill!(H::SchurBlockMatrix, M::AbstractMatrix)
+    schur_blocks((blk, rows, cols) -> (blk .= view(M, rows, cols)), H)
+    return H
 end
 
 function SecondOrderOptimization.makelinearsystem(x0, H::SchurBlockMatrix{T}, linsolver) where T

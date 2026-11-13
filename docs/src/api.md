@@ -86,6 +86,20 @@ Indefinite
   `linsolver` then names the solver for the reduced system: `:auto` or `:cholesky` (Cholesky, falling back to Bunch-Kaufman) or `:ldl` (Bunch-Kaufman); any other is an `ArgumentError` when the system is built.
   To enable: `using BlockLinearSystems`.
 
+## Linear System Interface
+
+The iterators drive any [`AbstractLinearSystem`](@ref) through the functions in its docstring. A new
+system type, or a new kind of Hessian storage for the Schur systems, can be checked against that
+contract with [`check_linear_system`](@ref), which needs a method of `conformance_matrix` and
+`conformance_fill!` for the storage it uses.
+
+```@docs
+AbstractLinearSystem
+check_linear_system
+SecondOrderOptimization.conformance_matrix
+SecondOrderOptimization.conformance_fill!
+```
+
 ## Callbacks & Diagnostics
 
 ```@docs

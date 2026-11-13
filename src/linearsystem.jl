@@ -252,8 +252,12 @@ function uniformscaling!(ls, k)
     uniformscaling!(getA(ls), k)
 end
 
+# The sparse system damps A in place, so these first save the undamped diagonal, from which every
+# sparse solve restores it afterwards. Saving here (not in `refresh_diag_cache!`) means a solve
+# leaves A as it found it even if A was written without a refresh.
 function uniformscaling!(ls::SparseLinearSystem, k)
-    @inbounds for idx in ls.diag_inds
+    @inbounds for (i, idx) in enumerate(ls.diag_inds)
+        ls.diag_cache[i] = ls.A.nzval[idx]
         ls.A.nzval[idx] += k
     end
 end
@@ -283,6 +287,7 @@ function damp_marquardt!(A::AbstractMatrix, scaling, dlambda)
 end
 function damp_marquardt!(ls::SparseLinearSystem, scaling, dlambda)
     @inbounds for (i, idx) in enumerate(ls.diag_inds)
+        ls.diag_cache[i] = ls.A.nzval[idx]
         ls.A.nzval[idx] += dlambda * scaling[i]
     end
 end

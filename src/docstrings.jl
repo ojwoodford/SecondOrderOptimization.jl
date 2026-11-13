@@ -454,3 +454,44 @@ x_opt, res = optimize(x0, HessianObjective(f, fdf!); callback=storecostscallback
 ```
 """
 storecostscallback
+
+"""
+    AbstractLinearSystem
+
+Supertype of the linear systems the iterators solve: the Hessian `A` and gradient `b` that `fdf!`
+fills, the step `x`, and the damping to apply. The built-in systems are `StaticLinearSystem`,
+`DenseLinearSystem` and `SparseLinearSystem`, and, with BlockLinearSystems.jl loaded,
+`DenseSchurLinearSystem` and `SparseSchurLinearSystem`. A new system type must provide the functions
+below (those not exported are extended as `SecondOrderOptimization.name`), and should pass
+[`check_linear_system`](@ref).
+
+# Linear system interface
+
+| Function | Contract |
+|:---|:---|
+| `makelinearsystem(x0, H, linsolver)` | Builds the system from the Hessian prototype `H` (see below for which type each `H` gives). `linsolver` is used to preallocate a factorization or Krylov workspace; a sparse system must then be solved with that same solver. |
+| `getA(ls)`, `getb(ls)`, `getx(ls)` | `A` is the Hessian storage and `b` the gradient vector that `fdf!(b, A, x)` fills; `x` is the vector `solve!` writes. `b` and `x` have length `n`. The iterators read and negate `x`, and dogleg writes its own step into it. `A` must support `fast_bAb(A, v)` for `v` of the type of `b`. |
+| `zero!(ls)` | Sets `A` and `b` to zero, keeping their structure (pattern, workspaces). |
+| `dampen!(ls, λ)`, `dampen!(ls, λ, s)` | Records damping without changing `A`: `solve!` then solves with `A + λI`, or `A + λ Diagonal(s)` (`s` in the units of `diag(A)`, not squared). Each call replaces the damping set before, including the scaling; `dampen!(ls, λ, nothing)` is `dampen!(ls, λ)`, and `λ = 0` is undamped. |
+| `solve!(ls, linsolver) -> SolveStatus` | Solves the damped system `A x = b` into `getx(ls)` (the step is `-x`; the iterators negate it). Returns `Success` when `x` solves it; `NotPositiveDefinite` when the factorization failed (`x` is then unspecified); `Indefinite` when it solved but found `A` indefinite (from `:ldl`, and CG's nonpositive curvature). The iterators treat anything but `Success` as failure: Newton shifts the diagonal, Levenberg-Marquardt raises `λ`, dogleg takes the Cauchy step. Leaves `A` and `b` exactly as written, damped or not, whether the solve succeeds or fails. `linsolver` may be a `Symbol`, a `StaticSymbol` or an `OptimizationLinearSolver`. |
+| `copy_structure(ls)` | A new system with the same structure and its own `A` and `b` (contents unspecified). It may share `x` and factorization workspaces with `ls`, provided each `solve!` is self-contained, so that solving one never changes the other's next solution. |
+| `sharex(ls, from)` | `ls`, or a copy of it sharing its `A` and `b`, whose `getx` is `getx(from)`. |
+| `SecondOrderOptimization.max_diag(ls)` | The largest absolute diagonal entry of `A`; `NaN` if a diagonal entry is `NaN` (as `max` propagates it). |
+| `SecondOrderOptimization.updatescaling!(lmd, ls)` | For `:levenbergmarquardt_dtd`: raises `lmd.scaling` to the running maximum of `abs.(diag(A))`, with a relative floor. The generic method reads `A[i, i]`; a system whose `A` can't be indexed needs its own method. |
+| `SecondOrderOptimization.refresh_diag_cache!(ls)` | Called by the iterators after `fdf!` writes `A`. A no-op by default; no built-in system needs it for correctness. |
+| `quadratic_model_change(ls, dx)` | `dx' A dx / 2 + b' dx`, undamped. The generic method uses `fast_bAb(getA(ls), dx)` and `fast_dot(getb(ls), dx)`. |
+
+Which system `makelinearsystem` builds:
+- `H = nothing`: a static system for a `Number` (size 1) or a `StaticVector` `x0`, and for any other
+  `x0` whose `nvars` is a static size of 16 or less; otherwise a dense system of size `nvars(x0)`.
+- `H::MMatrix`: a static system that writes into `H`; any other `StaticMatrix`: a static system of
+  its own.
+- `H::Matrix{Float64}`: a dense system that writes into `H`; any other `AbstractMatrix`: a dense
+  system on a `Float64` copy.
+- `H::SparseMatrixCSC{Float64}`: a sparse system that writes into `H`, or into a copy with explicit
+  zeros added if a diagonal entry is missing.
+- `H::SchurBlockMatrix` (BlockLinearSystems.jl): a Schur-complement system, dense or sparse
+  according to the storage of `H.R`; `linsolver` (`:auto`, `:cholesky` or `:ldl`) names the solver
+  for the reduced system.
+"""
+AbstractLinearSystem

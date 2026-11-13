@@ -149,7 +149,7 @@ end
     for kind in (:dense, :sparse), solver in (:auto, :ldl), (sname, scaling) in scalings, lambda in (0.0, 0.3)
         @testset "$kind, $solver, $sname, lambda=$lambda" begin
             ls = make_schur_ls(kind, p, scaling)
-            SecondOrderOptimization.dampen!(ls, lambda)
+            SecondOrderOptimization.dampen!(ls, lambda, scaling)
             @test SecondOrderOptimization.solve!(ls, solver) == SecondOrderOptimization.Success
             x_ref = reference_solve(p, lambda, scaling)
             @test norm(ls.x - x_ref) <= 1e-10 * norm(x_ref)
@@ -310,7 +310,7 @@ end
     expected = 0.5 * dot(dx, p.H * dx) + dot(p.b, dx)
     for kind in (:dense, :sparse), lambda in (0.0, 0.7)
         ls = make_schur_ls(kind, p, abs.(diag(p.H)))
-        SecondOrderOptimization.dampen!(ls, lambda)
+        SecondOrderOptimization.dampen!(ls, lambda, abs.(diag(p.H)))
         @test SecondOrderOptimization.quadratic_model_change(ls, dx) ≈ expected rtol = 1e-12
     end
 end
@@ -495,7 +495,7 @@ end
     for kind in (:dense, :sparse), nchunks in (1, 3), (sname, scaling) in scalings, lambda in (0.0, 0.5)
         @testset "$kind, K=$nchunks, $sname, lambda=$lambda" begin
             ls = make_schur_ls(kind, p, scaling; nchunks)
-            SecondOrderOptimization.dampen!(ls, lambda)
+            SecondOrderOptimization.dampen!(ls, lambda, scaling)
             @test SecondOrderOptimization.solve!(ls) == SecondOrderOptimization.Success
             x_ref = reference_solve(p, lambda, scaling)
             @test norm(ls.x - x_ref) <= 1e-9 * norm(x_ref)
@@ -639,19 +639,20 @@ end
     p = standard_problem()
     n = length(p.b)
     for kind in (:dense, :sparse)
-        ls = make_schur_ls(kind, p, abs.(diag(p.H)))      # Marquardt scaling
+        sc = abs.(diag(p.H))
+        ls = make_schur_ls(kind, p, sc)      # Marquardt scaling
         snapshot(H) = (copy(H.E_data), copy(H.C_data), H.R isa Matrix ? copy(H.R) : copy(H.R.data), copy(ls.b), copy(ls.scaling))
         before = snapshot(ls.H)
         lambda0 = 1e-3
-        SecondOrderOptimization.dampen!(ls, lambda0)
+        SecondOrderOptimization.dampen!(ls, lambda0, sc)
         @test SecondOrderOptimization.solve!(ls) == SecondOrderOptimization.Success
         x_first = copy(ls.x)
         # 100 increasing damping values, as in a run of rejected trial steps
         for lambda in lambda0 .* 1.5 .^ (1:100)
-            SecondOrderOptimization.dampen!(ls, lambda)
+            SecondOrderOptimization.dampen!(ls, lambda, sc)
             @test SecondOrderOptimization.solve!(ls) == SecondOrderOptimization.Success
         end
-        SecondOrderOptimization.dampen!(ls, lambda0)
+        SecondOrderOptimization.dampen!(ls, lambda0, sc)
         @test SecondOrderOptimization.solve!(ls) == SecondOrderOptimization.Success
         @test ls.x == x_first                                   # bit for bit
         @test all(snapshot(ls.H) .== before)                     # R, C, E, b and the scaling are untouched
@@ -768,5 +769,23 @@ end
             @test norm(rf.x - ra.x) <= 1e-8 * norm(ra.x)
             @test ra.res.niterations == rf.res.niterations
         end
+    end
+end
+
+@testset "Schur systems meet the linear-system interface (A3)" begin
+    for (name, p) in (("standard", standard_problem()), ("retained-retained couplings", coupled_groups_problem()),
+                      ("mixed eliminated sizes", mixed_dims_problem()))
+        n = length(p.b)
+        @testset "$name, dense R" begin
+            @test check_linear_system(s -> SecondOrderOptimization.makelinearsystem(nothing, dense_schur_matrix(p), s); n, linsolvers=(:auto, :cholesky, :ldl)) === nothing
+        end
+        @testset "$name, sparse R" begin
+            @test check_linear_system(s -> SecondOrderOptimization.makelinearsystem(nothing, sparse_schur_matrix(p), s); n, linsolvers=(:auto, :cholesky, :ldl)) === nothing
+        end
+    end
+    # The helpers read back exactly the full matrix the problem was built from
+    p = standard_problem()
+    for H in (dense_schur_matrix(p), sparse_schur_matrix(p))
+        @test SecondOrderOptimization.conformance_matrix(H) ≈ p.H
     end
 end

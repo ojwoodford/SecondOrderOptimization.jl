@@ -8,6 +8,7 @@ import OptimizationVariableInterface: nvars, update, update!, copyvars, syncvars
 # Exported public API
 export optimize, optimize!
 export HessianObjective
+export check_linear_system
 export OptimizationOptions, OptimizationResult, OptimizationWorkspace, isconverged, termination_reasons
 export CostTrajectory
 export nullcallback, printoutcallback, storecostscallback
@@ -45,6 +46,9 @@ include("iterators.jl")
 
 # Optimization driver and loop
 include("optimize.jl")
+
+# Conformance check for linear systems
+include("conformance.jl")
 
 # API docstrings
 include("docstrings.jl")
