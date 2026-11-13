@@ -52,3 +52,93 @@ struct HessianObjective{F, FDF, HM}
     H::HM       # Hessian prototype, or nothing
 end
 HessianObjective(f, fdf!; H = nothing) = HessianObjective(f, fdf!, H)
+
+"""
+    JacobianObjective(f, resjac!, J)
+
+A least-squares objective given by its cost and by its residual and Jacobian, for
+[`optimize`](@ref) and [`optimize!`](@ref). The linear systems are solved by a QR factorization
+of the Jacobian, never by forming `JᵀJ`, which is more accurate when `J` is ill conditioned.
+
+- `f(x) -> cost` returns the true scalar cost at `x`. Trial points are scored with `f`: the
+  optimizer never derives the cost from the residual, so the cost need not be `½‖r‖²` (with robust
+  weighting it is not).
+- `resjac!(r, J, x) -> cost` writes the residual into `r` (length `m`) and the Jacobian into `J`
+  (`m × nvars(x)`, the derivative of `r` along the update `dx` of `update(x, dx)`), and returns
+  the cost at `x`, equal to `f(x)`. `r` and `J` arrive zeroed, as `g` and `H` do for `fdf!` in
+  [`HessianObjective`](@ref), so `resjac!` may accumulate into them.
+- `J` is required: a `Matrix{Float64}` prototype (`m × nvars(x0)`), which the linear system then
+  writes into, or an integer `m`, the number of residuals, for a system with its own matrix.
+
+The quadratic model at `x` is `cost + (Jᵀr)ᵀdx + ½‖J dx‖²`: the gradient `Jᵀr` is computed by the
+optimizer, and there is no residual-only callable. The model's gradient matches the true cost's
+gradient only when the cost is `½‖r‖²` near `x`; for a reweighted cost, scale `r` and `J` so
+that this holds.
+
+# Supported so far
+| Accepted | Rejected (`ArgumentError`, before `f` or `resjac!` is called) |
+|:---|:---|
+| `J` a `Matrix{Float64}` prototype, or an integer `m ≥ 1` | a sparse or any other prototype; another element type |
+| `iterator = :levenbergmarquardt` | every other iterator |
+| `linsolver = :auto` or `:qr` (the same QR solve) | every other linear solver |
+
+A prototype whose column count is not `nvars(x0)` is a `DimensionMismatch`.
+
+# Example
+```julia
+t = collect(range(0, 1; length = 20))
+y = @. 2.0 * exp(-1.5 * t)
+f(x) = 0.5 * sum(abs2, @. x[1] * exp(x[2] * t) - y)
+function resjac!(r, J, x)
+    @. r = x[1] * exp(x[2] * t) - y
+    @. J[:, 1] = exp(x[2] * t)
+    @. J[:, 2] = x[1] * t * exp(x[2] * t)
+    return 0.5 * sum(abs2, r)
+end
+x, result = optimize([1.0, 0.0], JacobianObjective(f, resjac!, length(t)))
+```
+"""
+struct JacobianObjective{F, RJ, JM}
+    f::F            # f(x) -> cost
+    resjac!::RJ     # resjac!(r, J, x) -> cost
+    J::JM           # Matrix{Float64} prototype, or an Int: the number of residuals m
+
+    function JacobianObjective(f::F, resjac!::RJ, J::JM) where {F, RJ, JM}
+        checkjacobian(J)
+        return new{F, RJ, JM}(f, resjac!, J)
+    end
+end
+
+const JACOBIAN_SUPPORT = "JacobianObjective supports a Matrix{Float64} Jacobian prototype or an integer number of residuals m, with iterator = :levenbergmarquardt and linsolver = :auto or :qr"
+
+# The Jacobian prototype: a Matrix{Float64} with at least one row, or an integer m >= 1
+function checkjacobian(J)
+    if J isa Integer && !(J isa Bool)
+        J >= 1 || throw(ArgumentError("The number of residuals m must be at least 1; got $J. $JACOBIAN_SUPPORT."))
+    elseif J isa Matrix{Float64}
+        size(J, 1) >= 1 || throw(ArgumentError("The Jacobian prototype has no rows (size $(size(J))): it needs one row per residual. $JACOBIAN_SUPPORT."))
+    elseif J isa AbstractSparseMatrix
+        throw(ArgumentError("A sparse Jacobian prototype ($(typeof(J))) is not supported yet. $JACOBIAN_SUPPORT."))
+    elseif J isa AbstractMatrix && eltype(J) !== Float64
+        throw(ArgumentError("The Jacobian must be Float64; got a prototype with element type $(eltype(J)). $JACOBIAN_SUPPORT."))
+    else
+        throw(ArgumentError("A Jacobian prototype of type $(typeof(J)) is not supported. $JACOBIAN_SUPPORT."))
+    end
+    return nothing
+end
+
+nresiduals(obj::JacobianObjective) = obj.J isa Integer ? Int(obj.J) : size(obj.J, 1)
+
+# Everything checked before anything is allocated or any user function called
+function checkobjective(x0, obj::JacobianObjective, options::OptimizationOptions)
+    checkjacobian(obj.J)
+    n = dynamic(nvars(x0))
+    if obj.J isa AbstractMatrix && size(obj.J, 2) != n
+        throw(DimensionMismatch("Jacobian prototype J has size $(size(obj.J)), but the variables have $n degrees of freedom, so J must have $n columns."))
+    end
+    iter = dynamic(options.iterator)
+    iter === :levenbergmarquardt || throw(ArgumentError("iterator = :$iter is not supported with a JacobianObjective. $JACOBIAN_SUPPORT."))
+    s = dynamic(options.linsolver)
+    s in (:auto, :qr) || throw(ArgumentError("linsolver = :$s is not supported with a JacobianObjective. $JACOBIAN_SUPPORT."))
+    return nothing
+end

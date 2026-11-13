@@ -7,7 +7,7 @@ import OptimizationVariableInterface: nvars, update, update!, copyvars, syncvars
 
 # Exported public API
 export optimize, optimize!
-export HessianObjective
+export HessianObjective, JacobianObjective
 export check_linear_system
 export usesstaticsystem, MAX_STATIC_SYSTEM
 export OptimizationOptions, OptimizationResult, OptimizationWorkspace, isconverged, termination_reasons

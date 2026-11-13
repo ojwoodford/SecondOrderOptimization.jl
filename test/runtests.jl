@@ -7,6 +7,7 @@ using Test
     include("stats.jl")
     include("linearsolve.jl")
     include("objectives.jl")
+    include("jacobianobjective.jl")
     include("conformance.jl")
     include("staticrule.jl")
     include("functional.jl")
