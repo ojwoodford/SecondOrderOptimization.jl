@@ -40,6 +40,28 @@ options = OptimizationOptions(iterator = :levenbergmarquardt, gtol = 1e-8)
 x_opt, result = optimize(x0, HessianObjective(f, fdf!), options)
 ```
 
+## Least Squares from a Residual and Jacobian
+
+For a least-squares cost, give the residual and its Jacobian instead of the gradient and Hessian.
+`JacobianObjective` solves each step by a QR factorization of the Jacobian, never forming `JᵀJ`,
+so it stays accurate when the Jacobian is ill conditioned. This first version supports a dense
+Jacobian (a `Matrix{Float64}` prototype, or the number of residuals `m`) with
+`iterator = :levenbergmarquardt` and `linsolver = :auto` or `:qr`; anything else is an
+`ArgumentError` up front.
+
+```julia
+f(x) = 0.5 * ((1.0 - x[1])^2 + 100.0 * (x[2] - x[1]^2)^2)
+function resjac!(r, J, x)      # r and J arrive zeroed
+    r[1] = 1.0 - x[1]
+    r[2] = 10.0 * (x[2] - x[1]^2)
+    J[1, 1] = -1.0
+    J[2, 1] = -20.0 * x[1]
+    J[2, 2] = 10.0
+    return f(x)
+end
+x_opt, result = optimize(x0, JacobianObjective(f, resjac!, 2))
+```
+
 ## Large-Scale & Iterative Solvers (Extensions)
 
 Simply load `Krylov` or `Pardiso` to unlock optional solver backends:

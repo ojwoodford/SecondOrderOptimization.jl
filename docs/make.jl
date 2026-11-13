@@ -21,6 +21,7 @@ makedocs(
             "Zero-Allocation Static Optimization" => "tutorials/static_optimization.md",
             "Manifold Optimization" => "tutorials/manifold_optimization.md",
             "Sparse Large-Scale Optimization" => "tutorials/sparse_optimization.md",
+            "Least Squares from a Jacobian" => "tutorials/jacobian_least_squares.md",
             "Callbacks & Step Monitoring" => "tutorials/callbacks.md",
         ],
         "Migration Guides" => [

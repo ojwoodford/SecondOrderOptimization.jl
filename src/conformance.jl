@@ -135,10 +135,15 @@ Throws an `ErrorException` naming the first rule that is broken; returns `nothin
 `make_ls(linsolver)` (or `make_ls()`, if that is the only method) must return a fresh system of
 dimension `n` whose Hessian storage can hold a dense symmetric matrix wherever its pattern allows.
 The test matrices are built inside that pattern and made diagonally dominant, so they are
-positive definite. Reading and writing the storage uses [`conformance_matrix`](@ref) and
-[`conformance_fill!`](@ref), which have methods for `Matrix`, `MMatrix`, `SparseMatrixCSC` and
-(with BlockLinearSystems loaded) `SchurBlockMatrix`. Solutions are compared with `rtol`; use a
-looser value for iterative solvers.
+positive definite. Reading and writing the storage uses [`conformance_matrix`](@ref),
+[`conformance_fill!`](@ref) and [`conformance_fillb!`](@ref), which have methods for `Matrix`,
+`MMatrix`, `SparseMatrixCSC`, the [`TallHessian`](@ref) of a `DenseTallLinearSystem` and (with
+BlockLinearSystems loaded) `SchurBlockMatrix`; [`conformance_traits`](@ref) says what the storage
+can represent. For the tall storage, `JᵀJ` is compared with the test matrix to a relative `1e-10`
+(then exactly with itself), the indefinite-`A` checks are skipped, and when `m < n` the test
+matrix has rank `m`, the undamped solve must not return `Success`, and the solves that are
+otherwise undamped use a damping of `0.25`. Solutions are compared with `rtol`; use a looser
+value for iterative solvers.
 
 The rules, for each solver:
 - `getA`, `getb`, `getx` have dimension `n`.
@@ -159,6 +164,7 @@ The rules, for each solver:
 # Example
 ```julia
 check_linear_system(s -> makelinearsystem(zeros(5), zeros(5, 5), s); n = 5, linsolvers = (:auto, :cholesky, :ldl, :qr))
+check_linear_system(s -> SecondOrderOptimization.DenseTallLinearSystem(8, 5); n = 5, linsolvers = (:auto, :qr))
 ```
 """
 function check_linear_system(make_ls; n::Integer, linsolvers, rtol::Real = 1e-8)

@@ -63,14 +63,18 @@ OptimizationResult
 """
     OptimizationWorkspace()
     OptimizationWorkspace(x0, obj::HessianObjective, options=OptimizationOptions(); startstats=Stats())
+    OptimizationWorkspace(x0, obj::JacobianObjective, options=OptimizationOptions(); startstats=Stats())
 
 Preallocated cache for linear systems, solver factorizations, and trial variable buffers,
 enabling zero-allocation repeated optimizations.
 
 The cache is reused when the variable type, dimension and block layout, the options type and the
-Hessian's type and structure all match; otherwise it is rebuilt (and, for a workspace whose type
+objective's structure all match: for a [`HessianObjective`](@ref) the Hessian's type and structure,
+for a [`JacobianObjective`](@ref) the number of residuals `m`. A workspace built for one objective
+kind is never reused for the other. Otherwise it is rebuilt (and, for a workspace whose type
 parameters can't hold the new data, emptied, with a one-time warning). A reused workspace keeps
-the Hessian matrix of the call that built it: see *The Hessian prototype* in [`HessianObjective`](@ref).
+the Hessian (or Jacobian) matrix of the call that built it: see *The Hessian prototype* in
+[`HessianObjective`](@ref).
 
 # Example
 ```julia
@@ -320,6 +324,7 @@ CostTrajectory
 
 """
     optimize!(x0, obj::HessianObjective, options=OptimizationOptions(); callback=nullcallback, workspace=nothing, startstats=Stats()) -> result
+    optimize!(x0, obj::JacobianObjective, options=OptimizationOptions(); callback=nullcallback, workspace=nothing, startstats=Stats()) -> result
 
 Minimizes the objective `obj` starting from `x0`, updating `x0` in place, and returns the
 [`OptimizationResult`](@ref). On return `x0` holds the best point found.
@@ -331,7 +336,11 @@ For a `Number`, an `SVector` or any other immutable variable it throws an `Argum
 
 # Arguments
 - `x0`: Starting point, overwritten with the solution.
-- `obj::HessianObjective`: The cost, its gradient and Hessian, and the Hessian prototype; see [`HessianObjective`](@ref).
+- `obj`: The objective. A [`HessianObjective`](@ref) gives the cost, its gradient and Hessian, and
+  the Hessian prototype. A [`JacobianObjective`](@ref) gives the cost, the residual and its
+  Jacobian, and the Jacobian prototype or number of residuals; it supports only
+  `iterator = :levenbergmarquardt` and `linsolver = :auto` or `:qr` so far, and anything else is
+  an `ArgumentError` before `f` or `resjac!` is called.
 - `options::OptimizationOptions`: Optimization settings and stopping criteria.
 
 # Keyword Arguments
@@ -343,13 +352,14 @@ optimize!
 
 """
     optimize(x0, obj::HessianObjective, options=OptimizationOptions(); callback=nullcallback, workspace=nothing, startstats=Stats()) -> (x, result)
+    optimize(x0, obj::JacobianObjective, options=OptimizationOptions(); callback=nullcallback, workspace=nothing, startstats=Stats()) -> (x, result)
 
 Minimizes the objective `obj` starting from `x0`, and returns the best point found and the
 [`OptimizationResult`](@ref). `x0` is not modified: the optimization runs on `copyvars(x0)`.
 Works for any variable type, including immutable ones (`Number`, `StaticVector`, custom
 manifold types); for a mutable `x0`, [`optimize!`](@ref) avoids the copy.
 
-Takes the same arguments as [`optimize!`](@ref).
+Takes the same arguments as [`optimize!`](@ref), including either objective type.
 
 # Example
 ```julia
@@ -368,6 +378,17 @@ end
 
 x0 = @SVector [-1.2, 1.0]
 x_opt, res = optimize(x0, HessianObjective(f, fdf!))
+
+# The same problem as two residuals, r = [1 - x₁, 10(x₂ - x₁²)], with cost ½‖r‖²
+function resjac!(r, J, x)
+    r[1] = 1.0 - x[1]
+    r[2] = 10.0 * (x[2] - x[1]^2)
+    J[1, 1] = -1.0
+    J[2, 1] = -20.0 * x[1]
+    J[2, 2] = 10.0
+    return 0.5 * (r[1]^2 + r[2]^2)
+end
+x_opt, res = optimize(x0, JacobianObjective(x -> 0.5 * f(x), resjac!, 2))
 ```
 """
 optimize
@@ -460,7 +481,9 @@ storecostscallback
 
 Supertype of the linear systems the iterators solve: the Hessian `A` and gradient `b` that `fdf!`
 fills, the step `x`, and the damping to apply. The built-in systems are `StaticLinearSystem`,
-`DenseLinearSystem` and `SparseLinearSystem`, and, with BlockLinearSystems.jl loaded,
+`DenseLinearSystem`, `SparseLinearSystem` and [`DenseTallLinearSystem`](@ref) (for a
+[`JacobianObjective`](@ref): `A = JᵀJ` held implicitly as `J` and `r`, `b = Jᵀr`, and the
+iterators' `fdf!` a wrapper that calls `resjac!` and forms `b`), and, with BlockLinearSystems.jl loaded,
 `DenseSchurLinearSystem` and `SparseSchurLinearSystem`. A new system type must provide the functions
 below (those not exported are extended as `SecondOrderOptimization.name`), and should pass
 [`check_linear_system`](@ref).

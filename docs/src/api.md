@@ -4,6 +4,7 @@
 
 ```@docs
 HessianObjective
+JacobianObjective
 optimize
 optimize!
 ```
@@ -93,13 +94,26 @@ system type, or a new kind of Hessian storage for the Schur systems, can be chec
 contract with [`check_linear_system`](@ref), which needs a method of `conformance_matrix` and
 `conformance_fill!` for the storage it uses.
 
+A tall system meets the same interface without forming its Hessian. For a
+[`JacobianObjective`](@ref), [`SecondOrderOptimization.DenseTallLinearSystem`](@ref) holds `J` and
+`r`, and `A = JᵀJ` is implicit: `getA` is a [`SecondOrderOptimization.TallHessian`](@ref) wrapping
+`J` and `r`, on which `fast_bAb(A, v)` is `‖J v‖²` and the diagonal is the squared column norms.
+`b = Jᵀr` is the gradient. The iterators call `fdf!(b, A, x)` as for any system; for a
+`JacobianObjective` that `fdf!` is an internal wrapper which calls `resjac!(r, J, x)` and forms
+`b`. `solve!` factors `J` by QR, never `JᵀJ`, and solves the same damped normal equations
+`(A + λD) x = b` as any other system.
+
 ```@docs
 AbstractLinearSystem
+SecondOrderOptimization.DenseTallLinearSystem
+SecondOrderOptimization.TallHessian
 usesstaticsystem
 MAX_STATIC_SYSTEM
 check_linear_system
 SecondOrderOptimization.conformance_matrix
 SecondOrderOptimization.conformance_fill!
+SecondOrderOptimization.conformance_fillb!
+SecondOrderOptimization.conformance_traits
 ```
 
 ## Callbacks & Diagnostics
