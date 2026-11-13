@@ -11,6 +11,16 @@ import BlockLinearSystems
 import BlockLinearSystems: SchurBlockMatrix, SchurReductionWorkspace, SparseBlockLinearSystem, reset_schur_dense!, reset_schur_sparse!, reduce_schur_dense!, reduce_schur_sparse!, backsubstitute!, build_schur_pattern, build_r_to_s_map, retained_block_pairs, trial_workspace
 using LinearAlgebra, SparseArrays, Static
 
+# `linsolver` names the solver for the reduced system S. Only these are implemented for it; any other
+# is rejected when the system is built, rather than silently treated as `:auto`.
+const REDUCED_SOLVERS = (:auto, :cholesky, :ldl)
+const ReducedSolver = Union{StaticSymbol{:auto}, StaticSymbol{:cholesky}, StaticSymbol{:ldl}}
+function check_reduced_solver(linsolver)
+    sym = SecondOrderOptimization.linsolver_symbol(linsolver)
+    sym in REDUCED_SOLVERS || throw(ArgumentError("linsolver = :$sym is not implemented for the reduced system of a SchurBlockMatrix Hessian; use :auto or :cholesky (Cholesky, falling back to Bunch-Kaufman) or :ldl (Bunch-Kaufman)."))
+    return nothing
+end
+
 """
     DenseSchurLinearSystem{T} <: AbstractLinearSystem
 
@@ -294,7 +304,9 @@ function solve_bunchkaufman!(ls::DenseSchurLinearSystem)
     return Success
 end
 
-function SecondOrderOptimization.solve!(ls::DenseSchurLinearSystem, solver_opt::StaticSymbol=static(:auto))
+SecondOrderOptimization.solve!(ls::DenseSchurLinearSystem) = SecondOrderOptimization.solve!(ls, static(:auto))
+SecondOrderOptimization.solve!(ls::DenseSchurLinearSystem, s::StaticSymbol) = check_reduced_solver(s)   # throws: not a ReducedSolver
+function SecondOrderOptimization.solve!(ls::DenseSchurLinearSystem, solver_opt::ReducedSolver)
     build_reduced!(ls) || return NotPositiveDefinite
 
     if solver_opt isa StaticSymbol{:ldl}
@@ -337,7 +349,9 @@ else
     cholmod_ldiv!(x, F::SparseArrays.CHOLMOD.Factor, b) = copyto!(x, F \ b)
 end
 
-function SecondOrderOptimization.solve!(ls::SparseSchurLinearSystem, solver_opt::StaticSymbol=static(:auto))
+SecondOrderOptimization.solve!(ls::SparseSchurLinearSystem) = SecondOrderOptimization.solve!(ls, static(:auto))
+SecondOrderOptimization.solve!(ls::SparseSchurLinearSystem, s::StaticSymbol) = check_reduced_solver(s)   # throws: not a ReducedSolver
+function SecondOrderOptimization.solve!(ls::SparseSchurLinearSystem, solver_opt::ReducedSolver)
     reset_schur_sparse!(
         ls.S.nzval, ls.H.R.data, ls.r_to_s_map, ls.diag_inds, ls.scaling_r, ls.lambda, ls.workspace
     )
@@ -460,30 +474,18 @@ function SecondOrderOptimization.sharex(ls::SparseSchurLinearSystem{T, Ti, TL, T
     )
 end
 
-# The Schur solvers, valid only with a SchurBlockMatrix Hessian
-SecondOrderOptimization.validatelinsolver(::StaticSymbol{:schur}) = true
-SecondOrderOptimization.validatelinsolver(::StaticSymbol{:dense_schur}) = true
-SecondOrderOptimization.validatelinsolver(::StaticSymbol{:sparse_schur}) = true
-SecondOrderOptimization.checkhessianforsolver(::SchurBlockMatrix, linsolver) = nothing
-
 function SecondOrderOptimization.makelinearsystem(x0, H::SchurBlockMatrix{T}, linsolver) where T
     nr = H.structure.nr
     ne = sum(Int, H.structure.e_dims; init=0)
     tot = nr + ne
     b = zeros(T, tot)
     x = zeros(T, tot)
-    sym = SecondOrderOptimization.linsolver_symbol(linsolver)
-    sparse_B = H.R isa SparseBlockLinearSystem
-    if sym === :sparse_schur && !sparse_B
-        throw(ArgumentError("linsolver = :sparse_schur requires a SchurBlockMatrix whose R is a SparseBlockLinearSystem, got $(typeof(H.R))"))
-    elseif sym === :dense_schur && sparse_B
-        throw(ArgumentError("linsolver = :dense_schur requires a SchurBlockMatrix whose R is a dense Matrix, got $(typeof(H.R))"))
-    end
-    # :schur (and any other symbol) picks the system from the storage of R
-    # The sparse system reuses a Schur pattern carried by H (BlockLinearSystems versions that
-    # predate the field have none); the dense system has no use for one.
+    check_reduced_solver(linsolver)
+    # The storage of R picks the dense or sparse Schur system. The sparse system reuses a Schur
+    # pattern carried by H (BlockLinearSystems versions that predate the field have none); the dense
+    # system has no use for one.
     pattern = hasfield(typeof(H), :pattern) ? H.pattern : nothing
-    return sparse_B ? SparseSchurLinearSystem(H, b, x; pattern) : DenseSchurLinearSystem(H, b, x)
+    return H.R isa SparseBlockLinearSystem ? SparseSchurLinearSystem(H, b, x; pattern) : DenseSchurLinearSystem(H, b, x)
 end
 
 end # module BlockLinearSystemsExt

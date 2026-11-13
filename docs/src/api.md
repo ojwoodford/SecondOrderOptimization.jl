@@ -81,8 +81,9 @@ Indefinite
 - **`Pardiso.jl` (via `PardisoExt`)**: Provides multithreaded direct sparse factorization using Intel MKL PARDISO or Panua Pardiso.
   - `:pardiso`: Multi-threaded sparse direct solver for large sparse matrices. The symbolic analysis runs once, when the linear system is built; each solve runs only the positive-definite numerical factorization, and reports `NotPositiveDefinite` when it fails.
   To enable: `using Pardiso`.
-- **`BlockLinearSystems.jl` (via `BlockLinearSystemsExt`)**: Schur-complement solvers for a `SchurBlockMatrix` Hessian.
-  - `:schur`, `:dense_schur`, `:sparse_schur`.
+- **`BlockLinearSystems.jl` (via `BlockLinearSystemsExt`)**: Schur-complement elimination for a `SchurBlockMatrix` Hessian.
+  The type of `H` selects the linear system, including elimination for a `SchurBlockMatrix`: there is no solver symbol or option for it.
+  `linsolver` then names the solver for the reduced system: `:auto` or `:cholesky` (Cholesky, falling back to Bunch-Kaufman) or `:ldl` (Bunch-Kaufman); any other is an `ArgumentError` when the system is built.
   To enable: `using BlockLinearSystems`.
 
 ## Callbacks & Diagnostics

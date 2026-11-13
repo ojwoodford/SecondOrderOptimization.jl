@@ -28,7 +28,7 @@ function optimize_internal!(x, obj::HessianObjective, options::OptimizationOptio
     if !isnothing(workspace) && workspacevalid(workspace, x, options, H)
         return run_cached_optimize!(something(workspace.data), x, obj.f, obj.fdf!, options, callback, startstats)
     else
-        checkhessian(x, H, options.linsolver)
+        checkhessian(x, H)
         ls = makelinearsystem(x, H, options.linsolver)
         data = OptimizationInternal(ls, x, startstats)
         iteratedata = construct(options.iterator, ls, options.callbackchangesstate)

@@ -77,7 +77,7 @@ end
 
 function OptimizationWorkspace(x0, obj::HessianObjective, options::OptimizationOptions=OptimizationOptions(); startstats::Stats=Stats())
     H = obj.H
-    checkhessian(x0, H, options.linsolver)
+    checkhessian(x0, H)
     ls = makelinearsystem(x0, H, options.linsolver)
     data = OptimizationInternal(ls, x0, startstats)
     iteratedata = construct(options.iterator, ls, options.callbackchangesstate)

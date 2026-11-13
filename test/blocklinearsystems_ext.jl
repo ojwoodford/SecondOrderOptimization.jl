@@ -357,35 +357,42 @@ end
     end
 end
 
-@testset "BlockLinearSystemsExt: solver symbols (B12)" begin
+@testset "BlockLinearSystemsExt: the type of H selects elimination; linsolver names the reduced solver (A2)" begin
     p = standard_problem()
     Hd, Hs = dense_schur_matrix(p), sparse_schur_matrix(p)
     mk(H, s) = SecondOrderOptimization.makelinearsystem(nothing, H, s)
-    @test mk(Hd, :schur) isa SOOExt.DenseSchurLinearSystem
-    @test mk(Hd, :dense_schur) isa SOOExt.DenseSchurLinearSystem
-    @test mk(Hs, :schur) isa SOOExt.SparseSchurLinearSystem
-    @test mk(Hs, :sparse_schur) isa SOOExt.SparseSchurLinearSystem
-    @test mk(Hd, static(:schur)) isa SOOExt.DenseSchurLinearSystem
-    @test mk(Hd, SecondOrderOptimization.auto_solver) isa SOOExt.DenseSchurLinearSystem
-    # A request that contradicts the storage of R is an error, not silently ignored or a MethodError
-    @test_throws ArgumentError mk(Hd, :sparse_schur)
-    @test_throws ArgumentError mk(Hs, :dense_schur)
-    # B9: the extension registers the Schur symbols, and they need a SchurBlockMatrix Hessian
-    for s in (:schur, :dense_schur, :sparse_schur)
-        @test SecondOrderOptimization.validatelinsolver(s)
-        opts_s = OptimizationOptions(linsolver=s)
-        @test SecondOrderOptimization.checkhessianforsolver(Hd, opts_s.linsolver) === nothing
-        for H_other in (zeros(3, 3), spzeros(3, 3), nothing)
-            err = try
-                optimize(zeros(3), HessianObjective(x -> sum(abs2, x), (g, H, x) -> sum(abs2, x); H = H_other), opts_s)
-                nothing
-            catch c
-                c
-            end
+    # The storage of R picks the dense or sparse system, whatever the reduced-system solver
+    for s in (:auto, :cholesky, :ldl, static(:auto), static(:ldl), SecondOrderOptimization.auto_solver,
+              SecondOrderOptimization.cholesky_solver, SecondOrderOptimization.ldl_solver)
+        @test mk(Hd, s) isa SOOExt.DenseSchurLinearSystem
+        @test mk(Hs, s) isa SOOExt.SparseSchurLinearSystem
+    end
+    # Solvers not implemented for the reduced system are rejected when it is built (not treated as :auto)
+    sq(x) = sum(abs2, x)
+    sq_fdf!(g, H, x) = sq(x)
+    for H in (Hd, Hs)
+        for s in (:qr, :pardiso, :cg, :minres, :krylov, static(:qr), SecondOrderOptimization.qr_solver)
+            err = try mk(H, s); nothing catch e; e end
             @test err isa ArgumentError
-            @test occursin("SchurBlockMatrix", sprint(showerror, err))
-            @test_throws ArgumentError OptimizationWorkspace(zeros(3), HessianObjective(x -> sum(abs2, x), (g, H, x) -> sum(abs2, x); H = H_other), opts_s)
+            @test occursin("reduced system", sprint(showerror, err))
         end
+        opts_qr = OptimizationOptions(linsolver=:qr)
+        @test_throws ArgumentError optimize(zeros(length(p.b)), HessianObjective(sq, sq_fdf!; H), opts_qr)
+        @test_throws ArgumentError OptimizationWorkspace(zeros(length(p.b)), HessianObjective(sq, sq_fdf!; H), opts_qr)
+    end
+    # ...and by solve! on a system built directly
+    for kind in (:dense, :sparse)
+        @test_throws ArgumentError SecondOrderOptimization.solve!(make_schur_ls(kind, p), :qr)
+    end
+    # The old symbols are unknown even with the extension loaded; other Hessians need no check
+    for s in (:schur, :dense_schur, :sparse_schur)
+        @test !SecondOrderOptimization.validatelinsolver(s)
+        @test_throws ArgumentError OptimizationOptions(linsolver=s)
+    end
+    @test_throws MethodError OptimizationOptions(reduction=:eliminate)
+    for H_other in (nothing, zeros(3, 3), sparse(1.0I, 3, 3))
+        x, res = optimize(ones(3), HessianObjective(sq, (g, H, x) -> (g .= 2 .* x; H[diagind(H)] .= 2; sq(x)); H = H_other))
+        @test isconverged(res) && norm(x) < 1e-8
     end
 
     # solve! accepts Symbols, static symbols and the OptimizationLinearSolver enum without ambiguity
@@ -659,7 +666,7 @@ end
     pre = build_schur_pattern(H0.structure; extra_blocks=retained_block_pairs(H0.R))
     Hp = SchurBlockMatrix(H0.structure, H0.R, H0.E_data, H0.C_data; pattern=pre)
     x_ref = reference_solve(p, 0.3, ones(n))
-    mk(H) = SecondOrderOptimization.makelinearsystem(nothing, H, :sparse_schur)
+    mk(H) = SecondOrderOptimization.makelinearsystem(nothing, H, :auto)
 
     # With and without a pattern on H: the same solution
     for H in (H0, Hp)
@@ -703,5 +710,63 @@ end
     # The dense system ignores a pattern
     Hd = dense_schur_matrix(p)
     Hdp = SchurBlockMatrix(Hd.structure, Hd.R, Hd.E_data, Hd.C_data; pattern=build_schur_pattern(Hd.structure))
-    @test SecondOrderOptimization.makelinearsystem(nothing, Hdp, :schur) isa SOOExt.DenseSchurLinearSystem
+    @test SecondOrderOptimization.makelinearsystem(nothing, Hdp, :auto) isa SOOExt.DenseSchurLinearSystem
+end
+
+# Add d to the diagonal of the full matrix a SchurBlockMatrix represents
+function add_schur_diag!(H::SchurBlockMatrix, d)
+    st = H.structure
+    for r in 1:st.nrblocks, i in 1:Int(st.r_dims[r])
+        k = st.boffsets_r[r] + i - 1
+        if H.R isa Matrix
+            H.R[k, k] += d[k]
+        else
+            block(H.R, r, r)[i, i] += d[k]
+        end
+    end
+    for e in 1:st.neblocks
+        de = Int(st.e_dims[e])
+        for i in 1:de
+            H.E_data[st.eoffsets[e] + (i - 1) * (de + 1)] += d[st.nr + st.boffsets_e[e] + i - 1]
+        end
+    end
+    return H
+end
+
+# A quadratic plus a quartic term, so the Hessian H + diag(3x^2) changes every iteration. `kind` is
+# :dense or :sparse (a SchurBlockMatrix with that storage of R) or :full (a plain dense Hessian).
+function quartic_run(p, kind, linsolver, iterator)
+    cost(x) = 0.5 * dot(x, p.H * x) - dot(p.b, x) + 0.25 * sum(xi -> xi^4, x)
+    if kind === :full
+        Hproto = zeros(length(p.b), length(p.b))
+        fdf! = (g, H, x) -> (g .= p.H * x .- p.b .+ x .^ 3; H .= p.H; H[diagind(H)] .+= 3 .* x .^ 2; cost(x))
+    else
+        Href = kind === :dense ? dense_schur_matrix(p) : sparse_schur_matrix(p)
+        Hproto = kind === :dense ? dense_schur_matrix(p) : sparse_schur_matrix(p)
+        fdf! = (g, H, x) -> (g .= p.H * x .- p.b .+ x .^ 3; copy_content!(H, Href); add_schur_diag!(H, 3 .* x .^ 2); cost(x))
+    end
+    traj = CostTrajectory()
+    x, res = optimize(fill(3.0, length(p.b)), HessianObjective(cost, fdf!; H = Hproto),
+                      OptimizationOptions(; iterator, linsolver, gtol=1e-10); callback=storecostscallback(traj))
+    return (; x, res, costs = copy(traj.costs), steps = deepcopy(traj.steps))
+end
+
+@testset "Full optimization with a SchurBlockMatrix Hessian: :auto, :cholesky and :ldl (A2)" begin
+    p = standard_problem()
+    for kind in (:dense, :sparse), it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :newton, :dogleg)
+        @testset "$kind, $it" begin
+            ra = quartic_run(p, kind, :auto, it)
+            rc = quartic_run(p, kind, :cholesky, it)
+            rl = quartic_run(p, kind, :ldl, it)
+            rf = quartic_run(p, :full, :cholesky, it)
+            @test isconverged(ra.res) && isconverged(rl.res)
+            @test ra.res.niterations > 3
+            # :auto and :cholesky are the same solver for the reduced system: identical iterates
+            @test ra.x == rc.x && ra.costs == rc.costs && ra.steps == rc.steps
+            # the same optimum as :ldl and as the same problem with a plain dense Hessian
+            @test norm(rl.x - ra.x) <= 1e-8 * norm(ra.x)
+            @test norm(rf.x - ra.x) <= 1e-8 * norm(ra.x)
+            @test ra.res.niterations == rf.res.niterations
+        end
+    end
 end
