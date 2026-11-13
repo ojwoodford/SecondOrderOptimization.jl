@@ -6,7 +6,7 @@ using SecondOrderOptimization: getA, getb, getx, solve!   # explicit: Krylov, lo
 # against the normal equations built from the same J
 
 # The iterators widened to in section W, each tested in both variants
-const W_ITERATORS = (:levenbergmarquardt_dtd,)
+const W_ITERATORS = (:levenbergmarquardt_dtd, :dogleg)
 
 # Both objectives of a least-squares problem: the HessianObjective forms the normal equations
 # from the same J
@@ -30,14 +30,16 @@ end
 w_opts(it, extra...) = OptimizationOptions(; iterator=it, extra...)
 
 # The well-conditioned problems of the J tests: Rosenbrock as two residuals; an exponential fit
-# with a nonzero residual; n = 30
+# with a nonzero residual; n = 30. The J tests' n = 30 problem, M tanh.(x) - y, has no finite
+# minimizer (some variables run off to infinity, where sech² makes JᵀJ singular), so here the
+# nonlinearity is the monotone x + sin(x)/2, which keeps J well conditioned and the minimizer finite.
 function w_problems()
     t = collect(range(0, 2; length=25)); y = @. 3exp(-1.3t) + 0.05sin(7t)
     rng = Xoshiro(11); M = randn(rng, 45, 30) ./ sqrt(45) + I(45)[:, 1:30]; yy = randn(rng, 45)
     return (
         ("Rosenbrock", x -> [1 - x[1], 10 * (x[2] - x[1]^2)], x -> [-1.0 0.0; -20x[1] 10.0], 2, [-1.2, 1.0]),
         ("exponential fit", x -> @.(x[1] * exp(x[2] * t) - y), x -> hcat(exp.(x[2] .* t), x[1] .* t .* exp.(x[2] .* t)), 25, [1.0, 0.0]),
-        ("n = 30", x -> M * tanh.(x) .- yy, x -> M * Diagonal(sech.(x) .^ 2), 45, zeros(30)),
+        ("n = 30", x -> M * (x .+ 0.5 .* sin.(x)) .- yy, x -> M * Diagonal(1 .+ 0.5 .* cos.(x)), 45, zeros(30)),
     )
 end
 
@@ -61,6 +63,30 @@ function wrosen_resjac!(r, J, x)
     J[2, 1] = -20 * x[1]
     J[2, 2] = 10.0
     return 0.5 * (r[1]^2 + r[2]^2)
+end
+
+# A dogleg callback recording, for each iteration, the kind of step taken (the Gauss-Newton step,
+# a step along the gradient, or the interpolated dogleg step), the number of trial points
+# evaluated (the points in `pts`, which the objective records, other than the iteration's start;
+# emptied here), the trust radius before and after, the step norm, and the reduction ratio as the
+# iterator computes it
+function w_doglegtrace(pts::Vector{Vector{Float64}})
+    rec = NamedTuple[]
+    prevΔ = Ref(NaN)
+    cb = function (cost, x, data, dd)
+        ls = data.linsystem
+        step = collect(getx(ls)); g = collect(SOO.getgrad(ls))
+        along = norm(step - dot(step, g) / dot(g, g) * g) <= 1e-12 * norm(step)
+        kind = step == dd.newton ? :gaussnewton : along ? :gradient : :dogleg
+        noise = 10eps() * abs(data.bestcost)
+        rho = (data.bestcost - cost + noise) / (-quadratic_model_change(ls, step) + noise)
+        ntrials = count(!=(collect(Float64, data.variables)), pts)
+        push!(rec, (; kind, ntrials, before=prevΔ[], after=dd.trustradius, stepnorm=norm(step), rho, newton=copy(dd.newton), grad=g))
+        prevΔ[] = dd.trustradius
+        empty!(pts)
+        return (cost, 0)
+    end
+    return rec, cb
 end
 
 # Allocation of a warm optimize! with a workspace, measured in a function (Julia 1.10 boxes
@@ -190,6 +216,80 @@ end
         @test isnan(SOO.max_diag(ls))
     end
 
+    @testset "Dogleg: each kind of step, and the trust radius" begin
+        pts = Vector{Float64}[]
+        resid(x) = [1 - x[1], 10 * (x[2] - x[1]^2)]
+        jac(x) = [-1.0 0.0; -20x[1] 10.0]
+        f(x) = (push!(pts, collect(x)); 0.5 * sum(abs2, resid(x)))
+        resjac!(r, J, x) = (push!(pts, collect(x)); r .= resid(x); J .= jac(x); 0.5 * sum(abs2, r))
+        fdf!(g, H, x) = (push!(pts, collect(x)); r = resid(x); J = jac(x); g .= J' * r; H .= J' * J; 0.5 * sum(abs2, r))
+        for (obj, ls) in ((JacobianObjective(f, resjac!, 2), :auto), (HessianObjective(f, fdf!; H=zeros(2, 2)), :cholesky)), ccs in (false, true)
+            rec, cb = w_doglegtrace(pts)
+            empty!(pts)
+            optimize!([-1.2, 1.0], obj, w_opts(:dogleg, :linsolver => ls, :callbackchangesstate => ccs); callback=cb)
+            kinds = [r.kind for r in rec]
+            @test count(==(:gaussnewton), kinds) >= 1
+            @test count(==(:gradient), kinds) >= 1
+            @test count(==(:dogleg), kinds) >= 1
+            later = rec[2:end]
+            # after a rejected trial the radius shrinks: the accepted step is at most a quarter of
+            # the radius the iteration started with
+            rejected = filter(r -> r.ntrials > 1, later)
+            @test !isempty(rejected)
+            @test all(r.stepnorm <= 0.25 * r.before * (1 + 1e-12) for r in rejected)
+            # after a good step that reached the boundary the radius doubles; after a poor one it is
+            # a quarter of the step
+            good = filter(r -> r.ntrials == 1 && r.rho > 0.75 && r.stepnorm >= 0.9 * r.before, later)
+            @test !isempty(good)
+            @test all(r.after == 2 * r.before for r in good)
+            poor = filter(r -> r.ntrials == 1 && r.rho < 0.25, later)
+            @test all(r.after == 0.25 * r.stepnorm for r in poor)
+        end
+    end
+
+    @testset "Dogleg: rank-deficient J takes the shifted Gauss-Newton step, not the Cauchy step" begin
+        # The undamped solve returns NotPositiveDefinite; dogleg then retries with a diagonal shift
+        # (as :newton does), so its Gauss-Newton step is the shifted one, and the Cauchy step is the
+        # fallback only if every shift fails
+        rng = Xoshiro(5)
+        a, c = randn(rng, 15), randn(rng, 15); y = randn(rng, 15)
+        objJ, _ = w_objectives(x -> @.(a * (x[1] + x[2]) + c * x[3] - y), x -> hcat(a, a, c), 15, 3)
+        ls = SOO.makelinearsystem(zeros(3), objJ, :auto)
+        zero!(ls); SOO.linearizer(objJ)(getb(ls), getA(ls), zeros(3)); dampen!(ls, 0.0)
+        @test solve!(ls, :auto) == NotPositiveDefinite
+        for ccs in (false, true)
+            rec, cb = w_doglegtrace(Vector{Float64}[])
+            x, res = optimize(zeros(3), objJ, w_opts(:dogleg, :callbackchangesstate => ccs); callback=cb)
+            @test rec[1].kind == :gaussnewton
+            # the shifted step is not along the gradient (the Cauchy direction)
+            @test norm(rec[1].newton - dot(rec[1].newton, rec[1].grad) / sum(abs2, rec[1].grad) * rec[1].grad) > 1e-3 * norm(rec[1].newton)
+            @test res.bestcost < res.startcost && isconverged(res)
+        end
+    end
+
+    @testset "The tall system tolerates x being overwritten between solves" begin
+        # dogleg writes its own step into getx(ls) between solves, and its trial system shares x
+        rng = Xoshiro(23)
+        J = randn(rng, 9, 4); r = randn(rng, 9)
+        ls = SOO.DenseTallLinearSystem(copy(J))
+        getA(ls).r .= r; mul!(getb(ls), J', r); SOO.markstale!(getA(ls))
+        for λ in (0.0, 0.3)
+            dampen!(ls, λ)
+            @test solve!(ls, :auto) == Success
+            x1 = copy(getx(ls))
+            getx(ls) .= NaN
+            @test solve!(ls, :auto) == Success && getx(ls) == x1
+            getx(ls) .= 1e300
+            @test solve!(ls, :auto) == Success && getx(ls) == x1
+        end
+        trial = sharex(copy_structure(ls), ls)
+        @test getx(trial) === getx(ls)
+        getA(trial).J .= 2 .* J; getA(trial).r .= r; mul!(getb(trial), 2 .* J', r); SOO.markstale!(getA(trial))
+        dampen!(trial, 0.0); solve!(trial, :auto)
+        dampen!(ls, 0.0)
+        @test solve!(ls, :auto) == Success && getx(ls) ≈ (J' * J) \ (J' * r)
+    end
+
     @testset "Scaled damped solve against (JᵀJ + λ Diagonal(s)) \\ Jᵀr" begin
         rng = Xoshiro(17)
         for (m, n) in ((20, 5), (6, 6), (3, 5))
@@ -251,11 +351,12 @@ end
         _, res = optimize([0.0, 0.0], objlate, w_opts(it, :callbackchangesstate => ccs))
         @test :grad_not_finite in termination_reasons(res)
         @test res.niterations >= 1 && !isconverged(res)
-        # a NaN cost at the trial point
-        objcost = JacobianObjective(x -> x[1] > 0.5 ? NaN : f(x), (r, J, x) -> (r .= x .- 1; J .= I(2); x[1] > 0.5 ? NaN : f(x)), 2)
-        _, res = optimize([0.0, 0.0], objcost, w_opts(it, :callbackchangesstate => ccs))
-        @test !isconverged(res)
-        @test !isempty(intersect(termination_reasons(res), (:cost_nan, :max_fails, :step_size, :rel_dcost, :abs_dcost)))
+        # a NaN cost everywhere but the start: every trial is rejected, and the run stops on it
+        fnan(x) = x == [0.0, 0.0] ? f(x) : NaN
+        objcost = JacobianObjective(fnan, (r, J, x) -> (r .= x .- 1; J .= I(2); fnan(x)), 2)
+        x, res = optimize([0.0, 0.0], objcost, w_opts(it, :callbackchangesstate => ccs))
+        @test :cost_nan in termination_reasons(res) && !isconverged(res)
+        @test x == [0.0, 0.0] && res.bestcost == f(x)
     end
 
     @testset "Workspace reuse and no allocation per iteration: :$it" for it in W_ITERATORS, ccs in (false, true)
@@ -282,7 +383,7 @@ end
         xH, resH = optimize(zeros(14), objH, w_opts(it, :maxiters => 500, :linsolver => :cholesky))
         exJ = (exactcost(xJ) - costmin) / costmin
         exH = (exactcost(xH) - costmin) / costmin
-        @info "Ill-conditioned fit, iterator = :$it (relative excess cost over the least-squares minimum $costmin)" tall_excess=exJ tall_iterations=resJ.niterations tall_termination=termination_reasons(resJ) normal_excess=exH normal_iterations=resH.niterations normal_termination=termination_reasons(resH)
+        @info "Ill-conditioned fit, iterator = :$it (relative excess cost over the least-squares minimum $costmin)" tall_excess=exJ tall_iterations=resJ.niterations tall_termination=join(termination_reasons(resJ), ",") normal_excess=exH normal_iterations=resH.niterations normal_termination=join(termination_reasons(resH), ",")
         @test :linsolver_failed ∉ termination_reasons(resJ)
         @test resJ.bestcost < resJ.startcost && resH.bestcost < resH.startcost
         # Marquardt scaling floors the damping at λ ≥ 1e-12 times diag(JᵀJ), and cond(J)² ≈ 1.5e19,
@@ -290,6 +391,15 @@ end
         # invariant to the variables' scale, so no rescaling of the problem avoids it)
         if it === :levenbergmarquardt_dtd
             @test exJ > 1e-3 && exH > 1e-3
+        end
+        # Dogleg's Gauss-Newton step is undamped: from QR it reaches the minimum in a few
+        # iterations; from Cholesky of the normal equations it does not (measured: tall 1.8e-14
+        # in 8 iterations, normal 6.5e4 at maxiters on Julia 1.13; 4.2e-15 in 6 and 1.8e-3 in 396
+        # on 1.10)
+        if it === :dogleg
+            @test exJ <= 1e-12
+            @test exH > 1e-6
+            @test resJ.niterations < resH.niterations
         end
     end
 
