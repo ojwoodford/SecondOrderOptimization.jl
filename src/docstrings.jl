@@ -482,8 +482,9 @@ below (those not exported are extended as `SecondOrderOptimization.name`), and s
 | `quadratic_model_change(ls, dx)` | `dx' A dx / 2 + b' dx`, undamped. The generic method uses `fast_bAb(getA(ls), dx)` and `fast_dot(getb(ls), dx)`. |
 
 Which system `makelinearsystem` builds:
-- `H = nothing`: a static system for a `Number` (size 1) or a `StaticVector` `x0`, and for any other
-  `x0` whose `nvars` is a static size of 16 or less; otherwise a dense system of size `nvars(x0)`.
+- `H = nothing`: a static system when `nvars(x0)` is a static size (a `Number`, a `StaticVector`,
+  a tuple of them) of at most [`MAX_STATIC_SYSTEM`](@ref) (16); otherwise a dense system of size
+  `nvars(x0)`. [`usesstaticsystem`](@ref)`(x0)` says which.
 - `H::MMatrix`: a static system that writes into `H`; any other `StaticMatrix`: a static system of
   its own.
 - `H::Matrix{Float64}`: a dense system that writes into `H`; any other `AbstractMatrix`: a dense

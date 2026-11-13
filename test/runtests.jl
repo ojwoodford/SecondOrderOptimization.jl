@@ -8,6 +8,7 @@ using Test
     include("linearsolve.jl")
     include("objectives.jl")
     include("conformance.jl")
+    include("staticrule.jl")
     include("functional.jl")
     include("nantrial.jl")
     include("trialreuse.jl")

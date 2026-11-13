@@ -175,19 +175,32 @@ function makelinearsystem(x0, H::AbstractMatrix, linsolver)
     return DenseLinearSystem{Float64}(Matrix{Float64}(H), zeros(Float64, n), zeros(Float64, n); solver_ws=makedensews(n, linsolver))
 end
 
-function makelinearsystem(x0::Number, ::Nothing, linsolver)
-    return StaticLinearSystem{1, Float64}()
-end
+"""
+    MAX_STATIC_SYSTEM = 16
 
-function makelinearsystem(x0::StaticVector{N}, ::Nothing, linsolver) where N
-    return StaticLinearSystem{N, Float64}()
-end
+The largest number of variables for which, without a Hessian prototype, the linear system is
+static (stack-allocated `StaticArrays`). See [`usesstaticsystem`](@ref).
+"""
+const MAX_STATIC_SYSTEM = 16
 
+"""
+    usesstaticsystem(x0) -> Bool
+
+Whether `makelinearsystem(x0, nothing, linsolver)` (so `optimize` with `H = nothing`) builds a
+static linear system: when `nvars(x0)` is a static size (as for a `Number`, a `StaticVector`, or a
+tuple of them) of at most [`MAX_STATIC_SYSTEM`](@ref). Otherwise the system is dense, of size
+`nvars(x0)`. The rule does not depend on `linsolver`.
+"""
+usesstaticsystem(x0) = isstaticsize(nvars(x0))
+
+# For a static `nv` this is resolved at compile time, so `makelinearsystem` is type stable
+isstaticsize(nv) = dynamic(is_static(nv)) && nv <= MAX_STATIC_SYSTEM
+
+# Sized by `nvars(x0)`, the number of degrees of freedom (not `length(x0)`, which differs for a
+# vector of multi-dimensional variables)
 function makelinearsystem(x0, ::Nothing, linsolver)
     nv = nvars(x0)
-    if dynamic(is_static(nv)) && nv <= 16
-        return StaticLinearSystem{dynamic(nv), Float64}()
-    end
+    usesstaticsystem(x0) && return StaticLinearSystem{dynamic(nv), Float64}()
     return DenseLinearSystem{Float64}(dynamic(nv); solver_ws=makedensews(dynamic(nv), linsolver))
 end
 

@@ -9,6 +9,7 @@ import OptimizationVariableInterface: nvars, update, update!, copyvars, syncvars
 export optimize, optimize!
 export HessianObjective
 export check_linear_system
+export usesstaticsystem, MAX_STATIC_SYSTEM
 export OptimizationOptions, OptimizationResult, OptimizationWorkspace, isconverged, termination_reasons
 export CostTrajectory
 export nullcallback, printoutcallback, storecostscallback

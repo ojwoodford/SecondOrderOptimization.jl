@@ -95,6 +95,8 @@ contract with [`check_linear_system`](@ref), which needs a method of `conformanc
 
 ```@docs
 AbstractLinearSystem
+usesstaticsystem
+MAX_STATIC_SYSTEM
 check_linear_system
 SecondOrderOptimization.conformance_matrix
 SecondOrderOptimization.conformance_fill!
