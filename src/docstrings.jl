@@ -338,9 +338,9 @@ For a `Number`, an `SVector` or any other immutable variable it throws an `Argum
 - `x0`: Starting point, overwritten with the solution.
 - `obj`: The objective. A [`HessianObjective`](@ref) gives the cost, its gradient and Hessian, and
   the Hessian prototype. A [`JacobianObjective`](@ref) gives the cost, the residual and its
-  Jacobian, and the Jacobian prototype or number of residuals; it supports only
-  `iterator = :levenbergmarquardt` and `linsolver = :auto` or `:qr` so far, and anything else is
-  an `ArgumentError` before `f` or `resjac!` is called.
+  Jacobian, and the Jacobian prototype or number of residuals; it supports every iterator but
+  `:gradientdescent` (`:newton` is then Gauss-Newton) and `linsolver = :auto` or `:qr` so far,
+  and anything else is an `ArgumentError` before `f` or `resjac!` is called.
 - `options::OptimizationOptions`: Optimization settings and stopping criteria.
 
 # Keyword Arguments
@@ -496,11 +496,11 @@ below (those not exported are extended as `SecondOrderOptimization.name`), and s
 | `getA(ls)`, `getb(ls)`, `getx(ls)` | `A` is the Hessian storage and `b` the gradient vector that `fdf!(b, A, x)` fills; `x` is the vector `solve!` writes. `b` and `x` have length `n`. The iterators read and negate `x`, and dogleg writes its own step into it. `A` must support `fast_bAb(A, v)` for `v` of the type of `b`. |
 | `zero!(ls)` | Sets `A` and `b` to zero, keeping their structure (pattern, workspaces). |
 | `dampen!(ls, λ)`, `dampen!(ls, λ, s)` | Records damping without changing `A`: `solve!` then solves with `A + λI`, or `A + λ Diagonal(s)` (`s` in the units of `diag(A)`, not squared). Each call replaces the damping set before, including the scaling; `dampen!(ls, λ, nothing)` is `dampen!(ls, λ)`, and `λ = 0` is undamped. |
-| `solve!(ls, linsolver) -> SolveStatus` | Solves the damped system `A x = b` into `getx(ls)` (the step is `-x`; the iterators negate it). Returns `Success` when `x` solves it; `NotPositiveDefinite` when the factorization failed (`x` is then unspecified); `Indefinite` when it solved but found `A` indefinite (from `:ldl`, and CG's nonpositive curvature). The iterators treat anything but `Success` as failure: Newton shifts the diagonal, Levenberg-Marquardt raises `λ`, dogleg takes the Cauchy step. Leaves `A` and `b` exactly as written, damped or not, whether the solve succeeds or fails. `linsolver` may be a `Symbol`, a `StaticSymbol` or an `OptimizationLinearSolver`. |
+| `solve!(ls, linsolver) -> SolveStatus` | Solves the damped system `A x = b` into `getx(ls)` (the step is `-x`; the iterators negate it). Returns `Success` when `x` solves it; `NotPositiveDefinite` when the factorization failed (`x` is then unspecified); `Indefinite` when it solved but found `A` indefinite (from `:ldl`, and CG's nonpositive curvature). The iterators treat anything but `Success` as failure: Newton shifts the diagonal, Levenberg-Marquardt raises `λ`, and dogleg shifts the diagonal as Newton does, taking the Cauchy step only if every shift fails. Leaves `A` and `b` exactly as written, damped or not, whether the solve succeeds or fails. `linsolver` may be a `Symbol`, a `StaticSymbol` or an `OptimizationLinearSolver`. |
 | `copy_structure(ls)` | A new system with the same structure and its own `A` and `b` (contents unspecified). It may share `x` and factorization workspaces with `ls`, provided each `solve!` is self-contained, so that solving one never changes the other's next solution. |
 | `sharex(ls, from)` | `ls`, or a copy of it sharing its `A` and `b`, whose `getx` is `getx(from)`. |
 | `SecondOrderOptimization.max_diag(ls)` | The largest absolute diagonal entry of `A`; `NaN` if a diagonal entry is `NaN` (as `max` propagates it). |
-| `SecondOrderOptimization.updatescaling!(lmd, ls)` | For `:levenbergmarquardt_dtd`: raises `lmd.scaling` to the running maximum of `abs.(diag(A))`, with a relative floor. The generic method reads `A[i, i]`; a system whose `A` can't be indexed needs its own method. |
+| `SecondOrderOptimization.updatescaling!(lmd, ls)` | For `:levenbergmarquardt_dtd`: raises `lmd.scaling` to the running maximum of `abs.(diag(A))`, with a relative floor. The generic method reads `A[i, i]`; a system whose `A` can't be indexed needs its own method (the sparse, Schur and tall systems have one). |
 | `SecondOrderOptimization.refresh_diag_cache!(ls)` | Called by the iterators after `fdf!` writes `A`. A no-op by default; no built-in system needs it for correctness. |
 | `quadratic_model_change(ls, dx)` | `dx' A dx / 2 + b' dx`, undamped. The generic method uses `fast_bAb(getA(ls), dx)` and `fast_dot(getb(ls), dx)`. |
 

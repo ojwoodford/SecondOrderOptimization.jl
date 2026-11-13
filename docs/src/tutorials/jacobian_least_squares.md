@@ -9,8 +9,9 @@ problem to [`optimize`](@ref) in two ways:
   Jacobian $J$. The optimizer then solves each step by a QR factorization of $J$ and never forms
   $J^\top J$.
 
-Both give the same Levenberg-Marquardt iteration. They differ in how accurately each step is
-solved, and in what that accuracy costs.
+Both give the same iterations, with any iterator but `:gradientdescent`. They differ in how
+accurately each step is solved, and in what that accuracy costs. With a `JacobianObjective` the
+model Hessian is $J^\top J$, so `iterator = :newton` is Gauss-Newton.
 
 ## The same problem, both ways
 
@@ -67,9 +68,16 @@ directions. Cholesky may still succeed, but on a matrix that rounding has alread
 factorization of $J$ works with $\kappa(J)$ itself.
 
 The test suite checks this on a degree-13 polynomial fit with $\kappa(J) \approx 4 \times 10^9$.
-The Jacobian form reaches the least-squares minimum to rounding in about 20 iterations. The
-normal equations with `linsolver = :cholesky` are still above the minimum after 500 iterations:
-their steps are only as good as the rounded $J^\top J$. Ill-conditioned Jacobians come from
+With `:levenbergmarquardt` the Jacobian form reaches the least-squares minimum to rounding in
+about 20 iterations, and with `:dogleg` or `:newton` (Gauss-Newton) in under 10. The normal
+equations with `linsolver = :cholesky` are still above the minimum after hundreds of iterations:
+their steps are only as good as the rounded $J^\top J$.
+
+`:levenbergmarquardt_dtd` does not reach the minimum on this problem in either form. Its
+damping never falls below $10^{-12}$ times the diagonal of $J^\top J$, while here the smallest
+squared singular value is about $10^{-19}$ of it, so the damping holds back the weakest
+directions. Marquardt scaling is for Jacobians whose columns differ greatly in scale, not for
+ill conditioning within a scale. Ill-conditioned Jacobians come from
 polynomial and spline fits in a monomial basis, from parameters of very different scales, and
 from nearly redundant parameterizations.
 
@@ -89,18 +97,19 @@ For $J$ of size $m \times n$:
 The per-damping cost does not depend on $m$, so the retries with a larger $\lambda$ after a
 rejected step stay cheap however many residuals there are. An undamped solve on a numerically
 rank-deficient $J$ (including $m < n$) is reported as `NotPositiveDefinite`, just as Cholesky
-reports singular normal equations, and Levenberg-Marquardt raises $\lambda$.
+reports singular normal equations: Levenberg-Marquardt raises $\lambda$, and Newton and dogleg
+shift the diagonal.
 
-## What this first version supports
+## What is supported
 
-| Accepted | Rejected for now, with an `ArgumentError` before `f` or `resjac!` is called |
+| Accepted | Rejected, with an `ArgumentError` before `f` or `resjac!` is called |
 |:---|:---|
-| `J` a `Matrix{Float64}` prototype, or an integer `m ≥ 1` | a sparse or any other prototype, or another element type |
-| `iterator = :levenbergmarquardt` | `:levenbergmarquardt_dtd`, `:newton`, `:dogleg`, `:gradientdescent` |
+| `J` a `Matrix{Float64}` prototype, or an integer `m ≥ 1` | a sparse or any other prototype, or another element type (for now) |
+| `iterator = :levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg` or `:newton` (Gauss-Newton) | `:gradientdescent`, which uses only the gradient $J^\top r$ and gains nothing from the Jacobian |
 | `linsolver = :auto` or `:qr` (both the QR solve above) | every other linear solver |
 
 Everything else works as for a `HessianObjective`: every variable type, including immutable and
-manifold variables through [`optimize`](@ref); both Levenberg-Marquardt variants
+manifold variables through [`optimize`](@ref); both variants of each iterator
 (`callbackchangesstate`); callbacks and [`CostTrajectory`](@ref); the termination criteria, with
 `gtol` applied to $\lVert J^\top r \rVert_\infty$; and an [`OptimizationWorkspace`](@ref), with
 which a repeated `optimize!` allocates nothing. Time spent in `resjac!` is counted under gradients

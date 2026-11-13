@@ -44,10 +44,10 @@ x_opt, result = optimize(x0, HessianObjective(f, fdf!), options)
 
 For a least-squares cost, give the residual and its Jacobian instead of the gradient and Hessian.
 `JacobianObjective` solves each step by a QR factorization of the Jacobian, never forming `JᵀJ`,
-so it stays accurate when the Jacobian is ill conditioned. This first version supports a dense
-Jacobian (a `Matrix{Float64}` prototype, or the number of residuals `m`) with
-`iterator = :levenbergmarquardt` and `linsolver = :auto` or `:qr`; anything else is an
-`ArgumentError` up front.
+so it stays accurate when the Jacobian is ill conditioned. It supports a dense Jacobian (a
+`Matrix{Float64}` prototype, or the number of residuals `m`) with every iterator but
+`:gradientdescent` (`:newton` is Gauss-Newton here) and `linsolver = :auto` or `:qr`; anything
+else is an `ArgumentError` up front.
 
 ```julia
 f(x) = 0.5 * ((1.0 - x[1])^2 + 100.0 * (x[2] - x[1]^2)^2)

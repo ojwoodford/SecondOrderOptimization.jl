@@ -79,8 +79,13 @@ that this holds.
 | Accepted | Rejected (`ArgumentError`, before `f` or `resjac!` is called) |
 |:---|:---|
 | `J` a `Matrix{Float64}` prototype, or an integer `m ≥ 1` | a sparse or any other prototype; another element type |
-| `iterator = :levenbergmarquardt` | every other iterator |
+| `iterator = :levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg` or `:newton` | `:gradientdescent`, which uses only the gradient `Jᵀr` and so gains nothing from the Jacobian form |
 | `linsolver = :auto` or `:qr` (the same QR solve) | every other linear solver |
+
+The model Hessian is `JᵀJ`, so `iterator = :newton` is Gauss-Newton: each step solves
+`JᵀJ dx = -Jᵀr` by QR of `J`, with Newton's diagonal shift if `J` is numerically rank deficient.
+`:levenbergmarquardt_dtd` scales the damping by the running maximum of the squared column norms
+of `J` (the diagonal of `JᵀJ`).
 
 A prototype whose column count is not `nvars(x0)` is a `DimensionMismatch`.
 
@@ -141,6 +146,7 @@ function checkobjective(x0, obj::JacobianObjective, options::OptimizationOptions
         throw(DimensionMismatch("Jacobian prototype J has size $(size(obj.J)), but the variables have $n degrees of freedom, so J must have $n columns."))
     end
     iter = dynamic(options.iterator)
+    iter === :gradientdescent && throw(ArgumentError("iterator = :gradientdescent is not supported with a JacobianObjective: gradient descent uses only the gradient Jᵀr, so it gains nothing from the residual-and-Jacobian form; use a HessianObjective. $JACOBIAN_SUPPORT."))
     iter in JACOBIAN_ITERATORS || throw(ArgumentError("iterator = :$iter is not supported with a JacobianObjective. $JACOBIAN_SUPPORT."))
     s = dynamic(options.linsolver)
     s in (:auto, :qr) || throw(ArgumentError("linsolver = :$s is not supported with a JacobianObjective. $JACOBIAN_SUPPORT."))

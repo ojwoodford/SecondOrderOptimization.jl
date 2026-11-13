@@ -101,7 +101,10 @@ A tall system meets the same interface without forming its Hessian. For a
 `b = Jᵀr` is the gradient. The iterators call `fdf!(b, A, x)` as for any system; for a
 `JacobianObjective` that `fdf!` is an internal wrapper which calls `resjac!(r, J, x)` and forms
 `b`. `solve!` factors `J` by QR, never `JᵀJ`, and solves the same damped normal equations
-`(A + λD) x = b` as any other system.
+`(A + λD) x = b` as any other system, with `D` the identity or the Marquardt scaling (in the units
+of `diag(JᵀJ)`). The column norms of `J` are computed once per linearization and serve both
+`max_diag` and the tall system's `updatescaling!` method. Every iterator but `:gradientdescent`
+runs on it unchanged; `:newton` is then Gauss-Newton.
 
 ```@docs
 AbstractLinearSystem
