@@ -37,7 +37,6 @@ include("linearsolver.jl")
 # Core options, results, and internal data structures
 include("structs.jl")
 include("objectives.jl")
-include("tallsystem.jl")
 include("OptimizationWorkspace.jl")
 
 # Callbacks
@@ -45,6 +44,9 @@ include("callbacks.jl")
 
 # Iterators
 include("iterators.jl")
+
+# The residual-and-Jacobian linear system (after the iterators, for its Marquardt scaling method)
+include("tallsystem.jl")
 
 # Optimization driver and loop
 include("optimize.jl")

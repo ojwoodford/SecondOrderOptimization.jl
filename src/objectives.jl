@@ -109,7 +109,11 @@ struct JacobianObjective{F, RJ, JM}
     end
 end
 
-const JACOBIAN_SUPPORT = "JacobianObjective supports a Matrix{Float64} Jacobian prototype or an integer number of residuals m, with iterator = :levenbergmarquardt and linsolver = :auto or :qr"
+# The iterators accepted with a JacobianObjective
+const JACOBIAN_ITERATORS = (:levenbergmarquardt, :levenbergmarquardt_dtd)
+
+const JACOBIAN_SUPPORT = "JacobianObjective supports a Matrix{Float64} Jacobian prototype or an integer number of residuals m, with iterator = " *
+    join((":$s" for s in JACOBIAN_ITERATORS), ", ", " or ") * " and linsolver = :auto or :qr"
 
 # The Jacobian prototype: a Matrix{Float64} with at least one row, or an integer m >= 1
 function checkjacobian(J)
@@ -137,7 +141,7 @@ function checkobjective(x0, obj::JacobianObjective, options::OptimizationOptions
         throw(DimensionMismatch("Jacobian prototype J has size $(size(obj.J)), but the variables have $n degrees of freedom, so J must have $n columns."))
     end
     iter = dynamic(options.iterator)
-    iter === :levenbergmarquardt || throw(ArgumentError("iterator = :$iter is not supported with a JacobianObjective. $JACOBIAN_SUPPORT."))
+    iter in JACOBIAN_ITERATORS || throw(ArgumentError("iterator = :$iter is not supported with a JacobianObjective. $JACOBIAN_SUPPORT."))
     s = dynamic(options.linsolver)
     s in (:auto, :qr) || throw(ArgumentError("linsolver = :$s is not supported with a JacobianObjective. $JACOBIAN_SUPPORT."))
     return nothing

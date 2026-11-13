@@ -33,23 +33,28 @@ function geqrf_worksize(m::Integer, n::Integer)
     return max(1, Int(work[1]))
 end
 
-# The factorization state of one linearization. `stale` is set whenever J or r is written
-# (by `zero!`, by the linearization wrapper, or by `conformance_fill!`), and cleared by the QR.
+# The state of one linearization: the factorization and the squared column norms of J (the
+# diagonal of JᵀJ). `stale` and `normsstale` are both set whenever J or r is written (by `zero!`,
+# by the linearization wrapper, or by `conformance_fill!`, through `markstale!`); the QR clears
+# `stale`, and computing the column norms clears `normsstale`.
 mutable struct TallQRWorkspace
     const Jr::Matrix{Float64}     # m × (n+1): [J r], factored in place; R and q = (Qᵀr)[1:k] on top
     const tau::Vector{Float64}
     const S::Matrix{Float64}      # 2n × (n+1): [R q; √λ D^½ 0], factored in place per damping
     const tau2::Vector{Float64}
     const work::Vector{Float64}
+    const colnorm2::Vector{Float64}   # n: squared column norms of J, the diagonal of JᵀJ
     stale::Bool
+    normsstale::Bool
     nonfinite::Bool               # J or r held a NaN or Inf at the last factorization
     nfactor::Int                  # number of QR factorizations of [J r], for tests
+    nnorms::Int                   # number of column-norm computations, for tests
 end
 function TallQRWorkspace(m::Integer, n::Integer)
     lwork = max(geqrf_worksize(m, n + 1), geqrf_worksize(2n, n + 1))
     return TallQRWorkspace(Matrix{Float64}(undef, m, n + 1), Vector{Float64}(undef, min(m, n + 1)),
                            Matrix{Float64}(undef, 2n, n + 1), Vector{Float64}(undef, min(2n, n + 1)),
-                           Vector{Float64}(undef, lwork), true, false, 0)
+                           Vector{Float64}(undef, lwork), Vector{Float64}(undef, n), true, true, false, 0, 0)
 end
 
 """
@@ -69,7 +74,7 @@ TallHessian(J::Matrix{Float64}) = TallHessian(J, zeros(size(J, 1)), zeros(size(J
 
 Base.size(A::TallHessian) = (size(A.J, 2), size(A.J, 2))
 Base.size(A::TallHessian, d::Integer) = size(A)[d]
-markstale!(A::TallHessian) = (A.ws.stale = true; A)
+markstale!(A::TallHessian) = (A.ws.stale = true; A.ws.normsstale = true; A)
 
 function fast_bAb(A::TallHessian, v::AbstractVector)
     mul!(A.Jv, A.J, v)
@@ -89,10 +94,25 @@ end
     return total
 end
 
+# The squared column norms of J, the diagonal of JᵀJ: computed once per linearization and shared
+# by `max_diag` and the Marquardt scaling
+function colnorms2!(A::TallHessian)
+    ws = A.ws
+    if ws.normsstale
+        @inbounds for j in axes(A.J, 2)
+            ws.colnorm2[j] = sqcolnorm(A.J, j)
+        end
+        ws.normsstale = false
+        ws.nnorms += 1
+    end
+    return ws.colnorm2
+end
+
+# The largest squared column norm; NaN if any is NaN (`max` propagates NaN)
 function max_diag(A::TallHessian)
     md = 0.0
-    for j in axes(A.J, 2)
-        md = max(md, sqcolnorm(A.J, j))
+    for d in colnorms2!(A)
+        md = max(md, d)
     end
     return md
 end
@@ -114,8 +134,10 @@ solve on a numerically rank-deficient `J` (smallest `|R[i,i]|` at or below
 Cholesky does on singular normal equations; a `NaN` or `Inf` in `J` or `r` also returns
 `NotPositiveDefinite`, with `x` set to `NaN`. Nothing is allocated after construction.
 
-The factorization is redone after `zero!`, after the optimizer writes `J` and `r`, and after
-`conformance_fill!`; code that writes `getA(ls).J` or `.r` directly must call `zero!` first, or
+The factorization and the squared column norms of `J` (the diagonal of `JᵀJ`, used by `max_diag`
+and by the Marquardt scaling of `:levenbergmarquardt_dtd`) are computed once per linearization,
+and redone after `zero!`, after the optimizer writes `J` and `r`, and after `conformance_fill!`;
+code that writes `getA(ls).J` or `.r` directly must call `zero!` first, or
 `SecondOrderOptimization.markstale!(getA(ls))`.
 """
 mutable struct DenseTallLinearSystem <: AbstractLinearSystem
@@ -247,4 +269,23 @@ end
 
 function solve!(ls::DenseTallLinearSystem, ::StaticSymbol{S}) where S
     throw(ArgumentError("linsolver = :$S is not supported by a DenseTallLinearSystem; use :auto or :qr."))
+end
+
+# Marquardt scaling (`:levenbergmarquardt_dtd`) from the diagonal of JᵀJ, the squared column norms
+# of J. The rule is the generic method's (in iterators.jl), which reads `A[i, i]`: a running
+# maximum of the diagonal, a non-finite entry counting as 1, then a floor of 1e-8 times the
+# largest scale (and at least 1e-12). The scale is in the units of diag(JᵀJ), as `solve!` expects:
+# it puts √(λ sᵢ) on the diagonal of the stacked matrix, adding λ sᵢ to JᵀJ.
+function updatescaling!(lmd::AnyMarquardtData, ls::DenseTallLinearSystem)
+    if lmd.lambda == 0
+        lmd.lambda = 1e-6
+    end
+    m = zero(eltype(lmd.scaling))
+    d2 = colnorms2!(ls.A)
+    for i in eachindex(d2)
+        val = abs(d2[i])
+        @inbounds d = lmd.scaling[i] = max(lmd.scaling[i], isfinite(val) ? val : 1.0)
+        m = max(m, d)
+    end
+    lmd.scaling .= max.(lmd.scaling, max(m * 1e-8, 1e-12))
 end

@@ -8,6 +8,7 @@ using Test
     include("linearsolve.jl")
     include("objectives.jl")
     include("jacobianobjective.jl")
+    include("jacobianiterators.jl")
     include("conformance.jl")
     include("tallsystem.jl")
     include("staticrule.jl")
