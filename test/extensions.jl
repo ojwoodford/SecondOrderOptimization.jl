@@ -42,13 +42,13 @@ using SecondOrderOptimization, SparseArrays, LinearAlgebra, Test, Static
     for solver in (:cg, :minres, :krylov)
         # Newton iterator
         opts_newton = OptimizationOptions(iterator=:newton, linsolver=solver, maxiters=10, gtol=1e-6)
-        x_newton, res_newton = optimize(quad_cost, quad_fdf!, [0.0, 0.0, 0.0], opts_newton; H=copy(A_spd))
+        x_newton, res_newton = optimize([0.0, 0.0, 0.0], HessianObjective(quad_cost, quad_fdf!; H = copy(A_spd)), opts_newton)
         @test isconverged(res_newton)
         @test isapprox(x_newton, x_exact; rtol=1e-5)
 
         # Levenberg-Marquardt iterator
         opts_lm = OptimizationOptions(iterator=:levenbergmarquardt, linsolver=solver, maxiters=20, gtol=1e-6)
-        x_lm, res_lm = optimize(quad_cost, quad_fdf!, [0.0, 0.0, 0.0], opts_lm; H=copy(A_spd))
+        x_lm, res_lm = optimize([0.0, 0.0, 0.0], HessianObjective(quad_cost, quad_fdf!; H = copy(A_spd)), opts_lm)
         @test isconverged(res_lm)
         @test isapprox(x_lm, x_exact; rtol=1e-5)
     end
@@ -106,7 +106,7 @@ using SecondOrderOptimization, SparseArrays, LinearAlgebra, Test, Static
         dense_krylov_allocs(ls_dk, static(solver))
         @test dense_krylov_allocs(ls_dk, static(solver)) == 0
         opts = OptimizationOptions(iterator=:newton, linsolver=solver, maxiters=10, gtol=1e-6)
-        x_dense, res_dense = optimize(quad_dense_cost, quad_dense_fdf!, [0.0, 0.0, 0.0], opts; H=copy(A_dense))
+        x_dense, res_dense = optimize([0.0, 0.0, 0.0], HessianObjective(quad_dense_cost, quad_dense_fdf!; H = copy(A_dense)), opts)
         @test isconverged(res_dense)
         @test isapprox(x_dense, x_exact; rtol=1e-5)
     end
@@ -132,7 +132,7 @@ using SecondOrderOptimization, SparseArrays, LinearAlgebra, Test, Static
     # With Newton, the indefinite Hessian makes CG return Indefinite, prompting Newton to
     # regularize with a diagonal shift
     opts_indef = OptimizationOptions(iterator=:newton, linsolver=:cg, maxiters=10)
-    x_indef, res_indef = optimize(indef_cost, indef_fdf!, [1.0, 1.0, 1.0], opts_indef; H=copy(A_indef))
+    x_indef, res_indef = optimize([1.0, 1.0, 1.0], HessianObjective(indef_cost, indef_fdf!; H = copy(A_indef)), opts_indef)
     @test isfinite(res_indef.bestcost)
 
     # 3. PardisoExt testing
@@ -142,7 +142,7 @@ using SecondOrderOptimization, SparseArrays, LinearAlgebra, Test, Static
 
     if Pardiso.mkl_is_available() || Pardiso.panua_is_available()
         opts_pardiso = OptimizationOptions(iterator=:newton, linsolver=:pardiso, maxiters=10, gtol=1e-6)
-        x_pardiso, res_pardiso = optimize(quad_cost, quad_fdf!, [0.0, 0.0, 0.0], opts_pardiso; H=copy(A_spd))
+        x_pardiso, res_pardiso = optimize([0.0, 0.0, 0.0], HessianObjective(quad_cost, quad_fdf!; H = copy(A_spd)), opts_pardiso)
         @test isconverged(res_pardiso)
         @test isapprox(x_pardiso, x_exact; rtol=1e-5)
         # B1: repeated solves on one system must not try to reassign the const workspace field
@@ -170,11 +170,11 @@ using SecondOrderOptimization, SparseArrays, LinearAlgebra, Test, Static
             @test isapprox(ls_indef.x, (Matrix(A_indef) + 10I) \ b_vec; rtol=1e-8)
         end
         # Dense systems
-        x_pd, res_pd = optimize(quad_dense_cost, quad_dense_fdf!, [0.0, 0.0, 0.0], opts_pardiso; H=copy(A_dense))
+        x_pd, res_pd = optimize([0.0, 0.0, 0.0], HessianObjective(quad_dense_cost, quad_dense_fdf!; H = copy(A_dense)), opts_pardiso)
         @test isconverged(res_pd)
         @test isapprox(x_pd, x_exact; rtol=1e-5)
         # Newton recovers from the indefinite Hessian by shifting
-        x_pi, res_pi = optimize(indef_cost, indef_fdf!, [1.0, 1.0, 1.0], OptimizationOptions(iterator=:newton, linsolver=:pardiso, maxiters=10); H=copy(A_indef))
+        x_pi, res_pi = optimize([1.0, 1.0, 1.0], HessianObjective(indef_cost, indef_fdf!; H = copy(A_indef)), OptimizationOptions(iterator=:newton, linsolver=:pardiso, maxiters=10))
         @test isfinite(res_pi.bestcost)
     else
         # When shared library is not installed, attempting to solve throws an informative error

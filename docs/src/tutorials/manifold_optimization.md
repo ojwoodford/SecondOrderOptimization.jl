@@ -33,7 +33,7 @@ function fdf!(g, H, u::UnitVector3)
 end
 
 x0 = UnitVector3(SVector(1.0, 0.0, 0.1))
-x_opt, res = optimize(cost, fdf!, x0, OptimizationOptions(iterator = :levenbergmarquardt))
+x_opt, res = optimize(x0, HessianObjective(cost, fdf!), OptimizationOptions(iterator = :levenbergmarquardt))
 println("Optimized unit vector: ", x_opt.v)
 println("Norm: ", norm(x_opt.v))
 ```

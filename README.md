@@ -37,7 +37,7 @@ end
 
 x0 = @SVector [-1.2, 1.0]
 options = OptimizationOptions(iterator = :levenbergmarquardt, gtol = 1e-8)
-x_opt, result = optimize(f, fdf!, x0, options)
+x_opt, result = optimize(x0, HessianObjective(f, fdf!), options)
 ```
 
 ## Large-Scale & Iterative Solvers (Extensions)
@@ -50,7 +50,7 @@ using Krylov   # unlocks :cg, :minres, :krylov
 
 # Conjugate Gradient for large sparse positive-definite systems:
 opts = OptimizationOptions(iterator = :levenbergmarquardt, linsolver = :cg)
-x_opt, res = optimize(f, fdf!, x0, opts; H = H_sparse_prototype)
+x_opt, res = optimize(x0, HessianObjective(f, fdf!; H = H_sparse_prototype), opts)
 ```
 
 ```julia
@@ -58,5 +58,5 @@ using SecondOrderOptimization, SparseArrays
 using Pardiso  # unlocks :pardiso (multi-threaded MKL / Panua direct solver)
 
 opts = OptimizationOptions(iterator = :newton, linsolver = :pardiso)
-x_opt, res = optimize(f, fdf!, x0, opts; H = H_sparse_prototype)
+x_opt, res = optimize(x0, HessianObjective(f, fdf!; H = H_sparse_prototype), opts)
 ```

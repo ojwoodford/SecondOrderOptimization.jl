@@ -3,6 +3,7 @@
 ## Primary Functions
 
 ```@docs
+HessianObjective
 optimize
 optimize!
 ```

@@ -15,7 +15,7 @@ using SecondOrderOptimization, StaticArrays, SparseArrays, LinearAlgebra, Test, 
 
     x0_q = @SVector [0.0, 0.0]
     opts_q = OptimizationOptions(iterator=:dogleg, gtol=1e-10)
-    x_opt_q, res_q = optimize(quad_cost, quad_fdf!, x0_q, opts_q)
+    x_opt_q, res_q = optimize(x0_q, HessianObjective(quad_cost, quad_fdf!), opts_q)
     @test isapprox(x_opt_q, [3.0, -4.0]; atol=1e-8)
     @test res_q.bestcost < 1e-16
     @test res_q.niterations == 1 # Newton-first fast path achieves 1-iteration convergence on quadratic!
@@ -109,7 +109,7 @@ using SecondOrderOptimization, StaticArrays, SparseArrays, LinearAlgebra, Test, 
     f_bratu, fdf_bratu! = bratu_problem(64)
     x0_b = zeros(64)
     opts_b = OptimizationOptions(iterator=:dogleg, gtol=1e-8, maxiters=50)
-    x_opt_b, res_b = optimize(f_bratu, fdf_bratu!, copy(x0_b), opts_b)
+    x_opt_b, res_b = optimize(copy(x0_b), HessianObjective(f_bratu, fdf_bratu!), opts_b)
     @test isconverged(res_b)
     @test res_b.niterations <= 4 # Slashed from 16 to 3-4 iterations!
     @test res_b.bestcost < 1e-20
@@ -117,10 +117,13 @@ using SecondOrderOptimization, StaticArrays, SparseArrays, LinearAlgebra, Test, 
     # 4. Zero allocations with static vectors and OptimizationWorkspace
     x0_stat = @SVector [1.5, -2.5]
     opts_stat = OptimizationOptions(iterator=:dogleg)
-    ws = OptimizationWorkspace(quad_cost, quad_fdf!, x0_stat, opts_stat)
+    ws = OptimizationWorkspace(x0_stat, HessianObjective(quad_cost, quad_fdf!), opts_stat)
     # Warmup
-    optimize(quad_cost, quad_fdf!, x0_stat, opts_stat; workspace=ws)
-    allocs = @allocated optimize(quad_cost, quad_fdf!, x0_stat, opts_stat; workspace=ws)
+    optimize(x0_stat, HessianObjective(quad_cost, quad_fdf!), opts_stat; workspace=ws)
+    # Measured inside a function: at testset top level Julia 1.10 boxes the captured variables
+    dogleg_allocs(x, obj, o, w) = @allocated optimize(x, obj, o; workspace=w)
+    dogleg_allocs(x0_stat, HessianObjective(quad_cost, quad_fdf!), opts_stat, ws)
+    allocs = dogleg_allocs(x0_stat, HessianObjective(quad_cost, quad_fdf!), opts_stat, ws)
     @test allocs == 0
 
     # 5. DoglegData constructors and reset!

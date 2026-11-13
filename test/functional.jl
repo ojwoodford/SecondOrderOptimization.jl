@@ -21,33 +21,33 @@ end
     # Test second-order iterators with StaticVector
     for it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton)
         opts = OptimizationOptions(iterator=it, maxiters=100, dstep=1e-12)
-        x_opt, res = optimize(rosenbrock_cost, rosenbrock_fdf!, x0_static, opts)
+        x_opt, res = optimize(x0_static, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), opts)
         @test isapprox(x_opt, [1.0, 1.0]; atol=1e-4)
         @test res.bestcost < 1e-6
     end
 
     # Test gradient descent reduces cost
     opts_gd = OptimizationOptions(iterator=:gradientdescent, maxiters=200)
-    x_opt_gd, res_gd = optimize(rosenbrock_cost, rosenbrock_fdf!, x0_static, opts_gd)
+    x_opt_gd, res_gd = optimize(x0_static, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), opts_gd)
     @test res_gd.bestcost < rosenbrock_cost(x0_static) * 0.05
 
     # Test each iterator with dynamic Vector
     for it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton)
         opts = OptimizationOptions(iterator=it, maxiters=100)
-        x_opt, res = optimize(rosenbrock_cost, rosenbrock_fdf!, copy(x0_dense), opts)
+        x_opt, res = optimize(copy(x0_dense), HessianObjective(rosenbrock_cost, rosenbrock_fdf!), opts)
         @test isapprox(x_opt, [1.0, 1.0]; atol=1e-4)
     end
 
     # Test linear solver options
     for solver in (:auto, :cholesky, :ldl, :qr)
         opts = OptimizationOptions(iterator=:dogleg, linsolver=solver, maxiters=100)
-        x_opt, res = optimize(rosenbrock_cost, rosenbrock_fdf!, copy(x0_dense), opts)
+        x_opt, res = optimize(copy(x0_dense), HessianObjective(rosenbrock_cost, rosenbrock_fdf!), opts)
         @test isapprox(x_opt, [1.0, 1.0]; atol=1e-4)
     end
 
     # Test gtol termination
     opts_gtol = OptimizationOptions(gtol=1e-3, maxiters=100)
-    x_opt, res = optimize(rosenbrock_cost, rosenbrock_fdf!, copy(x0_dense), opts_gtol)
+    x_opt, res = optimize(copy(x0_dense), HessianObjective(rosenbrock_cost, rosenbrock_fdf!), opts_gtol)
     @test isapprox(x_opt, [1.0, 1.0]; atol=1e-2)
     @test (res.termination & TERMINATION_GRAD_TOL) != 0
     g_final = zeros(2)
@@ -57,7 +57,7 @@ end
 
     # Test gtol termination at initial point (0 iterations)
     x_at_min = @SVector [1.0, 1.0]
-    x_opt0, res0 = optimize(rosenbrock_cost, rosenbrock_fdf!, x_at_min, opts_gtol)
+    x_opt0, res0 = optimize(x_at_min, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), opts_gtol)
     @test res0.niterations == 0
     @test (res0.termination & TERMINATION_GRAD_TOL) != 0
     # M18: termination reasons without the raw bits
@@ -66,7 +66,7 @@ end
     @test occursin("Gradient norm below threshold.", sprint(show, res0))
     bits = [bit for (bit, _, _) in SecondOrderOptimization.TERMINATION_REASONS]
     @test allunique(bits) && all(ispow2, bits) && reduce(|, bits) == (1 << 15) - 1
-    _, res_cb = optimize(rosenbrock_cost, rosenbrock_fdf!, copy(x0_dense), OptimizationOptions(maxiters=50); callback=(c, args...) -> (c, 1))
+    _, res_cb = optimize(copy(x0_dense), HessianObjective(rosenbrock_cost, rosenbrock_fdf!), OptimizationOptions(maxiters=50); callback=(c, args...) -> (c, 1))
     @test termination_reasons(res_cb) == [:callback]
     @test !isconverged(res_cb)
 
@@ -78,7 +78,7 @@ end
     # Test callbacks
     traj = CostTrajectory()
     opts_cb = OptimizationOptions(maxiters=20)
-    x_opt, res = optimize(rosenbrock_cost, rosenbrock_fdf!, x0_static, opts_cb; callback=storecostscallback(traj))
+    x_opt, res = optimize(x0_static, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), opts_cb; callback=storecostscallback(traj))
     @test length(traj.costs) > 0
     @test length(traj.times_ns) == length(traj.costs)
     @test length(traj.steps) == length(traj.costs)
@@ -87,11 +87,14 @@ end
 
     # Test zero-allocation on SVector with OptimizationWorkspace
     opts_alloc = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=30)
-    ws = OptimizationWorkspace(rosenbrock_cost, rosenbrock_fdf!, x0_static, opts_alloc)
+    ws = OptimizationWorkspace(x0_static, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), opts_alloc)
     # Warmup
-    optimize(rosenbrock_cost, rosenbrock_fdf!, x0_static, opts_alloc; workspace=ws)
+    optimize(x0_static, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), opts_alloc; workspace=ws)
     # Allocation test
-    allocs = @allocated optimize(rosenbrock_cost, rosenbrock_fdf!, x0_static, opts_alloc; workspace=ws)
+    # Measured inside a function: at testset top level Julia 1.10 boxes the captured variables
+    rosen_allocs(x, obj, o, w) = @allocated optimize(x, obj, o; workspace=w)
+    rosen_allocs(x0_static, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), opts_alloc, ws)
+    allocs = rosen_allocs(x0_static, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), opts_alloc, ws)
     @test allocs == 0
 
     # Test printoutcallback and OptimizationResult show
@@ -103,25 +106,26 @@ end
 
     # Test enum options (OptimizationIterator & OptimizationLinearSolver)
     opts_enum = OptimizationOptions(iterator=SecondOrderOptimization.dogleg, linsolver=SecondOrderOptimization.cholesky_solver, maxiters=50)
-    x_enum, _ = optimize(rosenbrock_cost, rosenbrock_fdf!, x0_static, opts_enum)
+    x_enum, _ = optimize(x0_static, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), opts_enum)
     @test isapprox(x_enum, [1.0, 1.0]; atol=1e-4)
 
     # Test that optimize does not mutate x0
     opts_test = OptimizationOptions(maxiters=100)
     x0_orig = [-1.2, 1.0]
     x0_copy = copy(x0_orig)
-    x_opt_nomut, _ = optimize(rosenbrock_cost, rosenbrock_fdf!, x0_copy, opts_test)
+    x_opt_nomut, _ = optimize(x0_copy, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), opts_test)
     @test x0_copy == x0_orig
     @test x_opt_nomut !== x0_copy
     @test isapprox(x_opt_nomut, [1.0, 1.0]; atol=1e-4)
 
-    # Test optimize! mutates mutable vector in-place
+    # Test optimize! mutates mutable vector in-place, and returns the result only
     x_mut = copy(x0_orig)
-    x_opt_mut, _ = optimize!(rosenbrock_cost, rosenbrock_fdf!, x_mut, opts_test)
-    @test x_opt_mut === x_mut
+    res_mut = optimize!(x_mut, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), opts_test)
+    @test res_mut isa OptimizationResult
     @test isapprox(x_mut, [1.0, 1.0]; atol=1e-4)
 
-    # Test optimize! works on immutable StaticVector
-    x_stat_opt, _ = optimize!(rosenbrock_cost, rosenbrock_fdf!, x0_static, opts_test)
+    # optimize! refuses an immutable StaticVector; optimize handles it
+    @test_throws ArgumentError optimize!(x0_static, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), opts_test)
+    x_stat_opt, _ = optimize(x0_static, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), opts_test)
     @test isapprox(x_stat_opt, [1.0, 1.0]; atol=1e-4)
 end

@@ -24,27 +24,30 @@ end
     opts = OptimizationOptions(iterator=:dogleg)
 
     # 1. Eagerly constructed workspace
-    ws = OptimizationWorkspace(quad_cost, quad_fdf!, x0_static, opts)
+    ws = OptimizationWorkspace(x0_static, HessianObjective(quad_cost, quad_fdf!), opts)
     @test !isempty(ws)
-    x_opt, res = optimize(quad_cost, quad_fdf!, x0_static, opts; workspace=ws)
+    x_opt, res = optimize(x0_static, HessianObjective(quad_cost, quad_fdf!), opts; workspace=ws)
     @test isapprox(x_opt, [0.0, 0.0]; atol=1e-8)
 
     # Re-running with same workspace achieves 0 allocations
-    allocs = @allocated optimize(quad_cost, quad_fdf!, x0_static, opts; workspace=ws)
+    # Measured inside a function: at testset top level Julia 1.10 boxes the captured variables
+    static_allocs(x, obj, o, w) = @allocated optimize(x, obj, o; workspace=w)
+    static_allocs(x0_static, HessianObjective(quad_cost, quad_fdf!), opts, ws)
+    allocs = static_allocs(x0_static, HessianObjective(quad_cost, quad_fdf!), opts, ws)
     @test allocs == 0
 
     # 2. Key invalidation when options change (and safe fallback on concretely-typed workspace)
     opts_new = OptimizationOptions(iterator=:levenbergmarquardt)
     @test !SecondOrderOptimization.workspacevalid(ws, x0_static, opts_new, nothing)
     # M6: a concretely typed workspace that can't hold the new data warns (once) when emptied
-    x_opt_new, _ = @test_logs (:warn, r"emptied") optimize(quad_cost, quad_fdf!, x0_static, opts_new; workspace=ws)
+    x_opt_new, _ = @test_logs (:warn, r"emptied") optimize(x0_static, HessianObjective(quad_cost, quad_fdf!), opts_new; workspace=ws)
     @test isapprox(x_opt_new, [0.0, 0.0]; atol=1e-8)
     @test isempty(ws)
 
     # 3. Dynamic workspace
     ws_dyn = OptimizationWorkspace()
     @test isempty(ws_dyn)
-    x_opt, res = optimize(quad_cost, quad_fdf!, x0_static, opts; workspace=ws_dyn)
+    x_opt, res = optimize(x0_static, HessianObjective(quad_cost, quad_fdf!), opts; workspace=ws_dyn)
     @test !isempty(ws_dyn)
     @test isapprox(x_opt, [0.0, 0.0]; atol=1e-8)
 
@@ -57,18 +60,20 @@ end
     H_sparse = spdiagm(0 => ones(n))
     x0_vec = fill(1.5, n)
     opts_sparse = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=10)
-    ws_sp = OptimizationWorkspace(quad_cost, quad_fdf!, x0_vec, opts_sparse; H=H_sparse)
+    ws_sp = OptimizationWorkspace(x0_vec, HessianObjective(quad_cost, quad_fdf!; H = H_sparse), opts_sparse)
     @test !isempty(ws_sp)
 
-    x_opt_sp, res_sp = optimize(quad_cost, quad_fdf!, copy(x0_vec), opts_sparse; H=H_sparse, workspace=ws_sp)
+    x_opt_sp, res_sp = optimize(copy(x0_vec), HessianObjective(quad_cost, quad_fdf!; H = H_sparse), opts_sparse; workspace=ws_sp)
     @test isapprox(x_opt_sp, zeros(n); atol=1e-8)
 
     # Warmup and test allocations with sparse workspace (in-place optimize! achieves 0 allocations)
     x_buf = copy(x0_vec)
-    optimize!(quad_cost, quad_fdf!, x_buf, opts_sparse; H=H_sparse, workspace=ws_sp)
+    optimize!(x_buf, HessianObjective(quad_cost, quad_fdf!; H = H_sparse), opts_sparse; workspace=ws_sp)
     @test ws_sp.data[1].variables !== ws_sp.data[1].varnext
+    sparse_allocs(x, obj, o, w) = @allocated optimize!(x, obj, o; workspace=w)
+    sparse_allocs(x_buf, HessianObjective(quad_cost, quad_fdf!; H = H_sparse), opts_sparse, ws_sp)
     x_buf .= x0_vec
-    allocs_sp = @allocated optimize!(quad_cost, quad_fdf!, x_buf, opts_sparse; H=H_sparse, workspace=ws_sp)
+    allocs_sp = sparse_allocs(x_buf, HessianObjective(quad_cost, quad_fdf!; H = H_sparse), opts_sparse, ws_sp)
     @test ws_sp.data[1].variables !== ws_sp.data[1].varnext
     @test allocs_sp == 0
 
@@ -95,7 +100,7 @@ end
     opts_blk = OptimizationOptions(iterator=:levenbergmarquardt)
     ws_blk = OptimizationWorkspace()
     for x0 in (xa, xb, xa, xc, xd)
-        x_blk, res_blk = optimize(blk_cost, blk_fdf!, x0, opts_blk; workspace=ws_blk)
+        x_blk, res_blk = optimize(x0, HessianObjective(blk_cost, blk_fdf!), opts_blk; workspace=ws_blk)
         @test length(x_blk) == length(x0)
         @test all(length(x_blk[i]) == length(x0[i]) for i in eachindex(x0))
         @test isapprox(blk_cost(x_blk), 0.0; atol=1e-12)
@@ -108,9 +113,9 @@ end
     H1 = zeros(3, 3)
     H2 = zeros(3, 3)
     ws_h = OptimizationWorkspace()
-    optimize(quad_cost, quad_fdf!, ones(3), OptimizationOptions(); H=H1, workspace=ws_h)
+    optimize(ones(3), HessianObjective(quad_cost, quad_fdf!; H = H1), OptimizationOptions(); workspace=ws_h)
     @test H1 == I
-    optimize(quad_cost, quad_fdf!, ones(3), OptimizationOptions(); H=H2, workspace=ws_h)
+    optimize(ones(3), HessianObjective(quad_cost, quad_fdf!; H = H2), OptimizationOptions(); workspace=ws_h)
     @test all(iszero, H2)
 
     # M12: a sparse H's structure is matched by identity first, then by hashes

@@ -156,7 +156,7 @@ using SecondOrderOptimization, SparseArrays, StaticArrays, LinearAlgebra, Test, 
     for iter in (:newton, :levenbergmarquardt)
         opts = OptimizationOptions(iterator=iter, linsolver=:cholesky, maxiters=10)
         x0 = @SVector [1.0, 1.0]
-        x_opt, res = optimize(unsolvable_cost, unsolvable_fdf!, x0, opts)
+        x_opt, res = optimize(x0, HessianObjective(unsolvable_cost, unsolvable_fdf!), opts)
         @test (res.termination & TERMINATION_LINSOLVER_FAILED) != 0
         @test !isconverged(res)
     end

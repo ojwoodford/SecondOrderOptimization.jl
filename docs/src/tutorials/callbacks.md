@@ -45,7 +45,7 @@ options = OptimizationOptions(iterator = :dogleg)
 
 # 1. Using CostTrajectory
 traj = CostTrajectory()
-x_opt, result = optimize(f, fdf!, x0, options; callback = storecostscallback(traj))
+x_opt, result = optimize(x0, HessianObjective(f, fdf!), options; callback = storecostscallback(traj))
 println("Recorded ", length(traj.costs), " iterations.")
 
 # 2. Custom early-stopping callback
@@ -53,6 +53,6 @@ function stop_below_1e4(cost, x_trial, data, iteratedata)
     terminate = cost < 1e-4 ? 1 : 0
     return (cost, terminate)
 end
-x_early, res_early = optimize(f, fdf!, x0, options; callback = stop_below_1e4)
+x_early, res_early = optimize(x0, HessianObjective(f, fdf!), options; callback = stop_below_1e4)
 println("User termination flag: ", res_early.termination >> 16)
 ```

@@ -1,6 +1,6 @@
 # Sparse Large-Scale Optimization
 
-For large-scale problems (e.g. chain systems, pose graphs, bundle adjustment, spline fitting), forming or factoring dense Hessians is prohibitive. `SecondOrderOptimization.jl` natively supports sparse Hessians by passing a `SparseMatrixCSC` prototype via the `H` keyword argument of [`optimize`](@ref).
+For large-scale problems (e.g. chain systems, pose graphs, bundle adjustment, spline fitting), forming or factoring dense Hessians is prohibitive. `SecondOrderOptimization.jl` natively supports sparse Hessians: give a `SparseMatrixCSC` prototype as the `H` keyword of [`HessianObjective`](@ref), and pass the objective to [`optimize`](@ref).
 
 ## Passing a Sparse Hessian Prototype `H`
 
@@ -45,8 +45,8 @@ x0 = zeros(n)
 opts = OptimizationOptions(iterator = :levenbergmarquardt, linsolver = :ldl)
 
 # Preallocate workspace for zero-allocation repeated solves
-ws = OptimizationWorkspace(chain_cost, chain_fdf!, x0, opts; H = H_proto)
-x_opt, res = optimize(chain_cost, chain_fdf!, copy(x0), opts; H = H_proto, workspace = ws)
+ws = OptimizationWorkspace(x0, HessianObjective(chain_cost, chain_fdf!; H = H_proto), opts)
+x_opt, res = optimize(copy(x0), HessianObjective(chain_cost, chain_fdf!; H = H_proto), opts; workspace = ws)
 ```
 
 ## Choosing the Sparse Linear Solver
@@ -90,7 +90,7 @@ options = OptimizationOptions(
     gtol = 1e-6
 )
 
-x_opt, result = optimize(chain_cost, chain_fdf!, x0, options; H = H_proto)
+x_opt, result = optimize(x0, HessianObjective(chain_cost, chain_fdf!; H = H_proto), options)
 println("Final cost: ", result.bestcost)
 ```
 
@@ -123,8 +123,8 @@ options = OptimizationOptions(
 )
 
 # Zero-allocation workspace preallocates Krylov basis vectors in `solver_ws`
-ws = OptimizationWorkspace(chain_cost, chain_fdf!, x0, options; H = H_proto)
-x_opt, result = optimize(chain_cost, chain_fdf!, copy(x0), options; H = H_proto, workspace = ws)
+ws = OptimizationWorkspace(x0, HessianObjective(chain_cost, chain_fdf!; H = H_proto), options)
+x_opt, result = optimize(copy(x0), HessianObjective(chain_cost, chain_fdf!; H = H_proto), options; workspace = ws)
 ```
 
 #### Zero-Allocation Iterative Solves

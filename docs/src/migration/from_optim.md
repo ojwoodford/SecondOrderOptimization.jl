@@ -52,6 +52,6 @@ end
 
 x0 = @SVector [-1.2, 1.0]
 options = OptimizationOptions(iterator = :dogleg)
-x_opt, res = optimize(f, fdf!, x0, options)
+x_opt, res = optimize(x0, HessianObjective(f, fdf!), options)
 ```
 Notice how `fdf!` allows sharing intermediate terms between cost, gradient, and Hessian computation in a single pass.

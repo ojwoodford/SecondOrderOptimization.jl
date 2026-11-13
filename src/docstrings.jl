@@ -1,28 +1,3 @@
-const H_PROTOTYPE_DOC = """
-  See *The Hessian prototype* below."""
-
-const H_CONTRACT_DOC = """
-# The Hessian prototype
-- **Fill both triangles.** `fdf!` must write the full symmetric Hessian. Some solvers read only
-  the upper triangle (dense Cholesky and Bunch-Kaufman, sparse `:cholesky`), but sparse
-  `:auto`/`:ldl` need both, and `:qr` and the predicted cost reduction read every stored entry,
-  so an upper-triangle-only `H` gives a wrong step or a wrong step-quality estimate.
-- **Size and element type.** `H` must be `n×n`, where `n == nvars(x0)`; a mismatch is a
-  `DimensionMismatch`. The Hessian is `Float64`: a sparse prototype must be
-  `SparseMatrixCSC{Float64}`, and a dense one of another type is copied into a `Matrix{Float64}`.
-- **Missing diagonal entries.** A sparse prototype should store every diagonal entry (explicit
-  zeros are fine). If one is missing, a new matrix with explicit zeros on the diagonal is built
-  and handed to `fdf!` in place of the prototype; its `nzval` layout differs from the
-  prototype's, so an `fdf!` that writes by precomputed `nzval` positions of its own prototype
-  would write to the wrong entries. Writing through `H[i, j]` works either way.
-- **Which matrix holds the final Hessian.** `fdf!` writes into the linear system's own matrix.
-  That is the prototype itself for a `Matrix{Float64}`, `MMatrix` or a sparse matrix with every
-  diagonal entry stored, and a copy otherwise. With a reused `workspace`, the matrix is the one
-  from the call that built the workspace: passing a different `H` object of the same type and
-  size (or, for a sparse `H`, the same pattern) on a later call reuses the cached system, and
-  the new `H` is left untouched.
-"""
-
 """
     OptimizationOptions(; kwargs...)
 
@@ -78,7 +53,7 @@ Holds summary statistics and results from an optimization run.
 
 # Example
 ```julia
-x_opt, result = optimize(f, fdf!, x0)
+x_opt, result = optimize(x0, HessianObjective(f, fdf!))
 println("Final cost: ", result.bestcost)
 println("Iterations: ", result.niterations)
 ```
@@ -87,8 +62,7 @@ OptimizationResult
 
 """
     OptimizationWorkspace()
-    OptimizationWorkspace(x0, options=OptimizationOptions(); H=nothing)
-    OptimizationWorkspace(f, fdf!, x0, options=OptimizationOptions(); H=nothing)
+    OptimizationWorkspace(x0, obj::HessianObjective, options=OptimizationOptions(); startstats=Stats())
 
 Preallocated cache for linear systems, solver factorizations, and trial variable buffers,
 enabling zero-allocation repeated optimizations.
@@ -96,13 +70,14 @@ enabling zero-allocation repeated optimizations.
 The cache is reused when the variable type, dimension and block layout, the options type and the
 Hessian's type and structure all match; otherwise it is rebuilt (and, for a workspace whose type
 parameters can't hold the new data, emptied, with a one-time warning). A reused workspace keeps
-the Hessian matrix of the call that built it: see *The Hessian prototype* in [`optimize`](@ref).
+the Hessian matrix of the call that built it: see *The Hessian prototype* in [`HessianObjective`](@ref).
 
 # Example
 ```julia
-ws = OptimizationWorkspace(f, fdf!, x0, options)
+obj = HessianObjective(f, fdf!)
+ws = OptimizationWorkspace(x0, obj, options)
 for trial in 1:10
-    x_opt, res = optimize(f, fdf!, x0, options; workspace=ws)
+    x_opt, res = optimize(x0, obj, options; workspace=ws)
 end
 ```
 """
@@ -338,58 +313,43 @@ Used with [`storecostscallback`](@ref).
 # Example
 ```julia
 trajectory = CostTrajectory()
-x_opt, res = optimize(f, fdf!, x0; callback=storecostscallback(trajectory))
+x_opt, res = optimize(x0, HessianObjective(f, fdf!); callback=storecostscallback(trajectory))
 ```
 """
 CostTrajectory
 
 """
-    optimize!(f, fdf!, x, options=OptimizationOptions(); H=nothing, callback=nullcallback, workspace=nothing) -> (x_best, result)
+    optimize!(x0, obj::HessianObjective, options=OptimizationOptions(); callback=nullcallback, workspace=nothing, startstats=Stats()) -> result
 
-In-place variant of [`optimize`](@ref). Minimizes scalar objective `f(x)` updating variable state `x` in-place
-(for mutable variable containers such as `Vector`) to avoid allocating extra variable copies.
+Minimizes the objective `obj` starting from `x0`, updating `x0` in place, and returns the
+[`OptimizationResult`](@ref). On return `x0` holds the best point found.
+
+`x0` must be a variable that is updated in place (`ismutablevar(x0)` from
+OptimizationVariableInterface: e.g. a `Vector`, an `MVector`, or a `Vector` of static blocks).
+For a `Number`, an `SVector` or any other immutable variable it throws an `ArgumentError`: use
+[`optimize`](@ref), which returns the solution.
 
 # Arguments
-- `f`: Callable `f(x) -> Real` returning the scalar objective cost.
-- `fdf!`: In-place callable `fdf!(g, H, x) -> Real` populating gradient `g` and Hessian `H` and returning scalar cost.
-- `x`: Variable state to optimize in-place (e.g. `Vector`, or immutable `StaticVector` / `Number`).
+- `x0`: Starting point, overwritten with the solution.
+- `obj::HessianObjective`: The cost, its gradient and Hessian, and the Hessian prototype; see [`HessianObjective`](@ref).
 - `options::OptimizationOptions`: Optimization settings and stopping criteria.
 
 # Keyword Arguments
-- `H = nothing`: Optional prototype matrix for the Hessian (e.g. `SparseMatrixCSC` or `Matrix`). $(H_PROTOTYPE_DOC)
 - `callback = nullcallback`: Callback invoked per iteration: `callback(cost, x_trial, data, iteratedata) -> (cost, terminate_flags)`.
 - `workspace = nothing`: Optional [`OptimizationWorkspace`](@ref) for memory reuse.
-
-# Returns
-- `x_best`: The optimal variable state found (for mutable vectors, identical to `x` mutated in-place).
-- `result::OptimizationResult`: Detailed optimization statistics.
-
-$(H_CONTRACT_DOC)
+- `startstats = Stats()`: Time and allocation counters at the start, for the timings in the result.
 """
 optimize!
 
 """
-    optimize(f, fdf!, x0, options=OptimizationOptions(); H=nothing, callback=nullcallback, workspace=nothing) -> (x_best, result)
+    optimize(x0, obj::HessianObjective, options=OptimizationOptions(); callback=nullcallback, workspace=nothing, startstats=Stats()) -> (x, result)
 
-Minimizes scalar objective `f(x)` given initial point `x0` and gradient/Hessian provider `fdf!(g, H, x)`.
-Does not mutate `x0` (allocates a copy of `x0` and delegates to [`optimize!`](@ref)).
+Minimizes the objective `obj` starting from `x0`, and returns the best point found and the
+[`OptimizationResult`](@ref). `x0` is not modified: the optimization runs on `copyvars(x0)`.
+Works for any variable type, including immutable ones (`Number`, `StaticVector`, custom
+manifold types); for a mutable `x0`, [`optimize!`](@ref) avoids the copy.
 
-# Arguments
-- `f`: Callable `f(x) -> Real` returning the scalar objective cost.
-- `fdf!`: In-place callable `fdf!(g, H, x) -> Real` populating gradient `g` and Hessian `H` and returning scalar cost.
-- `x0`: Initial variable state (e.g. `Number`, `StaticVector`, `Vector`, or custom manifold struct).
-- `options::OptimizationOptions`: Optimization settings and stopping criteria.
-
-# Keyword Arguments
-- `H = nothing`: Optional prototype matrix for the Hessian (e.g. `SparseMatrixCSC` or `Matrix`). $(H_PROTOTYPE_DOC)
-- `callback = nullcallback`: Callback invoked per iteration: `callback(cost, x_trial, data, iteratedata) -> (cost, terminate_flags)`.
-- `workspace = nothing`: Optional [`OptimizationWorkspace`](@ref) for memory reuse.
-
-# Returns
-- `x_best`: The optimal variable state found.
-- `result::OptimizationResult`: Detailed optimization statistics.
-
-$(H_CONTRACT_DOC)
+Takes the same arguments as [`optimize!`](@ref).
 
 # Example
 ```julia
@@ -407,7 +367,7 @@ function fdf!(g, H, x)
 end
 
 x0 = @SVector [-1.2, 1.0]
-x_opt, res = optimize(f, fdf!, x0)
+x_opt, res = optimize(x0, HessianObjective(f, fdf!))
 ```
 """
 optimize
@@ -464,7 +424,7 @@ Default no-op callback incurring zero runtime overhead.
 
 # Example
 ```julia
-x_opt, res = optimize(f, fdf!, x0; callback=nullcallback)
+x_opt, res = optimize(x0, HessianObjective(f, fdf!); callback=nullcallback)
 ```
 """
 nullcallback
@@ -476,7 +436,7 @@ Callback that prints iteration count, cost, cost change, step norm, and trust-re
 
 # Example
 ```julia
-x_opt, res = optimize(f, fdf!, x0; callback=printoutcallback)
+x_opt, res = optimize(x0, HessianObjective(f, fdf!); callback=printoutcallback)
 ```
 """
 printoutcallback
@@ -490,7 +450,7 @@ where `store` is either a `Vector{Float64}` or a [`CostTrajectory`](@ref).
 # Example
 ```julia
 costs = Float64[]
-x_opt, res = optimize(f, fdf!, x0; callback=storecostscallback(costs))
+x_opt, res = optimize(x0, HessianObjective(f, fdf!); callback=storecostscallback(costs))
 ```
 """
 storecostscallback

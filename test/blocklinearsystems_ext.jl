@@ -377,14 +377,14 @@ end
         @test SecondOrderOptimization.checkhessianforsolver(Hd, opts_s.linsolver) === nothing
         for H_other in (zeros(3, 3), spzeros(3, 3), nothing)
             err = try
-                optimize(x -> sum(abs2, x), (g, H, x) -> sum(abs2, x), zeros(3), opts_s; H=H_other)
+                optimize(zeros(3), HessianObjective(x -> sum(abs2, x), (g, H, x) -> sum(abs2, x); H = H_other), opts_s)
                 nothing
             catch c
                 c
             end
             @test err isa ArgumentError
             @test occursin("SchurBlockMatrix", sprint(showerror, err))
-            @test_throws ArgumentError OptimizationWorkspace(zeros(3), opts_s; H=H_other)
+            @test_throws ArgumentError OptimizationWorkspace(zeros(3), HessianObjective(x -> sum(abs2, x), (g, H, x) -> sum(abs2, x); H = H_other), opts_s)
         end
     end
 

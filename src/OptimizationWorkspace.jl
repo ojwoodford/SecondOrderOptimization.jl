@@ -75,7 +75,8 @@ function keyvalid(key::Tuple, x0, options::OptimizationOptions, H)
     return hkeyvalid(key[5], H)
 end
 
-function OptimizationWorkspace(x0, options::OptimizationOptions=OptimizationOptions(); H=nothing, startstats::Stats=Stats())
+function OptimizationWorkspace(x0, obj::HessianObjective, options::OptimizationOptions=OptimizationOptions(); startstats::Stats=Stats())
+    H = obj.H
     checkhessian(x0, H, options.linsolver)
     ls = makelinearsystem(x0, H, options.linsolver)
     data = OptimizationInternal(ls, x0, startstats)
@@ -83,7 +84,3 @@ function OptimizationWorkspace(x0, options::OptimizationOptions=OptimizationOpti
     key = cachekey(x0, options, H)
     return OptimizationWorkspace{typeof(key), Tuple{typeof(data), typeof(iteratedata)}}(key, (data, iteratedata))
 end
-
-# Backward compatibility overload
-OptimizationWorkspace(f, fdf!, x0, options::OptimizationOptions=OptimizationOptions(); H=nothing, startstats::Stats=Stats()) =
-    OptimizationWorkspace(x0, options; H=H, startstats=startstats)

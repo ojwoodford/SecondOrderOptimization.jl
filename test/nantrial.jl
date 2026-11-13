@@ -75,7 +75,7 @@ end
     for iterator in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :gradientdescent)
         opts = OptimizationOptions(iterator=iterator, maxiters=50)
         x0 = @SVector [0.0]
-        x_opt, res = optimize(nanwall_cost, nanwall_fdf!, x0, opts)
+        x_opt, res = optimize(x0, HessianObjective(nanwall_cost, nanwall_fdf!), opts)
         @test 0.4 < x_opt[1] <= 0.5
         @test isfinite(res.bestcost) && res.bestcost < 0.5 * 9.0
         @test res.bestcost == nanwall_cost(x_opt)
@@ -85,7 +85,7 @@ end
     for iterator in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :gradientdescent)
         opts = OptimizationOptions(iterator=iterator, maxiters=50)
         x0 = @SVector [0.0]
-        x_opt, res = optimize(infwall_cost, infwall_fdf!, x0, opts)
+        x_opt, res = optimize(x0, HessianObjective(infwall_cost, infwall_fdf!), opts)
         @test 0.4 < x_opt[1] <= 0.5
         @test isfinite(res.bestcost) && res.bestcost < 0.5 * 9.0
         @test res.bestcost == infwall_cost(x_opt)
@@ -93,18 +93,18 @@ end
 
     # Dogleg with negative curvature (g'Hg < 0) and zero curvature (g'Hg == 0) hitting +Inf wall
     opts_dl = OptimizationOptions(iterator=:dogleg, linsolver=:ldl, maxiters=50)
-    x_conc, res_conc = optimize(concave_infwall_cost, concave_infwall_fdf!, @SVector([0.0]), opts_dl)
+    x_conc, res_conc = optimize(@SVector([0.0]), HessianObjective(concave_infwall_cost, concave_infwall_fdf!), opts_dl)
     @test 0.4 < x_conc[1] <= 0.5
     @test res_conc.bestcost == concave_infwall_cost(x_conc)
 
-    x_lin, res_lin = optimize(linear_infwall_cost, linear_infwall_fdf!, @SVector([0.0]), opts_dl)
+    x_lin, res_lin = optimize(@SVector([0.0]), HessianObjective(linear_infwall_cost, linear_infwall_fdf!), opts_dl)
     @test 0.4 < x_lin[1] <= 0.5
     @test res_lin.bestcost == linear_infwall_cost(x_lin)
 
     # Test non-finite start point
     x_bad = @SVector [1.0] # In NaN wall region
     opts = OptimizationOptions()
-    x_opt, res = optimize(nanwall_cost, nanwall_fdf!, x_bad, opts)
+    x_opt, res = optimize(x_bad, HessianObjective(nanwall_cost, nanwall_fdf!), opts)
     @test (res.termination & (1 << 11)) != 0
     @test (res.termination & (1 << 1)) != 0
 
@@ -121,7 +121,7 @@ end
     end
     for iterator in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton, :gradientdescent)
         opts = OptimizationOptions(iterator=iterator, maxtime=2.0)
-        x_opt, res = optimize(nanlinearization_cost, nanlinearization_fdf!, [0.0], opts)
+        x_opt, res = optimize([0.0], HessianObjective(nanlinearization_cost, nanlinearization_fdf!), opts)
         @test (res.termination & (TERMINATION_STEP_NAN | TERMINATION_COST_NAN | TERMINATION_GRAD_NOT_FINITE)) != 0
         @test isfinite(res.bestcost) && res.bestcost < nanlinearization_cost([0.0])
         @test res.bestcost == nanlinearization_cost(x_opt)

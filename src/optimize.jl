@@ -1,15 +1,32 @@
 function optimize!(
-    f::F,
-    fdf!::FDF,
-    x,
+    x0,
+    obj::HessianObjective,
     options::OptimizationOptions = OptimizationOptions();
-    H::HMat = nothing,
     callback::CB = nullcallback,
     workspace::WS = nothing,
     startstats::Stats = Stats()
-) where {F, FDF, HMat, CB, WS}
+) where {CB, WS}
+    ismutablevar(x0) || throw(ArgumentError("optimize! updates x0 in place, but a $(typeof(x0)) cannot be updated in place. Use `x, result = optimize(x0, obj, options)` instead."))
+    _, result = optimize_internal!(x0, obj, options, callback, workspace, startstats)
+    return result
+end
+
+function optimize(
+    x0,
+    obj::HessianObjective,
+    options::OptimizationOptions = OptimizationOptions();
+    callback::CB = nullcallback,
+    workspace::WS = nothing,
+    startstats::Stats = Stats()
+) where {CB, WS}
+    return optimize_internal!(copyvars(x0), obj, options, callback, workspace, startstats)
+end
+
+# Runs on `x` (updated in place when it is mutable) and returns `(x, result)`
+function optimize_internal!(x, obj::HessianObjective, options::OptimizationOptions, callback::CB, workspace::WS, startstats::Stats) where {CB, WS}
+    H = obj.H
     if !isnothing(workspace) && workspacevalid(workspace, x, options, H)
-        return run_cached_optimize!(something(workspace.data), x, f, fdf!, options, callback, startstats)
+        return run_cached_optimize!(something(workspace.data), x, obj.f, obj.fdf!, options, callback, startstats)
     else
         checkhessian(x, H, options.linsolver)
         ls = makelinearsystem(x, H, options.linsolver)
@@ -18,28 +35,18 @@ function optimize!(
         if !isnothing(workspace)
             storeworkspace!(workspace, cachekey(x, options, H), (data, iteratedata))
         end
-        return run_optimize!(data, iteratedata, f, fdf!, options, callback, x)
+        return run_optimize!(data, iteratedata, x, obj.f, obj.fdf!, options, callback)
     end
-end
-
-function optimize(
-    f::F,
-    fdf!::FDF,
-    x0,
-    options::OptimizationOptions = OptimizationOptions();
-    kwargs...
-) where {F, FDF}
-    return optimize!(f, fdf!, copyvars(x0), options; kwargs...)
 end
 
 function run_cached_optimize!(cached::Tuple{D, ID}, x, f::F, fdf!::FDF, options::OptimizationOptions, callback::CB, startstats::Stats) where {D, ID, F, FDF, CB}
     data, iteratedata = cached
     reset!(data, x, startstats)
     reset!(iteratedata)
-    return run_optimize!(data, iteratedata, f, fdf!, options, callback, x)
+    return run_optimize!(data, iteratedata, x, f, fdf!, options, callback)
 end
 
-function run_optimize!(data::D, iteratedata::ID, f::F, fdf!::FDF, options::OptimizationOptions, callback::CB, x=data.variables) where {D, ID, F, FDF, CB}
+function run_optimize!(data::D, iteratedata::ID, x, f::F, fdf!::FDF, options::OptimizationOptions, callback::CB) where {D, ID, F, FDF, CB}
     data.init = Stats()
     converged = optimizeloop!(data, iteratedata, f, fdf!, options, callback)
     data.optimize = Stats()

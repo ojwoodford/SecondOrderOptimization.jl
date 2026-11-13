@@ -43,5 +43,5 @@ function rosenbrock_fdf!(g, H, x)
 end
 
 x0 = @SVector [-1.2, 1.0]
-x_opt, res = optimize(rosenbrock_cost, rosenbrock_fdf!, x0, OptimizationOptions(iterator = :dogleg))
+x_opt, res = optimize(x0, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), OptimizationOptions(iterator = :dogleg))
 ```

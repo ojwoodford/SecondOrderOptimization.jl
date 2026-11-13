@@ -16,7 +16,7 @@ using SecondOrderOptimization, StaticArrays, LinearAlgebra, SparseArrays, Test
     x0 = @SVector [10.0, -5.0]
     for it in (:dogleg, :levenbergmarquardt, :levenbergmarquardt_dtd, :newton)
         opts = OptimizationOptions(iterator=it, gtol=1e-8)
-        x_opt, res = optimize(offset_cost, offset_fdf!, x0, opts)
+        x_opt, res = optimize(x0, HessianObjective(offset_cost, offset_fdf!), opts)
         @test isapprox(x_opt, [1.0, 3.0]; atol=1e-5)
         @test isapprox(res.bestcost, 1000.0; atol=1e-5)
         @test isconverged(res)
@@ -37,7 +37,7 @@ using SecondOrderOptimization, StaticArrays, LinearAlgebra, SparseArrays, Test
     x0_neg = @SVector [0.1, 0.3]
     for it in (:dogleg, :levenbergmarquardt, :levenbergmarquardt_dtd, :newton, :gradientdescent)
         opts = OptimizationOptions(iterator=it, gtol=1e-8, maxiters=200)
-        x_opt, res = optimize(neg_cost, neg_fdf!, x0_neg, opts)
+        x_opt, res = optimize(x0_neg, HessianObjective(neg_cost, neg_fdf!), opts)
         @test isapprox(x_opt, [2.0, -1.0]; atol=1e-4)
         @test isapprox(res.bestcost, -50.0; atol=1e-4)
         @test isconverged(res)
@@ -52,7 +52,7 @@ using SecondOrderOptimization, StaticArrays, LinearAlgebra, SparseArrays, Test
     end
     @test OptimizationOptions(maxtime=1e9).maxtime == UInt64(1e18)
     @test OptimizationOptions(maxtime=-1.0).maxtime == 0
-    x_opt, res_inf = optimize(offset_cost, offset_fdf!, x0, opts_inf)
+    x_opt, res_inf = optimize(x0, HessianObjective(offset_cost, offset_fdf!), opts_inf)
     @test isconverged(res_inf)
 
     # 4. Zero / flat Hessian does not get stuck in infinite loop
@@ -63,7 +63,7 @@ using SecondOrderOptimization, StaticArrays, LinearAlgebra, SparseArrays, Test
         return zero_h_cost(x)
     end
     opts_zh = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=5, dstep=1e-3)
-    x_opt_zh, res_zh = optimize(zero_h_cost, zero_h_fdf!, @SVector[5.0], opts_zh)
+    x_opt_zh, res_zh = optimize(@SVector[5.0], HessianObjective(zero_h_cost, zero_h_fdf!), opts_zh)
     @test res_zh.bestcost < zero_h_cost(@SVector[5.0])
 
     # 5. Invalid options throw ArgumentError
@@ -84,15 +84,18 @@ using SecondOrderOptimization, StaticArrays, LinearAlgebra, SparseArrays, Test
     end
     x0_dense = [0.0, 0.0]
     opts_dense = OptimizationOptions(iterator=:levenbergmarquardt, linsolver=:cholesky)
-    ws_dense = OptimizationWorkspace(x0_dense, opts_dense)
+    ws_dense = OptimizationWorkspace(x0_dense, HessianObjective(quad_dense_cost, quad_dense_fdf!), opts_dense)
     x_buf = copy(x0_dense)
-    optimize!(quad_dense_cost, quad_dense_fdf!, x_buf, opts_dense; workspace=ws_dense)
-    allocs = @allocated optimize!(quad_dense_cost, quad_dense_fdf!, x_buf, opts_dense; workspace=ws_dense)
+    optimize!(x_buf, HessianObjective(quad_dense_cost, quad_dense_fdf!), opts_dense; workspace=ws_dense)
+    # Measured inside a function: at testset top level Julia 1.10 boxes the captured variables
+    dense_allocs(x, obj, o, w) = @allocated optimize!(x, obj, o; workspace=w)
+    dense_allocs(x_buf, HessianObjective(quad_dense_cost, quad_dense_fdf!), opts_dense, ws_dense)
+    allocs = dense_allocs(x_buf, HessianObjective(quad_dense_cost, quad_dense_fdf!), opts_dense, ws_dense)
     @test allocs == 0
 
     # 7. CostTrajectory stores step trajectory
     ct = CostTrajectory()
-    x_opt, res = optimize(offset_cost, offset_fdf!, x0, OptimizationOptions(iterator=:newton); callback=storecostscallback(ct))
+    x_opt, res = optimize(x0, HessianObjective(offset_cost, offset_fdf!), OptimizationOptions(iterator=:newton); callback=storecostscallback(ct))
     @test length(ct.steps) > 0
     @test length(ct.steps) == length(ct.costs)
     @test all(x -> length(x) == 2, ct.steps)
@@ -125,7 +128,7 @@ using SecondOrderOptimization, StaticArrays, LinearAlgebra, SparseArrays, Test
     for solver in (:qr, :auto), it in (:levenbergmarquardt, :levenbergmarquardt_dtd), x0 in ([0.1, 0.4], [0.05, 0.9], [1e-3, 1.0])
         lambdas = Float64[]
         lmcb(cost, xt, data, itd) = (push!(lambdas, itd.lambda); (cost, 0))
-        x_dw, res_dw = optimize(dw_cost, dw_fdf!, copy(x0), OptimizationOptions(iterator=it, linsolver=solver, gtol=1e-8); H=zeros(2, 2), callback=lmcb)
+        x_dw, res_dw = optimize(copy(x0), HessianObjective(dw_cost, dw_fdf!; H = zeros(2, 2)), OptimizationOptions(iterator=it, linsolver=solver, gtol=1e-8); callback=lmcb)
         @test all(isfinite, lambdas)
         @test maximum(lambdas) < 1e8
         @test isconverged(res_dw)
@@ -142,11 +145,11 @@ using SecondOrderOptimization, StaticArrays, LinearAlgebra, SparseArrays, Test
     sq(x) = sum(abs2, x)
     sq_fdf!(g, H, x) = (g .= 2 .* x; H .= 2 * I(length(x)); sq(x))
     for H_bad in (zeros(2, 2), spzeros(4, 4), zeros(3, 2))
-        @test_throws DimensionMismatch optimize(sq, sq_fdf!, ones(3), OptimizationOptions(); H=H_bad)
-        @test_throws DimensionMismatch OptimizationWorkspace(ones(3), OptimizationOptions(); H=H_bad)
+        @test_throws DimensionMismatch optimize(ones(3), HessianObjective(sq, sq_fdf!; H = H_bad), OptimizationOptions())
+        @test_throws DimensionMismatch OptimizationWorkspace(ones(3), HessianObjective(sq, sq_fdf!; H = H_bad), OptimizationOptions())
     end
     # M4: the Hessian is Float64; another sparse element type is a clear error
-    err = try optimize(sq, sq_fdf!, ones(3), OptimizationOptions(); H=sparse(Float32(1) * I(3))); nothing catch e; e end
+    err = try optimize(ones(3), HessianObjective(sq, sq_fdf!; H = sparse(Float32(1) * I(3))), OptimizationOptions()); nothing catch e; e end
     @test err isa ArgumentError
     @test occursin("Float64", sprint(showerror, err))
 end

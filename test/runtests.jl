@@ -6,6 +6,7 @@ using Test
     include("utils.jl")
     include("stats.jl")
     include("linearsolve.jl")
+    include("objectives.jl")
     include("functional.jl")
     include("nantrial.jl")
     include("trialreuse.jl")

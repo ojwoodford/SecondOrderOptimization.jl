@@ -3,10 +3,11 @@ module SecondOrderOptimization
 using FastNorm
 using Printf: @printf, @sprintf
 using OptimizationVariableInterface
-import OptimizationVariableInterface: nvars, update, update!, copyvars, syncvars!
+import OptimizationVariableInterface: nvars, update, update!, copyvars, syncvars!, ismutablevar
 
 # Exported public API
 export optimize, optimize!
+export HessianObjective
 export OptimizationOptions, OptimizationResult, OptimizationWorkspace, isconverged, termination_reasons
 export CostTrajectory
 export nullcallback, printoutcallback, storecostscallback
@@ -33,6 +34,7 @@ include("linearsolver.jl")
 
 # Core options, results, and internal data structures
 include("structs.jl")
+include("objectives.jl")
 include("OptimizationWorkspace.jl")
 
 # Callbacks
