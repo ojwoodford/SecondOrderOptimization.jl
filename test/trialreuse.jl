@@ -52,7 +52,7 @@ using SecondOrderOptimization, StaticArrays, Test, Static
         fdf_counts[] = 0
         p0 = @SVector [1.0, -0.5]
         opts = OptimizationOptions(iterator=it, maxiters=30, reldcost=1e-12)
-        p_opt, res = optimize(exp_cost, exp_fdf!, p0, opts)
+        p_opt, res = optimize(p0, HessianObjective(exp_cost, exp_fdf!), opts)
 
         @test isapprox(p_opt, [2.0, -1.3]; atol=1e-3)
         # Because trial linearization is reused on accepted first trials,

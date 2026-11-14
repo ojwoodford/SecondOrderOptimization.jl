@@ -21,6 +21,7 @@ makedocs(
             "Zero-Allocation Static Optimization" => "tutorials/static_optimization.md",
             "Manifold Optimization" => "tutorials/manifold_optimization.md",
             "Sparse Large-Scale Optimization" => "tutorials/sparse_optimization.md",
+            "Least Squares from a Jacobian" => "tutorials/jacobian_least_squares.md",
             "Callbacks & Step Monitoring" => "tutorials/callbacks.md",
         ],
         "Migration Guides" => [
@@ -29,4 +30,12 @@ makedocs(
             "From JSOSolvers / NLPModels" => "migration/from_jso.md",
         ],
     ]
+)
+
+# Publishes to the gh-pages branch when run on GitHub Actions (see .github/workflows/Documentation.yml);
+# does nothing when run locally.
+deploydocs(
+    repo = "github.com/ojwoodford/SecondOrderOptimization.jl.git",
+    devbranch = "main",
+    push_preview = false,
 )

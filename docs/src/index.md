@@ -16,8 +16,9 @@
   - **Powell's Dogleg** (`:dogleg`): Trust-region interpolation between the Cauchy (steepest descent) step and the Newton step.
   - **Standard Newton** (`:newton`): Classical undamped second-order step.
   - **Gradient Descent** (`:gradientdescent`): Quadratic-interpolation backtracking line search.
-- **Flexible Manifolds**: Native support for custom manifolds either by extending [`SecondOrderOptimization.nvars`](@ref) and [`SecondOrderOptimization.update`](@ref) or by passing a custom `retract!(to, from, step)` function.
-- **Static, Dense & Sparse Systems**: Automatically selects static (`MMatrix`), dense (`Matrix`), or sparse (`SparseMatrixCSC` with zero-allocation `LDLFactorizations.jl`) linear systems.
+- **Flexible Manifolds**: Native support for custom manifolds by extending [`SecondOrderOptimization.nvars`](@ref) and [`SecondOrderOptimization.update`](@ref).
+- **Static, Dense & Sparse Systems**: Automatically selects static (`MMatrix`), dense (`Matrix`), or sparse (`SparseMatrixCSC` with zero-allocation `LDLFactorizations.jl` and `Cholesky`) linear systems.
+- **Extensible Linear Solvers**: Choose between built-in direct solvers (`:auto`, `:cholesky`, `:ldl`, `:qr`) or package extensions for multi-threaded sparse direct solves ([Pardiso.jl](https://github.com/JuliaSparse/Pardiso.jl) with `:pardiso`) and zero-allocation iterative Krylov subspace solvers ([Krylov.jl](https://github.com/JuliaSmoothOptimizers/Krylov.jl) with `:cg`, `:minres`, `:krylov`).
 - **Rich Callbacks & Diagnostics**: Monitor optimization progress, per-iteration timing, cost reductions, trust-region radius, and allocation counts via [`OptimizationResult`](@ref) and [`CostTrajectory`](@ref).
 
 ## Quick Start
@@ -46,9 +47,13 @@ x0 = @SVector [-1.2, 1.0]
 
 # Optimize using Powell's Dogleg
 options = OptimizationOptions(iterator = :dogleg)
-x_opt, result = optimize(rosenbrock_cost, rosenbrock_fdf!, x0, options)
+x_opt, result = optimize(x0, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), options)
 
 println("Optimal solution: ", x_opt)
 println("Final cost: ", result.bestcost)
 println("Iterations: ", result.niterations)
 ```
+
+## Threads and BLAS
+
+Within one `optimize` or `optimize!` call, assembling the Hessian (your `fdf!`) and factorizing it run one after the other, so a multithreaded BLAS or Pardiso factorization doesn't compete with your own code. Running several optimizations at once on Julia threads (for example with `Threads.@threads` over independent problems) is different: each one's dense factorization then uses BLAS threads too, and the two thread pools oversubscribe the cores. In that case call `LinearAlgebra.BLAS.set_num_threads(1)` before starting the threads. The package never changes the BLAS thread count itself.

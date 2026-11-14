@@ -1,5 +1,9 @@
 # SecondOrderOptimization.jl
 
+[![Documentation](https://img.shields.io/badge/docs-dev-blue.svg)](https://ojwoodford.github.io/SecondOrderOptimization.jl/dev/)
+[![Build Status](https://github.com/ojwoodford/SecondOrderOptimization.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/ojwoodford/SecondOrderOptimization.jl/actions/workflows/CI.yml?query=branch%3Amain)
+[![codecov](https://codecov.io/gh/ojwoodford/SecondOrderOptimization.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/ojwoodford/SecondOrderOptimization.jl)
+
 High-performance, zero-allocation second-order nonlinear optimization in Julia.
 
 ## Overview
@@ -7,11 +11,13 @@ High-performance, zero-allocation second-order nonlinear optimization in Julia.
 `SecondOrderOptimization.jl` minimizes smooth scalar objectives $f(x)$ using second-order trust-region and damped Newton methods:
 
 - **Iterators**: Levenberg-Marquardt (`:levenbergmarquardt`, `:levenbergmarquardt_dtd`), Powell's Dogleg (`:dogleg`), undamped Newton (`:newton`), and backtracking Gradient Descent (`:gradientdescent`).
-- **Linear Solvers**: Cholesky (`:cholesky`), LDL / Bunch-Kaufman (`:ldl`, using `LDLFactorizations.jl` for sparse matrices), and QR (`:qr`), with automatic dispatch (`:auto`).
-- **Variable Types & Manifolds**: Supports scalars (`Float64`), static vectors (`SVector`), dense vectors (`Vector`), heterogeneous variable vectors, and non-Euclidean manifolds via `SecondOrderOptimization.nvars` / `SecondOrderOptimization.update` or custom `retract!(to, from, step)`.
+- **Linear Solvers**:
+  - *Built-in*: Cholesky (`:cholesky`), LDL / Bunch-Kaufman (`:ldl`, using `LDLFactorizations.jl` for sparse matrices), and QR (`:qr`), with automatic dispatch (`:auto`).
+  - *Extensions*: Iterative Krylov subspace solvers (`:cg`, `:minres`, `:krylov` via `Krylov.jl`) and multi-threaded sparse direct factorizations (`:pardiso` via `Pardiso.jl`).
+- **Variable Types & Manifolds**: Supports scalars (`Float64`), static vectors (`SVector`), dense vectors (`Vector`), heterogeneous variable vectors, and non-Euclidean manifolds via `SecondOrderOptimization.nvars` / `SecondOrderOptimization.update`.
 - **Zero-Allocation Reuse**: Preallocate solver buffers and factorizations via `OptimizationWorkspace`.
 
-Looking to solve structured nonlinear least-squares factor graphs with automatic differentiation and robust kernels? See [`NLLSModels.jl`](https://github.com/ojwoodford/NLLSModels.jl), which builds on `SecondOrderOptimization.jl`.
+Looking to solve structured nonlinear least-squares factor graphs with automatic differentiation and robust kernels? See [`NLLSModel.jl`](https://github.com/ojwoodford/NLLSModel.jl), a complementary package that defines models that can be readily optimized using `SecondOrderOptimization.jl`.
 
 ## Quick Start
 
@@ -31,5 +37,57 @@ end
 
 x0 = @SVector [-1.2, 1.0]
 options = OptimizationOptions(iterator = :levenbergmarquardt, gtol = 1e-8)
-x_opt, result = optimize(f, fdf!, x0, options)
+x_opt, result = optimize(x0, HessianObjective(f, fdf!), options)
+```
+
+A run stops, converged, when the gradient is below `gtol`, the step below `dstep`, an iteration
+changes the cost (up or down) by less than `reldcost` relative (default `1e-12`) or `absdcost`
+absolute, or the run has stalled: the best cost has improved by less than `stalltol` relative
+(default `1.5e-8`) for more than `maxstall` (3) iterations. Stalled means progress has become
+negligible at the best point found, which is not proof of a minimum: a run crossing a flat valley
+slowly can stall too, so set `gtol` when that matters. Check `isconverged(result)`, and test `result.termination` against the exported
+`TERMINATION_*` masks (for example `result.termination & TERMINATION_MAX_FAILS != 0`) for a
+specific reason.
+
+## Least Squares from a Residual and Jacobian
+
+For a least-squares cost, give the residual and its Jacobian instead of the gradient and Hessian.
+`JacobianObjective` solves each step by a QR factorization of the Jacobian, never forming `JᵀJ`,
+so it stays accurate when the Jacobian is ill conditioned. It supports a dense Jacobian (a
+`Matrix{Float64}` prototype, or the number of residuals `m`) with every iterator but
+`:gradientdescent` (`:newton` is Gauss-Newton here) and `linsolver = :auto` or `:qr`; anything
+else is an `ArgumentError` up front.
+
+```julia
+f(x) = 0.5 * ((1.0 - x[1])^2 + 100.0 * (x[2] - x[1]^2)^2)
+function resjac!(r, J, x)      # set every entry of r and every entry of J that can be non-zero
+    r[1] = 1.0 - x[1]
+    r[2] = 10.0 * (x[2] - x[1]^2)
+    J[1, 1] = -1.0
+    J[2, 1] = -20.0 * x[1]
+    J[2, 2] = 10.0
+    return f(x)
+end
+x_opt, result = optimize(x0, JacobianObjective(f, resjac!, 2))
+```
+
+## Large-Scale & Iterative Solvers (Extensions)
+
+Simply load `Krylov` or `Pardiso` to unlock optional solver backends:
+
+```julia
+using SecondOrderOptimization, SparseArrays
+using Krylov   # unlocks :cg, :minres, :krylov
+
+# Conjugate Gradient for large sparse positive-definite systems:
+opts = OptimizationOptions(iterator = :levenbergmarquardt, linsolver = :cg)
+x_opt, res = optimize(x0, HessianObjective(f, fdf!; H = H_sparse_prototype), opts)
+```
+
+```julia
+using SecondOrderOptimization, SparseArrays
+using Pardiso  # unlocks :pardiso (multi-threaded MKL / Panua direct solver)
+
+opts = OptimizationOptions(iterator = :newton, linsolver = :pardiso)
+x_opt, res = optimize(x0, HessianObjective(f, fdf!; H = H_sparse_prototype), opts)
 ```

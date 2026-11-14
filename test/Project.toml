@@ -1,6 +1,15 @@
 [deps]
+BlockLinearSystems = "a7d4e89f-9c3b-4d0e-8f5a-5b8c7d1e4f28"
+Krylov = "ba0b0d4f-ebba-5204-a429-3ac8c609bfb7"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Pardiso = "46dd5b70-b6fb-5a00-ae2d-e8fea33afaf2"
+SecondOrderOptimization = "a3f5c71e-3b2d-4d9a-9e20-7f8e3c4b1a50"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Static = "aedffcd0-7271-4cad-89d0-dc628f76c6d3"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[sources]
+BlockLinearSystems = {url = "https://github.com/ojwoodford/BlockLinearSystems.jl", rev = "main"}
+SecondOrderOptimization = {path = ".."}

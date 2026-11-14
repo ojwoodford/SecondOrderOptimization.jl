@@ -26,13 +26,13 @@ end
 
 x0 = @SVector [-1.2, 1.0]
 options = OptimizationOptions(iterator = :levenbergmarquardt)
-ws = OptimizationWorkspace(rosenbrock_cost, rosenbrock_fdf!, x0, options)
+ws = OptimizationWorkspace(x0, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), options)
 
 # Warmup run
-x_opt, result = optimize(rosenbrock_cost, rosenbrock_fdf!, x0, options; workspace = ws)
+x_opt, result = optimize(x0, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), options; workspace = ws)
 
 # Verify zero heap allocations
-allocs = @allocated optimize(rosenbrock_cost, rosenbrock_fdf!, x0, options; workspace = ws)
+allocs = @allocated optimize(x0, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), options; workspace = ws)
 println("Heap allocations: ", allocs) # 0 bytes!
 ```
 
@@ -41,10 +41,10 @@ println("Heap allocations: ", allocs) # 0 bytes!
 When calling [`optimize`](@ref) thousands of times in a loop with varying initial states `x_init`, reuse the same [`OptimizationWorkspace`](@ref):
 
 ```julia
-ws = OptimizationWorkspace(rosenbrock_cost, rosenbrock_fdf!, x0, options)
+ws = OptimizationWorkspace(x0, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), options)
 
 for trial in 1:1000
     x_init = @SVector [-1.2 + 0.001 * trial, 1.0]
-    x_opt, res = optimize(rosenbrock_cost, rosenbrock_fdf!, x_init, options; workspace = ws)
+    x_opt, res = optimize(x_init, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), options; workspace = ws)
 end
 ```

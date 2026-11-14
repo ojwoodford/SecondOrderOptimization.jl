@@ -3,7 +3,10 @@
 ## Primary Functions
 
 ```@docs
+HessianObjective
+JacobianObjective
 optimize
+optimize!
 ```
 
 ## Variable & Retraction Interface
@@ -19,9 +22,30 @@ update!
 ```@docs
 OptimizationOptions
 OptimizationResult
+isconverged
 OptimizationWorkspace
 OptimizationInternal
 ```
+
+Why a run stopped is in `result.termination`, a bitfield. Test it against the exported masks, for
+example `result.termination & TERMINATION_GRAD_TOL != 0`, and use [`isconverged`](@ref) for whether
+the run converged:
+
+| Mask | Set when |
+|:---|:---|
+| `TERMINATION_REL_DCOST`, `TERMINATION_ABS_DCOST` | an iteration changed the cost, up or down, by less than `reldcost` (relative) or `absdcost` |
+| `TERMINATION_STEP_SIZE` | the step was below `dstep` |
+| `TERMINATION_GRAD_TOL` | the gradient was below `gtol` |
+| `TERMINATION_STALLED` | the best cost improved by less than `stalltol` relative for more than `maxstall` iterations, at least one of them stayed within that band, and none rose by more than `sqrt(stalltol)` (converged: progress has become negligible at the best point, which is not proof of a minimum) |
+| `TERMINATION_MAX_FAILS` | more than `maxstall` iterations without a significant improvement, and the cost did not settle: every one rose beyond the stall band, or one rose by more than `sqrt(stalltol)` |
+| `TERMINATION_MAX_ITERS`, `TERMINATION_MAX_TIME` | `maxiters` or `maxtime` was reached |
+| `TERMINATION_COST_INF`, `TERMINATION_COST_NAN` | the cost was not finite |
+| `TERMINATION_STEP_INF`, `TERMINATION_STEP_NAN` | the step was not finite |
+| `TERMINATION_GRAD_NOT_FINITE`, `TERMINATION_START_NOT_FINITE` | the gradient, or the cost or gradient at the start, was not finite |
+| `TERMINATION_COST_DISCREPANCY` | the cost from the linearization and from `f` disagreed |
+| `TERMINATION_LINSOLVER_FAILED` | the linear solver failed |
+
+A callback's own flags are in `result.termination >> 16`.
 
 ## Iteration Strategies
 
@@ -47,14 +71,71 @@ GradientDescentData
 
 ## Linear Solvers
 
+### Solver Strategy & Types
+
 ```@docs
 OptimizationLinearSolver
 auto_solver
 cholesky_solver
 ldl_solver
 qr_solver
+validatelinsolver
 solve!
 zero!
+SolveStatus
+Success
+NotPositiveDefinite
+Indefinite
+```
+
+### Extension Solvers
+
+`SecondOrderOptimization.jl` integrates with optional linear solver packages via Julia 1.10+ package extensions:
+
+- **`Krylov.jl` (via `KrylovExt`)**: Provides iterative Krylov subspace linear solvers.
+  - `:cg`: Conjugate Gradients for symmetric positive-definite systems. Reports `Indefinite` on nonpositive curvature.
+  - `:minres`: MINRES for symmetric indefinite systems.
+  - On sparse systems, `:cg` and `:minres` are Jacobi (diagonal) preconditioned whenever the damped diagonal is positive.
+  - `:krylov`: Alias for `:cg`.
+  To enable: `using Krylov`.
+- **`Pardiso.jl` (via `PardisoExt`)**: Provides multithreaded direct sparse factorization using Intel MKL PARDISO or Panua Pardiso.
+  - `:pardiso`: Multi-threaded sparse direct solver for large sparse matrices. The symbolic analysis runs once, when the linear system is built; each solve runs only the positive-definite numerical factorization, and reports `NotPositiveDefinite` when it fails.
+  To enable: `using Pardiso`.
+- **`BlockLinearSystems.jl` (via `BlockLinearSystemsExt`)**: Schur-complement elimination for a `SchurBlockMatrix` Hessian.
+  The type of `H` selects the linear system, including elimination for a `SchurBlockMatrix`: there is no solver symbol or option for it.
+  `linsolver` then names the solver for the reduced system: `:auto` or `:cholesky` (Cholesky, falling back to Bunch-Kaufman) or `:ldl` (Bunch-Kaufman); any other is an `ArgumentError` when the system is built.
+  To enable: `using BlockLinearSystems`.
+
+## Linear System Interface
+
+The iterators drive any [`AbstractLinearSystem`](@ref) through the functions in its docstring. A new
+system type, or a new kind of Hessian storage for the Schur systems, can be checked against that
+contract with [`check_linear_system`](@ref), which needs a method of `conformance_matrix` and
+`conformance_fill!` for the storage it uses.
+
+A tall system meets the same interface without forming its Hessian. For a
+[`JacobianObjective`](@ref), [`SecondOrderOptimization.DenseTallLinearSystem`](@ref) holds `J` and
+`r`, and `A = JᵀJ` is implicit: `getA` is a [`SecondOrderOptimization.TallHessian`](@ref) wrapping
+`J` and `r`, on which `fast_bAb(A, v)` is `‖J v‖²` and the diagonal is the squared column norms.
+`b = Jᵀr` is the gradient. The iterators call `fdf!(b, A, x)` as for any system; for a
+`JacobianObjective` that `fdf!` is an internal wrapper which calls `resjac!(r, J, x)` and forms
+`b`. `solve!` factors `J` by QR, never `JᵀJ`, and solves the same damped normal equations
+`(A + λD) x = b` as any other system, with `D` the identity or the Marquardt scaling (in the units
+of `diag(JᵀJ)`). The column norms of `J` are computed once per linearization and serve both
+`max_diag` and the tall system's `updatescaling!` method. Every iterator but `:gradientdescent`
+runs on it unchanged; `:newton` is then Gauss-Newton.
+
+```@docs
+AbstractLinearSystem
+SecondOrderOptimization.DenseTallLinearSystem
+SecondOrderOptimization.TallHessian
+usesstaticsystem
+MAX_STATIC_SYSTEM
+check_linear_system
+SecondOrderOptimization.conformance_matrix
+SecondOrderOptimization.conformance_fill!
+SecondOrderOptimization.conformance_fillb!
+SecondOrderOptimization.conformance_traits
 ```
 
 ## Callbacks & Diagnostics
