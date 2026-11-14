@@ -141,8 +141,9 @@ factorization and the column norms (and zeroes `b`, which the linearization then
 Code that writes `getA(ls).J` or `.r` directly must call `zero!` (before or after writing), or
 `SecondOrderOptimization.markstale!(getA(ls))`; the linearization wrapper does this itself.
 
-`DenseTallLinearSystem(J)` uses `J` as its storage with the values it holds; the systems that
-[`optimize`](@ref) builds start from an all-zero `J`.
+`DenseTallLinearSystem(J)` uses `J` as its storage with the values it holds, as does
+[`optimize`](@ref) with a `Matrix` prototype; with an integer `m`, `J` starts as zeros.
+`copy_structure` copies `J`, so a trial system starts with the same entries.
 """
 mutable struct DenseTallLinearSystem <: AbstractLinearSystem
     const A::TallHessian
@@ -154,11 +155,11 @@ end
 DenseTallLinearSystem(J::Matrix{Float64}) = DenseTallLinearSystem(TallHessian(J), zeros(size(J, 2)), zeros(size(J, 2)), 0.0, nothing)
 DenseTallLinearSystem(m::Integer, n::Integer) = DenseTallLinearSystem(zeros(Float64, m, n))
 
-# A Matrix prototype is the storage resjac! writes into, but its values are never read: it is
-# zeroed here, so J is all zeros when first handed to resjac!
+# A Matrix prototype is the storage resjac! writes into, used with the values it holds: entries
+# resjac! never writes keep the caller's values. With an integer m the matrix starts as zeros.
 function makelinearsystem(x0, obj::JacobianObjective, linsolver)
     obj.J isa Integer && return DenseTallLinearSystem(nresiduals(obj), dynamic(nvars(x0)))
-    return DenseTallLinearSystem(fill!(obj.J, 0.0))
+    return DenseTallLinearSystem(obj.J)
 end
 
 # resjac! sets every entry of r and every entry of J that can be non-zero, so a fresh
@@ -171,24 +172,34 @@ function zero!(ls::DenseTallLinearSystem)
     return ls
 end
 
-# J and r zeroed, as before the first linearization: done once per run with a reused workspace,
-# since a cached system's J holds the previous run's entries, which another objective's resjac!
-# need not overwrite (its structural zeros)
-function zerojacobian!(ls::DenseTallLinearSystem)
-    fill!(ls.A.J, 0.0)
-    fill!(ls.A.r, 0.0)
-    zero!(ls)
+# A workspace's system owns its Jacobian storage: a copy of a Matrix prototype. Were it the
+# prototype itself, a later run with another prototype would set this one's contents, and a run
+# handed this prototype again would start from the other's.
+function workspace_linearsystem(x0, obj::JacobianObjective, linsolver)
+    obj.J isa Integer && return makelinearsystem(x0, obj, linsolver)
+    return DenseTallLinearSystem(copy(obj.J))
+end
+
+# The start of a run with a reused workspace. Every J the run uses (the main system's, and the
+# trial system's if the iterator has one) must start as the J a fresh run would: the prototype as
+# handed, or zeros for an integer m. A cached J holds the previous run's entries, so it is set
+# from the prototype (never written itself). r needs nothing: resjac! sets every entry.
+initjacobian!(ls::DenseTallLinearSystem, ::Integer) = (fill!(ls.A.J, 0.0); markstale!(ls.A); ls)
+function initjacobian!(ls::DenseTallLinearSystem, P::Matrix{Float64})
+    ls.A.J === P || copyto!(ls.A.J, P)
+    markstale!(ls.A)
     return ls
 end
-zerojacobian!(ls) = ls
-# The systems a run uses: the main one, and the iterator's trial system, if it has one
-function zerojacobians!(data, iteratedata)
-    zerojacobian!(data.linsystem)
-    hasfield(typeof(iteratedata), :trial) && zerojacobian!(getfield(iteratedata, :trial))
+initjacobian!(ls, J) = ls
+function initlinearization!(cached::Tuple, obj::JacobianObjective)
+    data, iteratedata = cached
+    initjacobian!(data.linsystem, obj.J)
+    hasfield(typeof(iteratedata), :trial) && initjacobian!(getfield(iteratedata, :trial), obj.J)
     return nothing
 end
 
-copy_structure(ls::DenseTallLinearSystem) = DenseTallLinearSystem(TallHessian(zeros(size(ls.A.J))), zeros(length(ls.b)), ls.x, ls.lambda, ls.scaling)
+# The trial system starts from the same J (its unwritten entries must match the main system's)
+copy_structure(ls::DenseTallLinearSystem) = DenseTallLinearSystem(TallHessian(copy(ls.A.J)), zeros(length(ls.b)), ls.x, ls.lambda, ls.scaling)
 sharex(ls::DenseTallLinearSystem, from) = ls.x === from.x ? ls : DenseTallLinearSystem(ls.A, ls.b, from.x, ls.lambda, ls.scaling)
 
 # How the iterators and the outer loop drive the tall system unchanged: they call

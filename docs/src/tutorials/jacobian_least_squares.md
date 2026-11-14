@@ -54,9 +54,10 @@ The contract of `resjac!(r, J, x)`:
   with respect to the step of [`update`](@ref), so in the tangent space for a manifold variable),
   and returns the cost at `x`;
 - it sets `r` and `J`, and does not add to them. They are not zeroed before each call (unlike
-  `g` and `H` for `fdf!`): `J` is all zeros when first handed to `resjac!`, and after that holds
-  whatever `resjac!` last wrote. So every entry of `r`, and every entry of `J` that can be non-zero
-  at any `x`, must be set on every call; entries that are always zero can be left alone;
+  `g` and `H` for `fdf!`), and the optimizer never writes them. So every entry of `r`, and every
+  entry of `J` that `resjac!` writes at all, must be set on every call. Entries it never writes
+  keep the prototype's values (zeros for an integer `m`), so a `resjac!` that writes only the
+  non-zero pattern of `J` is handed a prototype of zeros;
 - the cost it returns must equal `f(x)`. Trial points are scored with `f`, never with
   $\tfrac12 \lVert r \rVert^2$, so `f` can be any cost whose gradient is $J^\top r$. For a robust
   cost, for example, `resjac!` writes the reweighted residual and Jacobian.

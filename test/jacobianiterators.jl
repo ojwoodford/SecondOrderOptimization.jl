@@ -526,25 +526,23 @@ end
         _, resR = optimize(x0, JacobianObjective(f, full!, n + 1), opts; callback=cbR)
         @test isconverged(resR) || (it === :newton && :max_fails in termination_reasons(resR))
         @test resR.bestcost < 0.1 * resR.startcost      # a nonzero-residual minimum (n + 1 residuals)
-        # the banded writer gives the identical run: with an integer m, and with a prototype
-        # holding garbage, which is zeroed before the first call
-        for J in (n + 1, fill(7.0, n + 1, n))
+        # the banded writer gives the identical run: with an integer m, and with a prototype of
+        # zeros (Q1: a prototype is used with the values it holds)
+        for J in (n + 1, zeros(n + 1, n))
             c, _, xs, cb = w_trace()
             _, res = optimize(x0, JacobianObjective(f, banded!, J), opts; callback=cb)
             @test c == cR && xs == xR
             @test res.bestcost == resR.bestcost && res.niterations == resR.niterations
-            J isa Matrix && @test J != fill(7.0, n + 1, n)
         end
-        # the trial system's J starts at zero (copy_structure allocates zeros, not similar)
-        ls = SOO.makelinearsystem(x0, JacobianObjective(f, banded!, fill(7.0, n + 1, n)), :auto)
-        @test all(iszero, getA(ls).J) && all(iszero, getA(ls).r)
-        getA(ls).J .= NaN; getA(ls).r .= NaN
+        # the trial system's J starts as a copy of the main one (copy_structure copies, not similar)
+        P = fill(7.0, n + 1, n)
+        ls = SOO.makelinearsystem(x0, JacobianObjective(f, banded!, P), :auto)
+        @test getA(ls).J === P && P == fill(7.0, n + 1, n)
         itd = SOO.construct(static(it), ls, static(ccs))
         if hasfield(typeof(itd), :trial) && !isnothing(itd.trial)
-            @test all(iszero, getA(itd.trial).J) && all(iszero, getA(itd.trial).r)
-            @test getA(itd.trial).J !== getA(ls).J
+            @test getA(itd.trial).J == P && getA(itd.trial).J !== P
         end
-        @test all(iszero, getA(copy_structure(ls)).J) && all(iszero, getA(copy_structure(ls)).r)
+        @test getA(copy_structure(ls)).J == P
     end
 
     @testset "The optimizer does not write J or r: :$it, callbackchangesstate = $ccs" for it in Z_ITERATORS, ccs in (false, true)
@@ -558,7 +556,7 @@ end
                 (J == last[J][1] && r == last[J][2]) || (nmismatch[] += 1)
             else
                 nfirst[] += 1
-                (all(iszero, J) && all(iszero, r)) || (nnotzero[] += 1)
+                all(iszero, J) || (nnotzero[] += 1)     # r is not initialized (Q1): resjac! sets all of it
             end
             cost = wrosen_resjac!(r, J, x)
             last[J] = (copy(J), copy(r))
@@ -571,7 +569,7 @@ end
         @test nfirst[] == (ccs || it === :newton ? 1 : 2)
         # with rejected steps: more cost evaluations than iterations, or (Newton) a cost increase
         @test res.costcomputations + res.gradientcomputations > res.niterations + 1 || it === :newton
-        # a reused workspace: each run starts every system's J from zero, then never writes it
+        # a reused workspace: each run starts every system's J from zero (integer m), then never writes it
         ws = OptimizationWorkspace([-1.2, 1.0], obj, opts)
         for _ in 1:2
             empty!(last)
@@ -666,5 +664,96 @@ end
             @test :grad_not_finite ∉ termination_reasons(res)
             @test isfinite(res.bestcost) && res.bestcost < res.startcost
         end
+    end
+end
+
+# Q1: a Matrix prototype is used as handed; the optimizer never writes J
+
+# A problem whose J has an entry resjac! never writes: J[1, 2], which the caller sets in the
+# prototype. `partial!` leaves it; `explicit!` writes it with the same value.
+function q_partial(c12)
+    function partial!(r, J, x)       # writes all of r and every entry of J but J[1, 2]
+        r[1] = x[1] + c12 * x[2] - 1 + 0.1 * sin(x[1])
+        r[2] = x[2] - 2 + 0.2 * x[1]^2
+        r[3] = x[1] * x[2] - 1.5
+        J[1, 1] = 1 + 0.1 * cos(x[1])
+        J[2, 1] = 0.4 * x[1]; J[2, 2] = 1.0
+        J[3, 1] = x[2]; J[3, 2] = x[1]
+        return 0.5 * (r[1]^2 + r[2]^2 + r[3]^2)
+    end
+    explicit!(r, J, x) = (cost = partial!(r, J, x); J[1, 2] = c12; cost)
+    f(x) = 0.5 * ((x[1] + c12 * x[2] - 1 + 0.1 * sin(x[1]))^2 + (x[2] - 2 + 0.2 * x[1]^2)^2 + (x[1] * x[2] - 1.5)^2)
+    return f, partial!, explicit!
+end
+q_prototype(c12) = (P = zeros(3, 2); P[1, 2] = c12; P)
+
+@testset "Q1: a Matrix prototype is used as handed" begin
+    @testset "Unwritten prototype entries are part of J: :$it, callbackchangesstate = $ccs" for it in Z_ITERATORS, ccs in (false, true)
+        c12 = 0.7
+        f, partial!, explicit! = q_partial(c12)
+        opts = w_opts(it, :callbackchangesstate => ccs)
+        x0 = [0.2, 0.3]
+        cR, _, xR, cbR = w_trace()
+        _, resR = optimize(x0, JacobianObjective(f, explicit!, 3), opts; callback=cbR)
+        @test resR.bestcost < resR.startcost
+        P = q_prototype(c12)
+        c, _, xs, cb = w_trace()
+        _, res = optimize(x0, JacobianObjective(f, partial!, P), opts; callback=cb)
+        @test c == cR && xs == xR
+        # the prototype's unwritten entry is bit-identical afterwards
+        @test P[1, 2] === c12
+        # a second run with a reused workspace, built from this prototype. A workspace owns its
+        # Jacobian storage, so P is not written at all from here on
+        Pbefore = copy(P)
+        ws = OptimizationWorkspace(x0, JacobianObjective(f, partial!, P), opts)
+        @test getA(ws.data[1].linsystem).J !== P
+        for _ in 1:2
+            c, _, xs, cb = w_trace()
+            optimize(x0, JacobianObjective(f, partial!, P), opts; workspace=ws, callback=cb)
+            @test c == cR && xs == xR
+        end
+        @test P[1, 2] === c12
+        # the same workspace with another prototype matrix, holding another constant: the run is
+        # that of a fresh run with the new prototype, and the new prototype is not written
+        f2, partial2!, explicit2! = q_partial(-0.4)
+        c2R, _, x2R, cb2R = w_trace()
+        optimize(x0, JacobianObjective(f2, explicit2!, 3), opts; callback=cb2R)
+        P2 = q_prototype(-0.4)
+        P2copy = copy(P2)
+        @test SOO.workspacevalid(ws, x0, opts, SOO.objective_structure(JacobianObjective(f2, partial2!, P2)))
+        c, _, xs, cb = w_trace()
+        optimize(x0, JacobianObjective(f2, partial2!, P2), opts; workspace=ws, callback=cb)
+        @test c == c2R && xs == x2R
+        @test P2 == P2copy
+        # and back to the first prototype on the same workspace
+        c, _, xs, cb = w_trace()
+        optimize(x0, JacobianObjective(f, partial!, P), opts; workspace=ws, callback=cb)
+        @test c == cR && xs == xR
+        @test P[1, 2] === c12 && P == Pbefore
+        # zero allocation per run still holds with the per-run copy
+        w_allocs(zeros(2), JacobianObjective(f2, partial2!, P2), opts, ws)
+        @test w_allocs(zeros(2), JacobianObjective(f2, partial2!, P2), opts, ws) == 0
+    end
+
+    @testset "Integer m: J starts as zeros, on the first run and on a reused workspace: :$it, callbackchangesstate = $ccs" for it in Z_ITERATORS, ccs in (false, true)
+        seen = IdDict{Any, Bool}()
+        nnotzero = Ref(0)
+        function check12!(r, J, x)
+            if !haskey(seen, J)
+                seen[J] = true
+                J[1, 2] == 0.0 || (nnotzero[] += 1)
+            end
+            return q_partial(0.0)[2](r, J, x)
+        end
+        writer!(r, J, x) = (cost = q_partial(0.0)[2](r, J, x); J[1, 2] = 5.0; cost)   # leaves J[1, 2] = 5
+        f = q_partial(0.0)[1]
+        opts = w_opts(it, :callbackchangesstate => ccs)
+        optimize([0.2, 0.3], JacobianObjective(f, check12!, 3), opts)
+        @test nnotzero[] == 0 && length(seen) >= 1
+        ws = OptimizationWorkspace([0.2, 0.3], JacobianObjective(f, writer!, 3), opts)
+        optimize([0.2, 0.3], JacobianObjective(f, writer!, 3), opts; workspace=ws)
+        empty!(seen)
+        optimize([0.2, 0.3], JacobianObjective(f, check12!, 3), opts; workspace=ws)
+        @test nnotzero[] == 0 && length(seen) == (ccs || it === :newton ? 1 : 2)
     end
 end

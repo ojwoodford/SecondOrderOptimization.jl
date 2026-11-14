@@ -68,13 +68,18 @@ of the Jacobian, never by forming `JᵀJ`, which is more accurate when `J` is il
   the cost at `x`, equal to `f(x)`.
 - **`resjac!` sets `r` and `J`; it does not add to them.** Unlike `g` and `H` for `fdf!` in
   [`HessianObjective`](@ref), they are not zeroed before each call: the optimizer never writes
-  to `r` or `J`, and `J` is all zeros when first handed to `resjac!` (in each run). So `resjac!`
-  must set every entry of `r`, and every entry of `J` that can be non-zero at any `x`, on every
-  call. Entries of `J` that are zero at every `x` (structural zeros) may be left alone. An entry
-  written at some `x` and skipped at another keeps its old value, which is a bug in `resjac!`.
+  to `r` or `J`. So `resjac!` must set every entry of `r` on every call, and every entry of `J`
+  that it writes at all must be set on every call. Entries of `J` that `resjac!` never writes keep
+  the values the caller put in the prototype: a caller whose `resjac!` writes only part of `J`
+  supplies a prototype with the rest already set (normally `zeros(m, n)`, for structural zeros).
+  With an integer `m` the optimizer allocates `J` itself, as zeros. An entry written at some `x`
+  and skipped at another keeps its old value, which is a bug in `resjac!`.
 - `J` is required: a `Matrix{Float64}` prototype (`m × nvars(x0)`), or an integer `m`, the number
-  of residuals, for a system with its own matrix. A prototype is the matrix the linear system
-  then writes into, but its values are never used: it is zeroed when the system is built.
+  of residuals, for a system with its own matrix. A prototype is the matrix `resjac!` writes
+  into, with its values (a trial system, for `callbackchangesstate = false`, works on a copy
+  made at the start of the run), except with an [`OptimizationWorkspace`](@ref): a workspace owns
+  its Jacobian storage, set from the prototype handed in at the start of each run, and the
+  prototype itself is then never written.
 
 The quadratic model at `x` is `cost + (Jᵀr)ᵀdx + ½‖J dx‖²`: the gradient `Jᵀr` is computed by the
 optimizer, and there is no residual-only callable. The model's gradient matches the true cost's

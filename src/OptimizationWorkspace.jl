@@ -85,7 +85,7 @@ end
 function OptimizationWorkspace(x0, obj::Union{HessianObjective, JacobianObjective}, options::OptimizationOptions=OptimizationOptions(); startstats::Stats=Stats())
     checkentry(x0, obj, options)
     checkbuild(x0, obj)
-    ls = objective_linearsystem(x0, obj, options.linsolver)
+    ls = workspace_linearsystem(x0, obj, options.linsolver)
     data = OptimizationInternal(ls, x0, startstats)
     iteratedata = construct(options.iterator, ls, options.callbackchangesstate)
     key = cachekey(x0, options, objective_structure(obj))

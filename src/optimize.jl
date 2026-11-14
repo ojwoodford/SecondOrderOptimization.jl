@@ -37,16 +37,25 @@ objective_structure(obj::HessianObjective) = obj.H
 objective_structure(obj::JacobianObjective) = JacobianStructureKey(nresiduals(obj))
 linearizer(obj::HessianObjective) = obj.fdf!
 linearizer(obj::JacobianObjective) = TallLinearize(obj.resjac!)
+# What a run with a reused workspace must set up before it starts: for a JacobianObjective, the
+# Jacobian storage (see `initjacobian!`)
+initlinearization!(cached, obj::HessianObjective) = nothing
+# The system a workspace caches. For a JacobianObjective with a Matrix prototype it owns its
+# Jacobian storage (a copy of the prototype), so that a later run with another prototype never
+# writes into this one's (see `workspace_linearsystem` in tallsystem.jl)
+workspace_linearsystem(x, obj::HessianObjective, linsolver) = objective_linearsystem(x, obj, linsolver)
 
 # Runs on `x` (updated in place when it is mutable) and returns `(x, result)`
 function optimize_internal!(x, obj::AnyObjective, options::OptimizationOptions, callback::CB, workspace::WS, startstats::Stats) where {CB, WS}
     checkentry(x, obj, options)
     structure = objective_structure(obj)
     if !isnothing(workspace) && workspacevalid(workspace, x, options, structure)
-        return run_cached_optimize!(something(workspace.data), x, obj.f, linearizer(obj), options, callback, startstats)
+        cached = something(workspace.data)
+        initlinearization!(cached, obj)
+        return run_cached_optimize!(cached, x, obj.f, linearizer(obj), options, callback, startstats)
     else
         checkbuild(x, obj)
-        ls = objective_linearsystem(x, obj, options.linsolver)
+        ls = isnothing(workspace) ? objective_linearsystem(x, obj, options.linsolver) : workspace_linearsystem(x, obj, options.linsolver)
         data = OptimizationInternal(ls, x, startstats)
         iteratedata = construct(options.iterator, ls, options.callbackchangesstate)
         if !isnothing(workspace)
@@ -60,7 +69,6 @@ function run_cached_optimize!(cached::Tuple{D, ID}, x, f::F, fdf!::FDF, options:
     data, iteratedata = cached
     reset!(data, x, startstats)
     reset!(iteratedata)
-    zerojacobians!(data, iteratedata)
     return run_optimize!(data, iteratedata, x, f, fdf!, options, callback)
 end
 

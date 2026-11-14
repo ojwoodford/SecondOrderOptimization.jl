@@ -73,8 +73,13 @@ objective's structure all match: for a [`HessianObjective`](@ref) the Hessian's 
 for a [`JacobianObjective`](@ref) the number of residuals `m`. A workspace built for one objective
 kind is never reused for the other. Otherwise it is rebuilt (and, for a workspace whose type
 parameters can't hold the new data, emptied, with a one-time warning). A reused workspace keeps
-the Hessian (or Jacobian) matrix of the call that built it: see *The Hessian prototype* in
-[`HessianObjective`](@ref).
+the Hessian matrix of the call that built it: see *The Hessian prototype* in
+[`HessianObjective`](@ref). A workspace for a [`JacobianObjective`](@ref) instead owns its
+Jacobian storage (a copy of the prototype, or zeros for an integer `m`), so a prototype matrix is
+never written when a workspace is used, and a different prototype matrix of the same size does
+not rebuild the workspace: at the start of each run, every cached Jacobian (the trial system's
+too) is set to the contents of the prototype handed in (or to zeros, for an integer `m`), so the
+run starts exactly as a fresh one would. `resjac!` then writes into the workspace's storage.
 
 # Example
 ```julia
