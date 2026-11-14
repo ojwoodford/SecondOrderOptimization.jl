@@ -42,6 +42,13 @@ const TERMINATION_GRAD_TOL          = 1 << 13
 const TERMINATION_LINSOLVER_FAILED  = 1 << 14
 
 const SUCCESS_CONVERGENCE_MASK = TERMINATION_REL_DCOST | TERMINATION_ABS_DCOST | TERMINATION_STEP_SIZE | TERMINATION_GRAD_TOL
+# Something non-finite: a failure whatever else is set
+const NONFINITE_TERMINATION_MASK = TERMINATION_COST_INF | TERMINATION_COST_NAN | TERMINATION_STEP_INF | TERMINATION_STEP_NAN | TERMINATION_GRAD_NOT_FINITE | TERMINATION_START_NOT_FINITE
+# The bits that make a run a failure even with a convergence bit set (see `isconverged`)
+const FAILED_CONVERGENCE_MASK = NONFINITE_TERMINATION_MASK | TERMINATION_LINSOLVER_FAILED
+# Every bit that is not a convergence criterion. No longer used by `isconverged` (a limit or a cost
+# discrepancy alongside a convergence bit is converged); kept for SmoothOptimizerBenchmark, which
+# reads it until it moves to `isconverged`.
 const FAILURE_TERMINATION_MASK = TERMINATION_COST_INF | TERMINATION_COST_NAN | TERMINATION_STEP_INF | TERMINATION_STEP_NAN | TERMINATION_MAX_FAILS | TERMINATION_MAX_ITERS | TERMINATION_MAX_TIME | TERMINATION_COST_DISCREPANCY | TERMINATION_START_NOT_FINITE | TERMINATION_GRAD_NOT_FINITE | TERMINATION_LINSOLVER_FAILED
 
 # Each termination bit, a symbol naming it, and the message shown for it
@@ -177,14 +184,24 @@ Base.:+(a::OptimizationResult, b::OptimizationResult) = OptimizationResult(
 """
     isconverged(x::OptimizationResult) -> Bool
 
-Returns `true` if the optimization terminated due to satisfying at least one convergence criterion
-(`gtol`, `reldcost`, `absdcost`, or `dstep`) without encountering failure conditions (such as non-finite
-costs, NaN steps, max outer iterations, max runtime, or cost calculation discrepancies).
+Whether the optimization converged: it stopped on at least one convergence criterion, and nothing
+went wrong that makes the point it returned untrustworthy.
+
+- **Convergence criteria** (`termination_reasons`): `:rel_dcost` and `:abs_dcost` (the change in
+  cost, in either direction, was below `reldcost` or `absdcost`), `:step_size` (below `dstep`)
+  and `:grad_tol` (the gradient below `gtol`). At least one must be set.
+- **Failures, whatever else is set:** anything non-finite (`:cost_inf`, `:cost_nan`,
+  `:step_inf`, `:step_nan`, `:grad_not_finite`, `:start_not_finite`), and `:linsolver_failed`.
+  So a small step to a point whose cost is not finite is not converged, nor is a small gradient at
+  a start point whose cost is not finite.
+- **Neither:** a limit (`:max_fails`, `:max_iters`, `:max_time`) and `:cost_discrepancy`. Alone
+  they are not convergence, but with a convergence criterion the run is converged: one that meets
+  a criterion on its last allowed iteration, or whose cost bounces at the minimum until
+  `maxfails` is reached, has converged; and a small gradient is a stationary point however `f`
+  and the linearization disagree about the cost.
 """
-function isconverged(x::OptimizationResult)
-    t = x.termination
-    return ((t & TERMINATION_GRAD_TOL) != 0) || (((t & SUCCESS_CONVERGENCE_MASK) != 0) && ((t & FAILURE_TERMINATION_MASK) == 0))
-end
+isconverged(x::OptimizationResult) = isconverged_bits(x.termination)
+isconverged_bits(t::Integer) = (t & SUCCESS_CONVERGENCE_MASK) != 0 && (t & FAILED_CONVERGENCE_MASK) == 0
 
 """
     termination_reasons(result::OptimizationResult) -> Vector{Symbol}

@@ -13,6 +13,7 @@ using Test
     include("tallsystem.jl")
     include("staticrule.jl")
     include("functional.jl")
+    include("convergence.jl")
     include("nantrial.jl")
     include("trialreuse.jl")
     include("OptimizationWorkspace.jl")
