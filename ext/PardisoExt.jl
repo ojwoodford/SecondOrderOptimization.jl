@@ -72,7 +72,7 @@ end
 function check_pardiso_ws(ws)
     ws isa PardisoWorkspace && return ws
     pardiso_is_available() || pardiso_unavailable_error()
-    throw(ArgumentError("This linear system was not built for linsolver=:pardiso; construct it with `makelinearsystem(x0, H, :pardiso)`."))
+    throw(ArgumentError("This workspace was built for a different linear solver; build the `OptimizationWorkspace` with the same `linsolver` option that you optimize with."))
 end
 
 # Factorize and solve with the current (already damped) values of `A`, whose pattern must be

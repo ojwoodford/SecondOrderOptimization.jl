@@ -47,9 +47,9 @@ makedensews(n, ::StaticSymbol{:krylov}) = makedensews(n, static(:cg))
 
 # The sparse workspace is built once, by `makesparsews`, and `solver_ws` is a `const` field,
 # so it cannot be replaced when it doesn't match the requested solver.
-function check_krylov_ws(ws, ::Type{W}, s::Symbol) where W
+function check_krylov_ws(ws, ::Type{W}) where W
     ws isa W && return ws
-    throw(ArgumentError("This linear system was not built for linsolver=:$s; construct it with `makelinearsystem(x0, H, :$s)`."))
+    throw(ArgumentError("This workspace was built for a different linear solver; build the `OptimizationWorkspace` with the same `linsolver` option that you optimize with."))
 end
 
 # With `linesearch=true`, nonpositive curvature sets both `indefinite` and `solved`, so check it first
@@ -60,7 +60,7 @@ end
 
 # SparseLinearSystem execution
 function solve!(ls::SparseLinearSystem, ::StaticSymbol{:cg})
-    jws = check_krylov_ws(ls.solver_ws, JacobiWorkspace{<:Krylov.CgWorkspace}, :cg)
+    jws = check_krylov_ws(ls.solver_ws, JacobiWorkspace{<:Krylov.CgWorkspace})
     ws = jws.ws
     if ls.lambda > 0
         if isnothing(ls.scaling)
@@ -87,7 +87,7 @@ function solve!(ls::SparseLinearSystem, ::StaticSymbol{:cg})
 end
 
 function solve!(ls::SparseLinearSystem, ::StaticSymbol{:minres})
-    jws = check_krylov_ws(ls.solver_ws, JacobiWorkspace{<:Krylov.MinresWorkspace}, :minres)
+    jws = check_krylov_ws(ls.solver_ws, JacobiWorkspace{<:Krylov.MinresWorkspace})
     ws = jws.ws
     if ls.lambda > 0
         if isnothing(ls.scaling)

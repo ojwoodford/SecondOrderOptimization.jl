@@ -3,6 +3,20 @@
 using SecondOrderOptimization, SparseArrays, LinearAlgebra, Test, Static
 using SecondOrderOptimization: dampen!, Success, NotPositiveDefinite, Indefinite   # internal names
 
+# P2: the message for a system built for another solver names no internal function
+function mismatch_message(ls, solver)
+    err = try SecondOrderOptimization.solve!(ls, static(solver)); nothing catch e; e end
+    @test err isa ArgumentError
+    msg = sprint(showerror, err)
+    @test occursin("OptimizationWorkspace", msg) && occursin("linsolver", msg)
+    for name in names(SecondOrderOptimization; all = true)
+        s = String(name)
+        (startswith(s, "#") || name in names(SecondOrderOptimization) || length(s) < 4) && continue
+        occursin(Regex("\\b\\Q" * s * "\\E\\b"), msg) && @test "internal name $s in message" == ""
+    end
+    return msg
+end
+
 @testset "extensions.jl" begin
     # 1. Validation error before loading extensions
     # (Testing that unregistered solver symbols throw informative ArgumentErrors)
@@ -60,6 +74,7 @@ using SecondOrderOptimization: dampen!, Success, NotPositiveDefinite, Indefinite
         ls_wrong = SecondOrderOptimization.makelinearsystem(zeros(3), copy(A_spd), static(:auto))
         ls_wrong.b .= b_vec
         @test_throws ArgumentError SecondOrderOptimization.solve!(ls_wrong, static(solver))
+        mismatch_message(ls_wrong, solver)
         ls_right = SecondOrderOptimization.makelinearsystem(zeros(3), copy(A_spd), static(solver))
         ls_right.b .= b_vec
         @test SecondOrderOptimization.solve!(ls_right, static(solver)) == Success
@@ -155,6 +170,7 @@ using SecondOrderOptimization: dampen!, Success, NotPositiveDefinite, Indefinite
         end
         ls_wrong = SecondOrderOptimization.makelinearsystem(zeros(3), copy(A_spd), static(:auto))
         @test_throws ArgumentError SecondOrderOptimization.solve!(ls_wrong, static(:pardiso))
+        mismatch_message(ls_wrong, :pardiso)
         # B8: damping changes values only, so the analysed pattern is reused
         dampen!(ls, 2.0)
         @test SecondOrderOptimization.solve!(ls, static(:pardiso)) == Success
