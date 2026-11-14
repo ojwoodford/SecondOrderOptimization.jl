@@ -30,8 +30,8 @@ Stores configuration options and stopping criteria for second-order optimization
   flat valley crossed slowly: whether the step was held back by damping or a trust radius is
   known only to the iterator. Check the gradient (`gtol`) when that matters.
 - `maxtime::Float64 = 30.0`: Maximum wall-clock optimization runtime in seconds.
-- `iterator::Union{Symbol, OptimizationIterator} = :levenbergmarquardt`: Iterator algorithm (`:newton`, `:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg`, `:gradientdescent`).
-- `linsolver::Union{Symbol, OptimizationLinearSolver} = :auto`: Linear solver method (`:auto`, `:cholesky`, `:ldl`, `:qr`, or `:cg`, `:minres`, `:krylov` via `Krylov.jl`, or `:pardiso` via `Pardiso.jl`).
+- `iterator::Symbol = :levenbergmarquardt`: Iterator algorithm (`:newton`, `:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg`, `:gradientdescent`).
+- `linsolver::Symbol = :auto`: Linear solver method (`:auto`, `:cholesky`, `:ldl`, `:qr`, or `:cg`, `:minres`, `:krylov` via `Krylov.jl`, or `:pardiso` via `Pardiso.jl`).
 - `callbackchangesstate::Union{Bool, StaticBool} = false`: Set `true` if callback modifies problem state.
 
 # Example
@@ -64,7 +64,7 @@ Holds summary statistics and results from an optimization run.
 - `gradientcomputations::Int`: Total gradient/Hessian evaluations performed.
 - `linearsolves::Int`: Total linear solves performed.
 - `termination::Int`: Bitmask indicating termination reasons.
-- `iterator::OptimizationIterator`: Algorithm used for optimization.
+- `iterator`: Algorithm used for optimization; `Symbol(result.iterator)` is the symbol it was selected by (for example `:dogleg`).
 - `initallocations::Int`: Heap allocations during setup.
 - `initallocated::Int`: Bytes allocated during setup.
 - `optimizeallocations::Int`: Heap allocations during optimization loop.
@@ -547,3 +547,133 @@ Which system `makelinearsystem` builds:
   for the reduced system.
 """
 AbstractLinearSystem
+
+# Termination masks: bits of `OptimizationResult.termination`
+
+"""
+    TERMINATION_REL_DCOST
+
+Bit mask of [`OptimizationResult`](@ref)`.termination`, set when an iteration changed the cost, up or down, by less than `reldcost` relative to the best cost. A convergence criterion.
+Test it with `result.termination & TERMINATION_REL_DCOST != 0`; see [`isconverged`](@ref).
+"""
+TERMINATION_REL_DCOST
+
+"""
+    TERMINATION_ABS_DCOST
+
+Bit mask of [`OptimizationResult`](@ref)`.termination`, set when an iteration changed the cost, up or down, by less than `absdcost`. A convergence criterion.
+Test it with `result.termination & TERMINATION_ABS_DCOST != 0`; see [`isconverged`](@ref).
+"""
+TERMINATION_ABS_DCOST
+
+"""
+    TERMINATION_STEP_SIZE
+
+Bit mask of [`OptimizationResult`](@ref)`.termination`, set when the step was below `dstep` (infinity norm). A convergence criterion.
+Test it with `result.termination & TERMINATION_STEP_SIZE != 0`; see [`isconverged`](@ref).
+"""
+TERMINATION_STEP_SIZE
+
+"""
+    TERMINATION_GRAD_TOL
+
+Bit mask of [`OptimizationResult`](@ref)`.termination`, set when the gradient was below `gtol` (infinity norm). A convergence criterion.
+Test it with `result.termination & TERMINATION_GRAD_TOL != 0`; see [`isconverged`](@ref).
+"""
+TERMINATION_GRAD_TOL
+
+"""
+    TERMINATION_STALLED
+
+Bit mask of [`OptimizationResult`](@ref)`.termination`, set when the best cost improved by less than `stalltol` relative for more than `maxstall` iterations, at least one of them stayed within that band, and none rose by more than `sqrt(stalltol)`. A convergence criterion: progress has become negligible at the best point, which is not proof of a minimum.
+Test it with `result.termination & TERMINATION_STALLED != 0`; see [`isconverged`](@ref).
+"""
+TERMINATION_STALLED
+
+"""
+    TERMINATION_MAX_FAILS
+
+Bit mask of [`OptimizationResult`](@ref)`.termination`, set when more than `maxstall` iterations passed without a significant improvement, and the cost did not settle: every one rose beyond the stall band, or one rose by more than `sqrt(stalltol)`. A limit, not convergence.
+Test it with `result.termination & TERMINATION_MAX_FAILS != 0`; see [`isconverged`](@ref).
+"""
+TERMINATION_MAX_FAILS
+
+"""
+    TERMINATION_MAX_ITERS
+
+Bit mask of [`OptimizationResult`](@ref)`.termination`, set when `maxiters` iterations were reached. A limit, not convergence.
+Test it with `result.termination & TERMINATION_MAX_ITERS != 0`; see [`isconverged`](@ref).
+"""
+TERMINATION_MAX_ITERS
+
+"""
+    TERMINATION_MAX_TIME
+
+Bit mask of [`OptimizationResult`](@ref)`.termination`, set when `maxtime` seconds were exceeded. A limit, not convergence.
+Test it with `result.termination & TERMINATION_MAX_TIME != 0`; see [`isconverged`](@ref).
+"""
+TERMINATION_MAX_TIME
+
+"""
+    TERMINATION_COST_INF
+
+Bit mask of [`OptimizationResult`](@ref)`.termination`, set when the cost was infinite. A failure.
+Test it with `result.termination & TERMINATION_COST_INF != 0`; see [`isconverged`](@ref).
+"""
+TERMINATION_COST_INF
+
+"""
+    TERMINATION_COST_NAN
+
+Bit mask of [`OptimizationResult`](@ref)`.termination`, set when the cost was `NaN`. A failure.
+Test it with `result.termination & TERMINATION_COST_NAN != 0`; see [`isconverged`](@ref).
+"""
+TERMINATION_COST_NAN
+
+"""
+    TERMINATION_STEP_INF
+
+Bit mask of [`OptimizationResult`](@ref)`.termination`, set when the step contained an infinite value. A failure.
+Test it with `result.termination & TERMINATION_STEP_INF != 0`; see [`isconverged`](@ref).
+"""
+TERMINATION_STEP_INF
+
+"""
+    TERMINATION_STEP_NAN
+
+Bit mask of [`OptimizationResult`](@ref)`.termination`, set when the step contained a `NaN`. A failure.
+Test it with `result.termination & TERMINATION_STEP_NAN != 0`; see [`isconverged`](@ref).
+"""
+TERMINATION_STEP_NAN
+
+"""
+    TERMINATION_GRAD_NOT_FINITE
+
+Bit mask of [`OptimizationResult`](@ref)`.termination`, set when the gradient was not finite. A failure.
+Test it with `result.termination & TERMINATION_GRAD_NOT_FINITE != 0`; see [`isconverged`](@ref).
+"""
+TERMINATION_GRAD_NOT_FINITE
+
+"""
+    TERMINATION_START_NOT_FINITE
+
+Bit mask of [`OptimizationResult`](@ref)`.termination`, set when the cost or the gradient was not finite at the start point. A failure.
+Test it with `result.termination & TERMINATION_START_NOT_FINITE != 0`; see [`isconverged`](@ref).
+"""
+TERMINATION_START_NOT_FINITE
+
+"""
+    TERMINATION_COST_DISCREPANCY
+
+Bit mask of [`OptimizationResult`](@ref)`.termination`, set when the cost from the linearization and the cost from `f` disagreed. Not convergence on its own.
+Test it with `result.termination & TERMINATION_COST_DISCREPANCY != 0`; see [`isconverged`](@ref).
+"""
+TERMINATION_COST_DISCREPANCY
+
+"""
+    TERMINATION_LINSOLVER_FAILED
+
+Bit mask of [`OptimizationResult`](@ref)`.termination`, set when the linear solver failed. A failure.
+Test it with `result.termination & TERMINATION_LINSOLVER_FAILED != 0`; see [`isconverged`](@ref).
+"""
+TERMINATION_LINSOLVER_FAILED

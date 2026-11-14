@@ -3,6 +3,7 @@
 using Test
 
 @testset "SecondOrderOptimization Tests" begin
+    include("publicapi.jl")
     include("utils.jl")
     include("stats.jl")
     include("linearsolve.jl")

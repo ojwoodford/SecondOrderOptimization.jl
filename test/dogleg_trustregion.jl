@@ -1,4 +1,5 @@
 using SecondOrderOptimization, StaticArrays, SparseArrays, LinearAlgebra, Test, Static
+using SecondOrderOptimization: OptimizationInternal, DoglegData   # internal names
 
 @testset "dogleg_trustregion.jl - Nocedal & Wright Dogleg Trust-Region" begin
     # 1. Quadratic problem: Newton step is exact minimizer, converges in 1 iteration

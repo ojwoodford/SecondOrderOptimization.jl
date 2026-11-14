@@ -1,4 +1,5 @@
 using SecondOrderOptimization, StaticArrays, Static, Test
+using SecondOrderOptimization: usesstaticsystem, MAX_STATIC_SYSTEM   # internal names
 const SO = SecondOrderOptimization
 
 # A4: one statement of the static-size rule

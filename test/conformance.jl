@@ -1,4 +1,5 @@
 using SecondOrderOptimization, StaticArrays, SparseArrays, LinearAlgebra, Static, Test
+using SecondOrderOptimization: AbstractLinearSystem, check_linear_system   # internal names
 const SOO = SecondOrderOptimization
 
 # A3: the linear-system interface, checked on every core system, and the checker itself checked

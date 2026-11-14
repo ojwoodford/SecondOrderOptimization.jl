@@ -1,6 +1,7 @@
 !in(@__DIR__, LOAD_PATH) && push!(LOAD_PATH, @__DIR__)
 
 using SecondOrderOptimization, SparseArrays, LinearAlgebra, Test, Static
+using SecondOrderOptimization: dampen!, Success, NotPositiveDefinite, Indefinite   # internal names
 
 @testset "extensions.jl" begin
     # 1. Validation error before loading extensions

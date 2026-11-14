@@ -80,7 +80,7 @@ their steps are only as good as the rounded $J^\top J$.
 `:levenbergmarquardt_dtd` reaches the minimum too in the Jacobian form, in about 20 iterations.
 Here the smallest squared singular value is about $10^{-19}$ of the diagonal of $J^\top J$, and
 the damping of Levenberg-Marquardt can fall to what the linear solver resolves (see
-`dampingfloor` in the [`AbstractLinearSystem`](@ref) interface): about $\epsilon^2$ times the
+`dampingfloor` in the internal linear-system interface): about $\epsilon^2$ times the
 diagonal for QR of $J$, but only about $\epsilon$ for Cholesky of $J^\top J$, so the normal
 equations stay above the minimum. Ill-conditioned Jacobians come from
 polynomial and spline fits in a monomial basis, from parameters of very different scales, and
@@ -101,7 +101,7 @@ For $J$ of size $m \times n$:
 
 The per-damping cost does not depend on $m$, so the retries with a larger $\lambda$ after a
 rejected step stay cheap however many residuals there are. An undamped solve on a numerically
-rank-deficient $J$ (including $m < n$) is reported as `NotPositiveDefinite`, just as Cholesky
+rank-deficient $J$ (including $m < n$) is reported as not positive definite, just as Cholesky
 reports singular normal equations: Levenberg-Marquardt raises $\lambda$, and Newton and dogleg
 shift the diagonal.
 

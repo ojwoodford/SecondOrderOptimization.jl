@@ -1,4 +1,5 @@
 using SecondOrderOptimization, StaticArrays, SparseArrays, LinearAlgebra, Static, Random, Test
+using SecondOrderOptimization: LevenbergData, MarquardtData, MarquardtDataTrial, AbstractLinearSystem, dampen!, zero!, copy_structure, sharex, quadratic_model_change, Success, NotPositiveDefinite, check_linear_system   # internal names
 include("termbits.jl")
 const SOO = SecondOrderOptimization
 using SecondOrderOptimization: getA, getb, getx, solve!   # explicit: Krylov, loaded by other test files, also exports solve!

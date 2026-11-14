@@ -1,4 +1,5 @@
 using SecondOrderOptimization, SparseArrays, StaticArrays, LinearAlgebra, Test, Static
+using SecondOrderOptimization: quadratic_model_change   # internal names
 
 @testset "linearsolve.jl" begin
     # 1. Symmetric positive definite system

@@ -1,5 +1,6 @@
 using Test, Random, LinearAlgebra, SparseArrays, StaticArrays, Static
 using SecondOrderOptimization, BlockLinearSystems
+using SecondOrderOptimization: check_linear_system   # internal names
 
 # Tests for the BlockLinearSystems extension (ext/BlockLinearSystemsExt.jl): Schur-complement linear systems.
 # Every Schur solve is compared against a dense Cholesky solve of the full damped system.

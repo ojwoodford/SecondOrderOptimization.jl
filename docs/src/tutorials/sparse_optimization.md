@@ -94,7 +94,7 @@ x_opt, result = optimize(x0, HessianObjective(chain_cost, chain_fdf!; H = H_prot
 println("Final cost: ", result.bestcost)
 ```
 
-> **Note**: `PardisoExt` automatically detects whether Intel MKL (`MKLPardisoSolver`) or Panua Pardiso (`PardisoSolver`) is available in your environment, configures the solver for symmetric positive-definite systems (`REAL_SYM_POSDEF`), and maps breakdown/singularity into [`NotPositiveDefinite`](@ref).
+> **Note**: `PardisoExt` automatically detects whether Intel MKL (`MKLPardisoSolver`) or Panua Pardiso (`PardisoSolver`) is available in your environment, configures the solver for symmetric positive-definite systems (`REAL_SYM_POSDEF`), and reports a breakdown or singularity as a system that is not positive definite.
 
 ---
 
@@ -130,4 +130,4 @@ x_opt, result = optimize(copy(x0), HessianObjective(chain_cost, chain_fdf!; H = 
 #### Zero-Allocation Iterative Solves
 When `OptimizationWorkspace` is constructed with a Krylov solver, `SecondOrderOptimization.jl` preallocates the appropriate Krylov workspace (`Krylov.CgWorkspace` or `MinresWorkspace`) inside `solver_ws`. During the optimization loop, `cg!` and `minres!` execute in-place with **zero heap allocations** per iteration.
 
-If the linear solver detects negative curvature ($x^T A x < 0$), it reports [`Indefinite`](@ref), allowing Newton and Dogleg iterators to apply regularizing spectral shifts or fall back to trust-region boundaries.
+If the linear solver detects negative curvature ($x^T A x < 0$), it reports the system as indefinite, allowing Newton and Dogleg iterators to apply regularizing spectral shifts or fall back to trust-region boundaries.

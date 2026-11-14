@@ -1,3 +1,11 @@
+"""
+    SecondOrderOptimization
+
+Second-order (Newton-type) unconstrained optimization of smooth functions, from a gradient and
+Hessian ([`HessianObjective`](@ref)) or from residuals and their Jacobian
+([`JacobianObjective`](@ref)). Run it with [`optimize`](@ref) or [`optimize!`](@ref), configured
+by [`OptimizationOptions`](@ref).
+"""
 module SecondOrderOptimization
 
 using FastNorm
@@ -5,26 +13,18 @@ using Printf: @printf, @sprintf
 using OptimizationVariableInterface
 import OptimizationVariableInterface: nvars, update, update!, copyvars, syncvars!, ismutablevar
 
-# Exported public API
+# The public API: every exported name is documented in the API reference, and nothing else is
+# exported. The test suite pins this list (test/publicapi.jl).
 export optimize, optimize!
 export HessianObjective, JacobianObjective
-export check_linear_system
-export usesstaticsystem, MAX_STATIC_SYSTEM
 export OptimizationOptions, OptimizationResult, OptimizationWorkspace, isconverged
 export CostTrajectory
 export nullcallback, printoutcallback, storecostscallback
-export AbstractLinearSystem, solve!, dampen!, validatelinsolver, zero!, makelinearsystem, copy_structure, sharex, fast_bAb, fast_dot, quadratic_model_change
-export SolveStatus, Success, NotPositiveDefinite, Indefinite
-export OptimizationLinearSolver, auto_solver, cholesky_solver, ldl_solver, qr_solver
-export OptimizationIterator, newton, levenbergmarquardt, levenbergmarquardt_dtd, dogleg, gradientdescent, getiterator
-export NewtonData, NewtonDataRelinearize, DoglegData
-export LevenbergData, LevenbergDataTrial, MarquardtData, MarquardtDataTrial, GradientDescentData
-export OptimizationInternal
 export TERMINATION_COST_INF, TERMINATION_COST_NAN, TERMINATION_REL_DCOST, TERMINATION_ABS_DCOST
 export TERMINATION_STEP_INF, TERMINATION_STEP_NAN, TERMINATION_STEP_SIZE, TERMINATION_MAX_FAILS
 export TERMINATION_MAX_ITERS, TERMINATION_MAX_TIME, TERMINATION_COST_DISCREPANCY
 export TERMINATION_START_NOT_FINITE, TERMINATION_GRAD_TOL, TERMINATION_GRAD_NOT_FINITE
-export TERMINATION_LINSOLVER_FAILED, TERMINATION_STALLED, LINSOLVER_FAILED
+export TERMINATION_LINSOLVER_FAILED, TERMINATION_STALLED
 
 # Utilities
 include("utils.jl")
