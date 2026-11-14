@@ -188,6 +188,46 @@ allocations(f::F, args::Vararg{Any, N}) where {F, N} = (f(args...); @allocated f
         @test (@allocated SOO.DenseTallLinearSystem(m, n)) < 3.2 * 8 * m * (n + 1)
     end
 
+    @testset "copy_structure shares the factorization scratch (Q3)" begin
+        rng = Random.Xoshiro(41)
+        J1, r1 = randn(rng, 12, 4), randn(rng, 12)
+        J2, r2 = randn(rng, 12, 4), randn(rng, 12)
+        ls = tallsystem(J1, r1)
+        trial = copy_structure(ls)
+        @test getA(trial).ws.scratch === getA(ls).ws.scratch
+        @test getA(trial).ws !== getA(ls).ws && getA(trial).ws.token != getA(ls).ws.token
+        @test getA(trial).ws.colnorm2 !== getA(ls).ws.colnorm2
+        getA(trial).J .= J2; getA(trial).r .= r2; mul!(getb(trial), J2', r2); SOO.markstale!(getA(trial))
+        # solve one, then the other, then the first again: each refactors only when the scratch
+        # holds the other's factorization, and every solution is that of its own J
+        for λ in (0.0, 0.3)
+            dampen!(ls, λ); dampen!(trial, λ)
+            @test solve!(ls, :auto) == Success && getx(ls) ≈ reference_solve(J1, r1, λ)
+            x1 = copy(getx(ls))
+            @test solve!(trial, :auto) == Success && getx(trial) ≈ reference_solve(J2, r2, λ)
+            @test solve!(ls, :auto) == Success && getx(ls) == x1
+        end
+        nf1, nf2 = getA(ls).ws.nfactor, getA(trial).ws.nfactor
+        @test nf1 == 3 && nf2 == 2     # ls: first solve, after trial (λ = 0), after trial (λ = 0.3); trial: once per λ
+        # repeated solves of the same system reuse its factorization
+        dampen!(ls, 0.7); solve!(ls, :auto); dampen!(ls, 0.0); solve!(ls, :auto)
+        @test getA(ls).ws.nfactor == nf1
+        # the column norms are each system's own
+        @test SOO.max_diag(ls) ≈ maximum(sum(abs2, J1; dims=1)) && SOO.max_diag(trial) ≈ maximum(sum(abs2, J2; dims=1))
+    end
+
+    @testset "Memory: J, one scratch copy, and one more J for the trial system (Q3)" begin
+        m, n = 20_000, 50
+        sz = 8 * m * (n + 1)
+        obj = JacobianObjective((x) -> 0.0, (r, J, x) -> 0.0, m)
+        for (ccs, expected) in ((true, 2), (false, 3))
+            opts = OptimizationOptions(callbackchangesstate=ccs)
+            OptimizationWorkspace(zeros(n), obj, opts)
+            bytes = @allocated OptimizationWorkspace(zeros(n), obj, opts)
+            @test (expected - 0.1) * sz < bytes < (expected + 0.3) * sz
+        end
+    end
+
     @testset "No allocation after warm-up" begin
         J = randn(Random.Xoshiro(6), 50, 7); r = randn(Random.Xoshiro(8), 50)
         ls = tallsystem(J, r)

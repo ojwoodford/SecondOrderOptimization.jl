@@ -36,16 +36,36 @@ function geqrf_worksize(m::Integer, n::Integer)
     return max(1, Int(work[]))
 end
 
-# The state of one linearization: the factorization and the squared column norms of J (the
-# diagonal of JᵀJ). `stale` and `normsstale` are both set, through `markstale!`, by `zero!` and by
-# the linearization wrapper after `resjac!` has written J and r; the QR clears `stale`, and
-# computing the column norms clears `normsstale`.
-mutable struct TallQRWorkspace
+# The factorization scratch: [J r] factored in place, the stacked matrix of the damped solve,
+# and their LAPACK arrays. A system and its `copy_structure` copy share one: only one of them
+# has a live factorization at a time (the trial system is not solved until it becomes the main
+# one). `owner` is the token of the system whose factorization the scratch holds (0: none).
+mutable struct TallQRScratch
     const Jr::Matrix{Float64}     # m × (n+1): [J r], factored in place; R and q = (Qᵀr)[1:k] on top
     const tau::Vector{Float64}
     const S::Matrix{Float64}      # 2n × (n+1): [R q; √λ D^½ 0], factored in place per damping
     const tau2::Vector{Float64}
     const work::Vector{Float64}
+    owner::Int
+end
+function TallQRScratch(m::Integer, n::Integer)
+    lwork = max(geqrf_worksize(m, n + 1), geqrf_worksize(2n, n + 1))
+    return TallQRScratch(Matrix{Float64}(undef, m, n + 1), Vector{Float64}(undef, min(m, n + 1)),
+                         Matrix{Float64}(undef, 2n, n + 1), Vector{Float64}(undef, min(2n, n + 1)),
+                         Vector{Float64}(undef, lwork), 0)
+end
+
+const TALL_TOKENS = Threads.Atomic{Int}(0)
+
+# The state of one system's linearization: whether its factorization and the squared column norms
+# of J (the diagonal of JᵀJ) are current. `stale` and `normsstale` are both set, through
+# `markstale!`, by `zero!` and by the linearization wrapper after `resjac!` has written J and r;
+# the QR clears `stale`, and computing the column norms clears `normsstale`. The factorization
+# itself is in the (possibly shared) scratch, and is this system's only while the scratch's owner
+# is this system's token: a solve refactors otherwise.
+mutable struct TallQRWorkspace
+    const scratch::TallQRScratch
+    const token::Int
     const colnorm2::Vector{Float64}   # n: squared column norms of J, the diagonal of JᵀJ
     stale::Bool
     normsstale::Bool
@@ -53,12 +73,11 @@ mutable struct TallQRWorkspace
     nfactor::Int                  # number of QR factorizations of [J r], for tests
     nnorms::Int                   # number of column-norm computations, for tests
 end
-function TallQRWorkspace(m::Integer, n::Integer)
-    lwork = max(geqrf_worksize(m, n + 1), geqrf_worksize(2n, n + 1))
-    return TallQRWorkspace(Matrix{Float64}(undef, m, n + 1), Vector{Float64}(undef, min(m, n + 1)),
-                           Matrix{Float64}(undef, 2n, n + 1), Vector{Float64}(undef, min(2n, n + 1)),
-                           Vector{Float64}(undef, lwork), Vector{Float64}(undef, n), true, true, false, 0, 0)
-end
+TallQRWorkspace(scratch::TallQRScratch, n::Integer) =
+    TallQRWorkspace(scratch, Threads.atomic_add!(TALL_TOKENS, 1) + 1, Vector{Float64}(undef, n), true, true, false, 0, 0)
+TallQRWorkspace(m::Integer, n::Integer) = TallQRWorkspace(TallQRScratch(m, n), n)
+# Whether the scratch holds this system's current factorization
+factorized(ws::TallQRWorkspace) = !ws.stale && ws.scratch.owner == ws.token
 
 """
     TallHessian
@@ -131,7 +150,12 @@ holding `J` and `r`, and `getb(ls)` the gradient `Jᵀr`.
 
 `solve!(ls, :auto)` (or `:qr`) factors `[J r]` by Householder QR once per linearization
 (`O(mn²)`), and then, for each damping value, factors the `2n × n` stacked matrix
-`[R; √λ D^½]` (`O(n³)`, independent of `m`), so retries with a larger `λ` are cheap. An undamped
+`[R; √λ D^½]` (`O(n³)`, independent of `m`), so retries with a larger `λ` are cheap.
+Memory: `J`, one `m × (n+1)` scratch copy of `[J r]` for the factorization, and `O(n²)` more.
+`copy_structure` (the trial system, with `callbackchangesstate = false`) adds its own `J` and
+shares the scratch: about three times the storage of `J` in all. An
+[`OptimizationWorkspace`](@ref) with a `Matrix` prototype owns its own `J`, so the caller's
+prototype is one more. An undamped
 solve on a numerically rank-deficient `J` (smallest `|R[i,i]|` at or below
 `max(m, n)·eps` times the largest, which includes `m < n`) returns `NotPositiveDefinite`, as
 Cholesky does on singular normal equations; a `NaN` or `Inf` in `J` or `r` also returns
@@ -201,8 +225,15 @@ function initlinearization!(cached::Tuple, obj::JacobianObjective)
     return nothing
 end
 
-# The trial system starts from the same J (its unwritten entries must match the main system's)
-copy_structure(ls::DenseTallLinearSystem) = DenseTallLinearSystem(TallHessian(copy(ls.A.J)), zeros(length(ls.b)), ls.x, ls.lambda, ls.scaling)
+# The trial system starts from the same J (its unwritten entries must match the main system's),
+# and shares the factorization scratch: its own J, r, b, stale flags and column norms, so it costs
+# one more J, not two
+function copy_structure(ls::DenseTallLinearSystem)
+    A = ls.A
+    m, n = size(A.J)
+    At = TallHessian(copy(A.J), zeros(m), zeros(m), TallQRWorkspace(A.ws.scratch, n))
+    return DenseTallLinearSystem(At, zeros(length(ls.b)), ls.x, ls.lambda, ls.scaling)
+end
 sharex(ls::DenseTallLinearSystem, from) = ls.x === from.x ? ls : DenseTallLinearSystem(ls.A, ls.b, from.x, ls.lambda, ls.scaling)
 
 # How the iterators and the outer loop drive the tall system unchanged: they call
@@ -223,13 +254,15 @@ function factor_tall!(A::TallHessian)
     ws = A.ws
     J, r = A.J, A.r
     m, n = size(J)
+    sc = ws.scratch
     ws.stale = false
+    sc.owner = ws.token
     ws.nonfinite = !(all(isfinite, J) && all(isfinite, r))
     ws.nonfinite && return nothing
-    Jr = ws.Jr
+    Jr = sc.Jr
     copyto!(view(Jr, :, 1:n), J)
     copyto!(view(Jr, :, n + 1), r)
-    geqrf_ws!(Jr, ws.tau, ws.work)
+    geqrf_ws!(Jr, sc.tau, sc.work)
     ws.nfactor += 1
     return nothing
 end
@@ -266,13 +299,14 @@ function solve!(ls::DenseTallLinearSystem, ::Union{StaticSymbol{:auto}, StaticSy
     A = ls.A
     ws = A.ws
     m, n = size(A.J)
-    ws.stale && factor_tall!(A)
+    factorized(ws) || factor_tall!(A)
     if ws.nonfinite
         fill!(ls.x, NaN)
         return NotPositiveDefinite
     end
+    sc = ws.scratch
     k = min(m, n)
-    Jr = ws.Jr
+    Jr = sc.Jr
     lambda = ls.lambda
     if !(lambda > 0)
         # Undamped: R x = q, if R is square and numerically of full rank
@@ -284,7 +318,7 @@ function solve!(ls::DenseTallLinearSystem, ::Union{StaticSymbol{:auto}, StaticSy
         return Success
     end
     # Damped: QR of [R q; √λ D^½ 0], then back-substitution
-    S = ws.S
+    S = sc.S
     scaling = ls.scaling
     @inbounds begin
         for j in 1:n+1, i in 1:2n
@@ -297,7 +331,7 @@ function solve!(ls::DenseTallLinearSystem, ::Union{StaticSymbol{:auto}, StaticSy
             S[n + i, i] = sqrt(lambda * (isnothing(scaling) ? 1.0 : scaling[i]))
         end
     end
-    geqrf_ws!(S, ws.tau2, ws.work)
+    geqrf_ws!(S, sc.tau2, sc.work)
     fullrank_upper(S, n) || return NotPositiveDefinite
     @inbounds for i in 1:n
         ls.x[i] = S[i, n + 1]

@@ -96,7 +96,7 @@ For $J$ of size $m \times n$:
 |:---|:---|:---|
 | Once per linearization | form $J^\top J$ and $J^\top r$: $O(mn^2)$, in your `fdf!` | Householder QR of $[J\ r]$: $O(mn^2)$, about twice the flops of forming $J^\top J$ |
 | Per damping value tried | Cholesky of $J^\top J + \lambda D$: $O(n^3)$ | QR of the stacked $2n \times n$ matrix $[R;\ \sqrt{\lambda} D^{1/2}]$: $O(n^3)$, independent of $m$ |
-| Storage | $n \times n$ | $J$, plus a copy of $[J\ r]$ for the factorization (about twice the storage of $J$), plus $2n \times (n + 1)$ |
+| Storage | $n \times n$ (twice that with trial reuse) | $J$, plus one $m \times (n + 1)$ scratch copy of $[J\ r]$ for the factorization, plus $2n \times (n + 1)$: about twice the storage of $J$. With trial reuse (`callbackchangesstate = false`, the default) a second $J$, which shares the scratch: about three times |
 
 The per-damping cost does not depend on $m$, so the retries with a larger $\lambda$ after a
 rejected step stay cheap however many residuals there are. An undamped solve on a numerically
