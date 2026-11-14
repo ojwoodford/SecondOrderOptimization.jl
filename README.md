@@ -40,6 +40,12 @@ options = OptimizationOptions(iterator = :levenbergmarquardt, gtol = 1e-8)
 x_opt, result = optimize(x0, HessianObjective(f, fdf!), options)
 ```
 
+A run stops, converged, when the gradient is below `gtol`, the step below `dstep`, or an
+iteration changes the cost (up or down) by less than `reldcost` relative (default `1.5e-8`, the
+square root of machine epsilon) or `absdcost` absolute. A run that is still far from its minimum
+but improving very slowly can also stop on the cost test; lower `reldcost` if that matters, and
+check `isconverged(result)` and `termination_reasons(result)`.
+
 ## Least Squares from a Residual and Jacobian
 
 For a least-squares cost, give the residual and its Jacobian instead of the gradient and Hessian.

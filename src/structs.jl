@@ -4,8 +4,8 @@ import Printf.@printf
 @enum OptimizationIterator newton levenbergmarquardt dogleg gradientdescent levenbergmarquardt_dtd
 
 struct OptimizationOptions{S, L, B <: StaticBool}
-    reldcost::Float64           # Minimum relative reduction in cost required to avoid termination
-    absdcost::Float64           # Minimum absolute reduction in cost required to avoid termination
+    reldcost::Float64           # Minimum relative change in cost (either direction) required to avoid termination
+    absdcost::Float64           # Minimum absolute change in cost (either direction) required to avoid termination
     dstep::Float64              # Minimum L-infinity norm of the update vector required to avoid termination
     gtol::Float64               # Minimum L-infinity norm of the gradient required to avoid termination
     maxfails::Int               # Maximum number of consecutive iterations that have a higher cost than current best before termination
@@ -55,8 +55,8 @@ const FAILURE_TERMINATION_MASK = TERMINATION_COST_INF | TERMINATION_COST_NAN | T
 const TERMINATION_REASONS = (
     (TERMINATION_COST_INF,         :cost_inf,           "Cost is infinite."),
     (TERMINATION_COST_NAN,         :cost_nan,           "Cost is NaN."),
-    (TERMINATION_REL_DCOST,        :rel_dcost,          "Relative decrease in cost below threshold."),
-    (TERMINATION_ABS_DCOST,        :abs_dcost,          "Absolute decrease in cost below threshold."),
+    (TERMINATION_REL_DCOST,        :rel_dcost,          "Relative change in cost below threshold."),
+    (TERMINATION_ABS_DCOST,        :abs_dcost,          "Absolute change in cost below threshold."),
     (TERMINATION_STEP_INF,         :step_inf,           "Step contains an infinite value."),
     (TERMINATION_STEP_NAN,         :step_nan,           "Step contains a NaN."),
     (TERMINATION_STEP_SIZE,        :step_size,          "Step size below threshold."),
@@ -74,7 +74,7 @@ const LINSOLVER_FAILED = reinterpret(Float64, 0x7ff8000000000001)
 
 function OptimizationOptions(;
     maxiters=100,
-    reldcost=1.e-15,
+    reldcost=1.5e-8,
     absdcost=1.e-15,
     dstep=1.e-15,
     gtol=0.0,

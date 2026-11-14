@@ -151,8 +151,10 @@ end
         J0 = jac(x0)
         @test norm(J0[:, 1]) / norm(J0[:, 2]) > 1e6
         for (obj, ls) in ((objJ, :auto), (objH, :cholesky))
-            _, rL = optimize(x0, obj, OptimizationOptions(iterator=:levenbergmarquardt, linsolver=ls, maxiters=500))
-            _, rM = optimize(x0, obj, OptimizationOptions(iterator=:levenbergmarquardt_dtd, linsolver=ls, maxiters=500))
+            # reldcost = 1e-15: uniform damping crawls here, decreasing the cost by under 1e-10
+            # relative per iteration, and the default (1.5e-8) would stop it at cost 0.72 (Q6)
+            _, rL = optimize(x0, obj, OptimizationOptions(iterator=:levenbergmarquardt, linsolver=ls, maxiters=500, reldcost=1e-15))
+            _, rM = optimize(x0, obj, OptimizationOptions(iterator=:levenbergmarquardt_dtd, linsolver=ls, maxiters=500, reldcost=1e-15))
             @test isconverged(rM) && rM.bestcost < 1e-20
             @test rM.niterations < 50
             @test 5 * rM.niterations < rL.niterations
@@ -449,8 +451,9 @@ end
         # in a few iterations; from Cholesky of the normal equations it does not. Measured on
         # Julia 1.13 / 1.10: dogleg tall 1.8e-14 in 8 iterations / 4.2e-15 in 6, normal 6.5e4 at
         # maxiters / 1.8e-3 in 396; Newton tall 1.3e-14 in 7 / 2.5e-15 in 8, normal 6.5e4 / 2.2e-4,
-        # both at maxiters. (Newton stops on max_fails at the minimum: it rejects no step, and the
-        # cost's rounding noise counts as failures.)
+        # both at maxiters. (Measured before Q6, when Newton stopped on max_fails at the minimum: it
+        # rejects no step, and the cost's rounding noise counted as failures. With the default
+        # reldcost of Q6 it ends on rel_dcost in 3 iterations, at the same cost.)
         if it in (:dogleg, :newton)
             @test exJ <= 1e-12
             @test exH > 1e-6

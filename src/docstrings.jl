@@ -5,8 +5,16 @@ Stores configuration options and stopping criteria for second-order optimization
 
 # Keyword Arguments
 - `maxiters::Int = 100`: Maximum number of outer iterations (linearization evaluations).
-- `reldcost::Float64 = 1e-15`: Minimum relative decrease in cost required to continue.
-- `absdcost::Float64 = 1e-15`: Minimum absolute decrease in cost required to continue.
+- `reldcost::Float64 = 1.5e-8`: Minimum relative change in cost required to continue: the run
+  stops (converged, `:rel_dcost`) when an iteration changes the cost by less than
+  `reldcost * abs(bestcost)`, a rise as well as a fall. The default is `sqrt(eps(Float64))`: the
+  cost is computed to about machine epsilon at best, and near a minimum a relative change in cost
+  of `eps` corresponds to a relative change in the variables of about `sqrt(eps)`. A slowly
+  converging run (one whose cost decreases by less than this per iteration while still far from
+  its minimum, as uniform damping on a badly scaled problem can) stops on this test; lower
+  `reldcost`, or set it to `0`, to keep it going, and rely on `gtol`, `dstep` or `maxiters`.
+- `absdcost::Float64 = 1e-15`: Minimum absolute change in cost, in either direction, required to
+  continue (converged, `:abs_dcost`).
 - `dstep::Float64 = 1e-15`: Minimum infinity-norm of parameter step vector to continue.
 - `gtol::Float64 = 0.0`: Gradient infinity-norm threshold for termination.
 - `maxfails::Int = 3`: Maximum consecutive failed steps (cost increases) before termination.

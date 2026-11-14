@@ -135,3 +135,40 @@ const Q6_NONFINITE = (:cost_inf, :cost_nan, :step_inf, :step_nan, :grad_not_fini
         @test res.niterations == 4 && xd == [1.5]            # maxfails = 3, and the start is the best point
     end
 end
+
+@testset "The default reldcost = 1.5e-8 (Q6)" begin
+    @test OptimizationOptions().reldcost == 1.5e-8 && OptimizationOptions().absdcost == 1e-15 && OptimizationOptions().dstep == 1e-15
+    @test 1.5e-8 ≈ sqrt(eps()) rtol=0.02
+    # Gauss-Newton on the ill-conditioned fit: at the minimum the cost is computable to about 1e-8
+    # relative, so with the old default the run bounced until max_fails (not converged); with the
+    # default it ends on rel_dcost, at the minimum
+    tt = collect(range(0, 1; length=60))
+    V = 1e4 * hcat((tt .^ k for k in 0:13)...)
+    yv = 1e4 * (@. sin(3tt) + 0.01 * cos(17tt))
+    exactcost(x) = Float64(0.5 * sum(abs2, big.(V) * big.(x) - big.(yv)))
+    costmin = exactcost(big.(V) \ big.(yv))
+    obj = JacobianObjective(x -> 0.5 * sum(abs2, V * x - yv), (r, J, x) -> (r .= V * x - yv; J .= V; 0.5 * sum(abs2, r)), 60)
+    for ccs in (false, true)
+        x, res = optimize(zeros(14), obj, OptimizationOptions(iterator=:newton, callbackchangesstate=ccs, maxiters=500))
+        @test isconverged(res) && :rel_dcost in termination_reasons(res)
+        @test (exactcost(x) - costmin) / costmin <= 1e-12
+        # with the old default it ends on max_fails alone
+        _, res = optimize(zeros(14), obj, OptimizationOptions(iterator=:newton, callbackchangesstate=ccs, maxiters=500, reldcost=1e-15))
+        @test termination_reasons(res) == [:max_fails] && !isconverged(res)
+    end
+    # a slowly converging run can stop on the cost test far from its minimum: uniform damping on
+    # Rosenbrock with x[2] in units of 1e-6 (the case the documentation warns of). With reldcost
+    # lowered it keeps going.
+    d = [1.0, 1e-6]
+    f(x) = 0.5 * ((1 - x[1] * d[1])^2 + 100 * (x[2] * d[2] - (x[1] * d[1])^2)^2)
+    objs = JacobianObjective(f, (r, J, x) -> (r[1] = 1 - x[1] * d[1]; r[2] = 10 * (x[2] * d[2] - (x[1] * d[1])^2);
+                                              J[1, 1] = -d[1]; J[2, 1] = -20 * x[1] * d[1]^2; J[2, 2] = 10 * d[2]; f(x)), 2)
+    x0 = [-1.2, 1.0] ./ d
+    _, res = optimize(x0, objs, OptimizationOptions(maxiters=500))
+    @test termination_reasons(res) == [:rel_dcost] && res.bestcost > 0.5
+    _, res2 = optimize(x0, objs, OptimizationOptions(maxiters=500, reldcost=1e-15))
+    @test termination_reasons(res2) == [:max_iters] && res2.bestcost < res.bestcost
+    # the right iterator for it converges with the default
+    _, res3 = optimize(x0, objs, OptimizationOptions(iterator=:levenbergmarquardt_dtd, maxiters=500))
+    @test isconverged(res3) && res3.bestcost < 1e-20
+end
