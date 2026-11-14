@@ -137,8 +137,8 @@ struct OptimizationResult
     linearsolves::Int                     # Number of linear solves performed
     # Termination reason
     termination::Int                      # Bitmask indicating which termination criteria were met
-    # Iterator type
-    iterator::OptimizationIterator        # The iterator that was used
+    # Iterator
+    iterator::Symbol                      # The iterator that was used, as selected in the options (:dogleg, ...)
     # Allocations
     initallocations::Int                  # Number of separate allocations during initialization
     initallocated::Int                    # Total bytes allocated during initialization
@@ -146,7 +146,7 @@ struct OptimizationResult
     optimizeallocated::Int                # Total bytes allocated during optimization
 end
 
-OptimizationResult(data, termination, iterator::OptimizationIterator) = OptimizationResult(
+OptimizationResult(data, termination, iterator::Symbol) = OptimizationResult(
     data.startcost,
     data.bestcost,
     data.optimize.time_ns - data.start.time_ns,
@@ -165,7 +165,6 @@ OptimizationResult(data, termination, iterator::OptimizationIterator) = Optimiza
     data.optimize.num_allocs - data.init.num_allocs,
     data.optimize.bytes_allocd - data.init.bytes_allocd
 )
-OptimizationResult(data, termination, iterator_sym::Symbol) = OptimizationResult(data, termination, getiterator(iterator_sym))
 
 Base.:+(a::OptimizationResult, b::OptimizationResult) = OptimizationResult(
     a.startcost + b.startcost,
@@ -225,7 +224,7 @@ function Base.show(io::IO, x::OptimizationResult)
     cost_change_pct = (x.startcost != 0.0 && isfinite(x.startcost) && isfinite(x.bestcost)) ?
         100.0 * (x.startcost - x.bestcost) / abs(x.startcost) : 0.0
     @printf(io, "SecondOrderOptimization optimization using %s took %s and %d iterations to change the cost from %e to %e (%.2f%% change), requiring:\n",
-        String(x.iterator),
+        String(getiterator(x.iterator)),
         timestring(x.timetotal), x.niterations, x.startcost, x.bestcost, cost_change_pct)
     @printf(io, "   %s for initialization (%.2f%% of total time, with %d allocations totalling %s), and\n",
         timestring(x.timeinit), 100.0 * x.timeinit / x.timetotal, x.initallocations, bytesstring(x.initallocated))

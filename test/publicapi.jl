@@ -57,7 +57,19 @@ const PUBLIC_API = sort([
         @test isdefined(SecondOrderOptimization, name)
         @test !(name in names(SecondOrderOptimization))
     end
-    # The documented way to recover the iterator's symbol from a result
-    _, r = optimize([1.0], HessianObjective(x -> x[1]^2, (g, H, x) -> (g[1] = 2x[1]; H[1, 1] = 2.0; x[1]^2)), OptimizationOptions(iterator = :dogleg))
-    @test Symbol(r.iterator) === :dogleg
+end
+
+@testset "OptimizationResult.iterator is the Symbol the options selected (P1)" begin
+    obj = HessianObjective(x -> x[1]^2, (g, H, x) -> (g[1] = 2x[1]; H[1, 1] = 2.0; x[1]^2))
+    # The names `show` printed before P1, when the field held the internal enum
+    shown = (newton = "Newton", levenbergmarquardt = "Levenberg-Marquardt",
+             levenbergmarquardt_dtd = "Levenberg-Marquardt (D'D scaling)", dogleg = "Dogleg",
+             gradientdescent = "gradient descent")
+    @test fieldtype(OptimizationResult, :iterator) === Symbol
+    for (s, name) in pairs(shown)
+        _, r = optimize([1.0], obj, OptimizationOptions(iterator = s))
+        @test r.iterator === s
+        @test (r + r).iterator === s
+        @test startswith(sprint(show, r), "SecondOrderOptimization optimization using $name took ")
+    end
 end

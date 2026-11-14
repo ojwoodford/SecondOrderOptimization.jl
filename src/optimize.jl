@@ -94,7 +94,7 @@ function run_optimize!(data::D, iteratedata::ID, x, f::F, fdf!::FDF, options::Op
         end
         data.variables = x
     end
-    return x, OptimizationResult(data, converged, getiterator(options))
+    return x, OptimizationResult(data, converged, dynamic(options.iterator))
 end
 
 @inline function optimizeloop!(data::D, iteratedata::ID, f::F, fdf!::FDF, options::OptimizationOptions, callback::CB) where {D, ID, F, FDF, CB}

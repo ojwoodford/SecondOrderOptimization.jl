@@ -64,7 +64,7 @@ Holds summary statistics and results from an optimization run.
 - `gradientcomputations::Int`: Total gradient/Hessian evaluations performed.
 - `linearsolves::Int`: Total linear solves performed.
 - `termination::Int`: Bitmask indicating termination reasons.
-- `iterator`: Algorithm used for optimization; `Symbol(result.iterator)` is the symbol it was selected by (for example `:dogleg`).
+- `iterator::Symbol`: The iterator used, as selected by the `iterator` option (for example `:dogleg`).
 - `initallocations::Int`: Heap allocations during setup.
 - `initallocated::Int`: Bytes allocated during setup.
 - `optimizeallocations::Int`: Heap allocations during optimization loop.
