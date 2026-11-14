@@ -48,14 +48,21 @@ What [`check_linear_system`](@ref) can expect of the Hessian storage `A`:
   return `Success`.
 - `indefinite`: whether the storage can hold an indefinite matrix; if not, the indefinite-`A`
   checks are skipped.
+- `accumulates`: whether `fdf!` accumulates into the storage, so that `zero!` must zero it. If
+  not (a Jacobian, whose entries `resjac!` sets), the "`zero!` zeroes `A`" check is skipped, and
+  the system is instead refilled with a different matrix after `zero!`, to check that `zero!`
+  invalidated any cached factorization.
 
-The default, `(exact = true, maxrank = typemax(Int), indefinite = true)`, fits every square storage.
+The default, `(exact = true, maxrank = typemax(Int), indefinite = true, accumulates = true)`,
+fits every square storage. A method returning a tuple without `accumulates` counts as `true`.
 """
-conformance_traits(A) = (exact = true, maxrank = typemax(Int), indefinite = true)
+conformance_traits(A) = (exact = true, maxrank = typemax(Int), indefinite = true, accumulates = true)
 
 # The tall storage: A = JᵀJ. Filling factors M (its largest min(m, n) eigenpairs) into J through
 # a fixed orthonormal basis, so J is dense; a non-finite diagonal entry of M is written into the
-# first row of J, so the corresponding diagonal of JᵀJ is non-finite too.
+# first row of J, so the corresponding diagonal of JᵀJ is non-finite too. Filling writes J and r
+# as resjac! does, and like resjac! it does not mark the factorization stale: the checker fills
+# only fresh systems, or after zero!, so a zero! that left the old factorization in place is caught.
 function conformance_matrix(A::TallHessian)
     J = A.J
     n = size(J, 2)
@@ -80,7 +87,6 @@ function conformance_fill!(A::TallHessian, M::AbstractMatrix)
     for i in 1:n
         isfinite(M[i, i]) || (A.J[1, i] = M[i, i])
     end
-    markstale!(A)
     return A
 end
 function conformance_fillb!(ls::DenseTallLinearSystem, b::AbstractVector)
@@ -91,10 +97,9 @@ function conformance_fillb!(ls::DenseTallLinearSystem, b::AbstractVector)
     else
         fill!(ls.A.r, NaN)
     end
-    markstale!(ls.A)
     return ls
 end
-conformance_traits(A::TallHessian) = (exact = false, maxrank = min(size(A.J)...), indefinite = false)
+conformance_traits(A::TallHessian) = (exact = false, maxrank = min(size(A.J)...), indefinite = false, accumulates = false)
 
 # Deterministic test data, so the checker needs no random number generator
 conformance_symmetric(n) = [sin(1.7 * (i + j) + 0.3 * i * j) for i in 1:n, j in 1:n]
@@ -157,7 +162,9 @@ The rules, for each solver:
 - `sharex(trial, ls)` returns a system whose `getx` is `getx(ls)`.
 - `fast_bAb(getA(ls), v) ≈ v' A v` and `quadratic_model_change(ls, v) ≈ v' A v / 2 + b' v`.
 - `max_diag(ls)` is the largest absolute diagonal entry of `A`, and `NaN` if a diagonal entry is.
-- `zero!(ls)` zeroes `A` and `b`, and the system can be refilled and solved afterwards.
+- `zero!(ls)` zeroes `A` (unless the storage is not accumulated into: see
+  [`conformance_traits`](@ref)) and `b`, and the system can be refilled and solved afterwards,
+  without reusing a factorization from before `zero!`.
 - For an indefinite `A`, `:cholesky` does not return `Success` and `:ldl` returns `Indefinite`
   (checked only for the solvers in `linsolvers`).
 
@@ -282,9 +289,21 @@ function check_linear_system_solver(make_ls, n, s, rtol)
     isnan(max_diag(lsnan)) || conformance_error("max_diag is NaN if a diagonal entry is NaN", s)
 
     # zero!, then refill and solve
+    accumulates = get(traits, :accumulates, true)
     zero!(ls)
-    all(iszero, conformance_matrix(getA(ls))) || conformance_error("zero! zeroes A", s)
+    !accumulates || all(iszero, conformance_matrix(getA(ls))) || conformance_error("zero! zeroes A", s)
     all(iszero, getb(ls)) || conformance_error("zero! zeroes b", s)
+    if !accumulates
+        # Storage that is set, not accumulated into, keeps its values through zero!: refill it
+        # with a different matrix, whose solution a factorization kept from before zero! would miss
+        conformance_fill!(getA(ls), Q2)
+        conformance_fillb!(ls, b2)
+        Q2z = conformance_matrix(getA(ls))
+        dampen!(ls, λ0)
+        relerr(conformance_solve!(ls, s, Q2z, b2, "solve after zero! and refilling with another matrix"), (Q2z + λ0 * I) \ b2) <= rtol ||
+            conformance_error("zero! invalidates what was computed from the old A", s, "after zero!, refilling with another matrix and solving gave the old matrix's solution")
+        zero!(ls)
+    end
     conformance_fill!(getA(ls), Q)
     conformance_fillb!(ls, b)
     dampen!(ls, λ0)

@@ -53,7 +53,10 @@ The contract of `resjac!(r, J, x)`:
 - it writes the residual into `r` (length `m`) and the Jacobian into `J` (`m × nvars(x)`, taken
   with respect to the step of [`update`](@ref), so in the tangent space for a manifold variable),
   and returns the cost at `x`;
-- `r` and `J` arrive zeroed, so `resjac!` may accumulate into them;
+- it sets `r` and `J`, and does not add to them. They are not zeroed before each call (unlike
+  `g` and `H` for `fdf!`): `J` is all zeros when first handed to `resjac!`, and after that holds
+  whatever `resjac!` last wrote. So every entry of `r`, and every entry of `J` that can be non-zero
+  at any `x`, must be set on every call; entries that are always zero can be left alone;
 - the cost it returns must equal `f(x)`. Trial points are scored with `f`, never with
   $\tfrac12 \lVert r \rVert^2$, so `f` can be any cost whose gradient is $J^\top r$. For a robust
   cost, for example, `resjac!` writes the reweighted residual and Jacobian.

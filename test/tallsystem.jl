@@ -44,7 +44,7 @@ allocations(f::F, args::Vararg{Any, N}) where {F, N} = (f(args...); @allocated f
             @test check_linear_system(s -> SOO.makelinearsystem(zeros(n), JacobianObjective(identity, identity, zeros(m, n)), s); n, linsolvers=(:auto,)) === nothing
             @test check_linear_system(s -> SOO.makelinearsystem(zeros(n), JacobianObjective(identity, identity, m), s); n, linsolvers=(:qr,)) === nothing
         end
-        @test SOO.conformance_traits(SOO.getA(SOO.DenseTallLinearSystem(4, 6))) == (exact = false, maxrank = 4, indefinite = false)
+        @test SOO.conformance_traits(SOO.getA(SOO.DenseTallLinearSystem(4, 6))) == (exact = false, maxrank = 4, indefinite = false, accumulates = false)
     end
 
     @testset "makelinearsystem writes into a Matrix prototype, or builds its own J" begin
@@ -166,8 +166,10 @@ allocations(f::F, args::Vararg{Any, N}) where {F, N} = (f(args...); @allocated f
         shared = sharex(other, ls)
         @test getx(shared) === getx(ls) && SOO.getA(shared) === SOO.getA(other) && getb(shared) === getb(other)
         @test sharex(shared, ls) === shared
+        # zero! leaves J and r as resjac! wrote them (Z1), zeroes b, and invalidates the caches
+        A.ws.stale = false; A.ws.normsstale = false
         zero!(ls)
-        @test all(iszero, A.J) && all(iszero, A.r) && all(iszero, getb(ls)) && A.ws.stale
+        @test A.J == J && A.r == r && all(iszero, getb(ls)) && A.ws.stale && A.ws.normsstale
         @test_throws ArgumentError solve!(ls, :cholesky)
         @test_throws ArgumentError solve!(ls, :ldl)
     end

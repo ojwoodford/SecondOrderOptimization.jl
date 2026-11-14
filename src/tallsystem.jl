@@ -34,9 +34,9 @@ function geqrf_worksize(m::Integer, n::Integer)
 end
 
 # The state of one linearization: the factorization and the squared column norms of J (the
-# diagonal of JᵀJ). `stale` and `normsstale` are both set whenever J or r is written (by `zero!`,
-# by the linearization wrapper, or by `conformance_fill!`, through `markstale!`); the QR clears
-# `stale`, and computing the column norms clears `normsstale`.
+# diagonal of JᵀJ). `stale` and `normsstale` are both set, through `markstale!`, by `zero!` and by
+# the linearization wrapper after `resjac!` has written J and r; the QR clears `stale`, and
+# computing the column norms clears `normsstale`.
 mutable struct TallQRWorkspace
     const Jr::Matrix{Float64}     # m × (n+1): [J r], factored in place; R and q = (Qᵀr)[1:k] on top
     const tau::Vector{Float64}
@@ -135,10 +135,14 @@ Cholesky does on singular normal equations; a `NaN` or `Inf` in `J` or `r` also 
 `NotPositiveDefinite`, with `x` set to `NaN`. Nothing is allocated after construction.
 
 The factorization and the squared column norms of `J` (the diagonal of `JᵀJ`, used by `max_diag`
-and by the Marquardt scaling of `:levenbergmarquardt_dtd`) are computed once per linearization,
-and redone after `zero!`, after the optimizer writes `J` and `r`, and after `conformance_fill!`;
-code that writes `getA(ls).J` or `.r` directly must call `zero!` first, or
-`SecondOrderOptimization.markstale!(getA(ls))`.
+and by the Marquardt scaling of `:levenbergmarquardt_dtd`) are computed once per linearization.
+`zero!(ls)` does not zero `J` or `r`: `resjac!` sets them, so `zero!` only invalidates the
+factorization and the column norms (and zeroes `b`, which the linearization then overwrites).
+Code that writes `getA(ls).J` or `.r` directly must call `zero!` (before or after writing), or
+`SecondOrderOptimization.markstale!(getA(ls))`; the linearization wrapper does this itself.
+
+`DenseTallLinearSystem(J)` uses `J` as its storage with the values it holds; the systems that
+[`optimize`](@ref) builds start from an all-zero `J`.
 """
 mutable struct DenseTallLinearSystem <: AbstractLinearSystem
     const A::TallHessian
@@ -150,20 +154,41 @@ end
 DenseTallLinearSystem(J::Matrix{Float64}) = DenseTallLinearSystem(TallHessian(J), zeros(size(J, 2)), zeros(size(J, 2)), 0.0, nothing)
 DenseTallLinearSystem(m::Integer, n::Integer) = DenseTallLinearSystem(zeros(Float64, m, n))
 
+# A Matrix prototype is the storage resjac! writes into, but its values are never read: it is
+# zeroed here, so J is all zeros when first handed to resjac!
 function makelinearsystem(x0, obj::JacobianObjective, linsolver)
     obj.J isa Integer && return DenseTallLinearSystem(nresiduals(obj), dynamic(nvars(x0)))
-    return DenseTallLinearSystem(obj.J)
+    return DenseTallLinearSystem(fill!(obj.J, 0.0))
 end
 
+# resjac! sets every entry of r and every entry of J that can be non-zero, so a fresh
+# linearization needs no zeroing: only the cached factorization and column norms are invalidated.
+# b is zeroed (n entries) so that zero! leaves the system as the interface describes; the
+# linearization wrapper overwrites it.
 function zero!(ls::DenseTallLinearSystem)
-    fill!(ls.A.J, 0.0)
-    fill!(ls.A.r, 0.0)
     fill!(ls.b, 0.0)
     markstale!(ls.A)
     return ls
 end
 
-copy_structure(ls::DenseTallLinearSystem) = DenseTallLinearSystem(TallHessian(similar(ls.A.J)), similar(ls.b), ls.x, ls.lambda, ls.scaling)
+# J and r zeroed, as before the first linearization: done once per run with a reused workspace,
+# since a cached system's J holds the previous run's entries, which another objective's resjac!
+# need not overwrite (its structural zeros)
+function zerojacobian!(ls::DenseTallLinearSystem)
+    fill!(ls.A.J, 0.0)
+    fill!(ls.A.r, 0.0)
+    zero!(ls)
+    return ls
+end
+zerojacobian!(ls) = ls
+# The systems a run uses: the main one, and the iterator's trial system, if it has one
+function zerojacobians!(data, iteratedata)
+    zerojacobian!(data.linsystem)
+    hasfield(typeof(iteratedata), :trial) && zerojacobian!(getfield(iteratedata, :trial))
+    return nothing
+end
+
+copy_structure(ls::DenseTallLinearSystem) = DenseTallLinearSystem(TallHessian(zeros(size(ls.A.J))), zeros(length(ls.b)), ls.x, ls.lambda, ls.scaling)
 sharex(ls::DenseTallLinearSystem, from) = ls.x === from.x ? ls : DenseTallLinearSystem(ls.A, ls.b, from.x, ls.lambda, ls.scaling)
 
 # How the iterators and the outer loop drive the tall system unchanged: they call

@@ -65,10 +65,16 @@ of the Jacobian, never by forming `JᵀJ`, which is more accurate when `J` is il
   weighting it is not).
 - `resjac!(r, J, x) -> cost` writes the residual into `r` (length `m`) and the Jacobian into `J`
   (`m × nvars(x)`, the derivative of `r` along the update `dx` of `update(x, dx)`), and returns
-  the cost at `x`, equal to `f(x)`. `r` and `J` arrive zeroed, as `g` and `H` do for `fdf!` in
-  [`HessianObjective`](@ref), so `resjac!` may accumulate into them.
-- `J` is required: a `Matrix{Float64}` prototype (`m × nvars(x0)`), which the linear system then
-  writes into, or an integer `m`, the number of residuals, for a system with its own matrix.
+  the cost at `x`, equal to `f(x)`.
+- **`resjac!` sets `r` and `J`; it does not add to them.** Unlike `g` and `H` for `fdf!` in
+  [`HessianObjective`](@ref), they are not zeroed before each call: the optimizer never writes
+  to `r` or `J`, and `J` is all zeros when first handed to `resjac!` (in each run). So `resjac!`
+  must set every entry of `r`, and every entry of `J` that can be non-zero at any `x`, on every
+  call. Entries of `J` that are zero at every `x` (structural zeros) may be left alone. An entry
+  written at some `x` and skipped at another keeps its old value, which is a bug in `resjac!`.
+- `J` is required: a `Matrix{Float64}` prototype (`m × nvars(x0)`), or an integer `m`, the number
+  of residuals, for a system with its own matrix. A prototype is the matrix the linear system
+  then writes into, but its values are never used: it is zeroed when the system is built.
 
 The quadratic model at `x` is `cost + (Jᵀr)ᵀdx + ½‖J dx‖²`: the gradient `Jᵀr` is computed by the
 optimizer, and there is no residual-only callable. The model's gradient matches the true cost's

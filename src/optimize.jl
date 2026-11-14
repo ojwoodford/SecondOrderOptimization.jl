@@ -60,6 +60,7 @@ function run_cached_optimize!(cached::Tuple{D, ID}, x, f::F, fdf!::FDF, options:
     data, iteratedata = cached
     reset!(data, x, startstats)
     reset!(iteratedata)
+    zerojacobians!(data, iteratedata)
     return run_optimize!(data, iteratedata, x, f, fdf!, options, callback)
 end
 

@@ -51,7 +51,7 @@ else is an `ArgumentError` up front.
 
 ```julia
 f(x) = 0.5 * ((1.0 - x[1])^2 + 100.0 * (x[2] - x[1]^2)^2)
-function resjac!(r, J, x)      # r and J arrive zeroed
+function resjac!(r, J, x)      # set every entry of r and every entry of J that can be non-zero
     r[1] = 1.0 - x[1]
     r[2] = 10.0 * (x[2] - x[1]^2)
     J[1, 1] = -1.0

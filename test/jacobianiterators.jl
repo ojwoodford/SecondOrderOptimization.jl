@@ -466,3 +466,205 @@ end
         @test WCALLS[] == 0
     end
 end
+
+# Z1: the optimizer does not zero r and J before each resjac! call; resjac! sets them
+
+# Every iterator accepted with a JacobianObjective
+const Z_ITERATORS = (:levenbergmarquardt, W_ITERATORS...)
+
+# A tall system whose zero! forgets to invalidate the factorization, for the checker
+struct LazyZeroTall <: AbstractLinearSystem
+    inner::SOO.DenseTallLinearSystem
+end
+SOO.getA(w::LazyZeroTall) = getA(w.inner)
+SOO.getb(w::LazyZeroTall) = getb(w.inner)
+SOO.getx(w::LazyZeroTall) = getx(w.inner)
+SOO.solve!(w::LazyZeroTall, s::StaticSymbol) = solve!(w.inner, s)
+SOO.dampen!(w::LazyZeroTall, λ::Real) = (dampen!(w.inner, λ); w)
+SOO.dampen!(w::LazyZeroTall, λ::Real, s) = (dampen!(w.inner, λ, s); w)
+SOO.copy_structure(w::LazyZeroTall) = LazyZeroTall(copy_structure(w.inner))
+SOO.sharex(w::LazyZeroTall, from) = LazyZeroTall(sharex(w.inner, from.inner))
+SOO.zero!(w::LazyZeroTall) = (fill!(getb(w.inner), 0.0); w)          # broken: the old QR is kept
+SOO.max_diag(w::LazyZeroTall) = SOO.max_diag(w.inner)
+SOO.conformance_fillb!(w::LazyZeroTall, b::AbstractVector) = (SOO.conformance_fillb!(w.inner, b); w)
+
+# A banded least-squares problem: residual i couples x[i] and x[i+1], and a last residual couples
+# x[1] and x[n]. `banded!` writes only the entries of J that can be non-zero; `full!` writes all.
+function z_banded(n)
+    y = [0.3 * sin(1.7i) for i in 1:n+1]
+    resid(x) = [[x[i] + 0.5 * sin(x[i+1]) - y[i] for i in 1:n-1]; x[n] - y[n]; 0.3 * x[1] * x[n] - y[n+1]]
+    function jac(x)
+        J = zeros(n + 1, n)
+        for i in 1:n-1
+            J[i, i] = 1.0; J[i, i+1] = 0.5 * cos(x[i+1])
+        end
+        J[n, n] = 1.0
+        J[n+1, 1] = 0.3 * x[n]; J[n+1, n] = 0.3 * x[1]
+        return J
+    end
+    f(x) = 0.5 * sum(abs2, resid(x))
+    function banded!(r, J, x)
+        r .= resid(x)
+        for i in 1:n-1
+            J[i, i] = 1.0; J[i, i+1] = 0.5 * cos(x[i+1])
+        end
+        J[n, n] = 1.0
+        J[n+1, 1] = 0.3 * x[n]; J[n+1, n] = 0.3 * x[1]
+        return f(x)
+    end
+    full!(r, J, x) = (r .= resid(x); J .= jac(x); f(x))
+    return f, banded!, full!, jac
+end
+
+@testset "Z1: resjac! sets r and J; the optimizer does not zero them" begin
+    @testset "A resjac! that writes only the band of J: :$it, callbackchangesstate = $ccs" for it in Z_ITERATORS, ccs in (false, true)
+        n = 6
+        f, banded!, full!, _ = z_banded(n)
+        x0 = fill(0.4, n)
+        opts = w_opts(it, :callbackchangesstate => ccs)
+        cR, _, xR, cbR = w_trace()
+        _, resR = optimize(x0, JacobianObjective(f, full!, n + 1), opts; callback=cbR)
+        @test isconverged(resR) || (it === :newton && :max_fails in termination_reasons(resR))
+        @test resR.bestcost < 0.1 * resR.startcost      # a nonzero-residual minimum (n + 1 residuals)
+        # the banded writer gives the identical run: with an integer m, and with a prototype
+        # holding garbage, which is zeroed before the first call
+        for J in (n + 1, fill(7.0, n + 1, n))
+            c, _, xs, cb = w_trace()
+            _, res = optimize(x0, JacobianObjective(f, banded!, J), opts; callback=cb)
+            @test c == cR && xs == xR
+            @test res.bestcost == resR.bestcost && res.niterations == resR.niterations
+            J isa Matrix && @test J != fill(7.0, n + 1, n)
+        end
+        # the trial system's J starts at zero (copy_structure allocates zeros, not similar)
+        ls = SOO.makelinearsystem(x0, JacobianObjective(f, banded!, fill(7.0, n + 1, n)), :auto)
+        @test all(iszero, getA(ls).J) && all(iszero, getA(ls).r)
+        getA(ls).J .= NaN; getA(ls).r .= NaN
+        itd = SOO.construct(static(it), ls, static(ccs))
+        if hasfield(typeof(itd), :trial) && !isnothing(itd.trial)
+            @test all(iszero, getA(itd.trial).J) && all(iszero, getA(itd.trial).r)
+            @test getA(itd.trial).J !== getA(ls).J
+        end
+        @test all(iszero, getA(copy_structure(ls)).J) && all(iszero, getA(copy_structure(ls)).r)
+    end
+
+    @testset "The optimizer does not write J or r: :$it, callbackchangesstate = $ccs" for it in Z_ITERATORS, ccs in (false, true)
+        # record J and r on leaving resjac!, and compare with them on the next entry with the same
+        # storage (the trial variants alternate between two systems)
+        last = IdDict{Any, Tuple{Matrix{Float64}, Vector{Float64}}}()
+        nfirst, ncompared, nmismatch, nnotzero = Ref(0), Ref(0), Ref(0), Ref(0)
+        function recording!(r, J, x)
+            if haskey(last, J)
+                ncompared[] += 1
+                (J == last[J][1] && r == last[J][2]) || (nmismatch[] += 1)
+            else
+                nfirst[] += 1
+                (all(iszero, J) && all(iszero, r)) || (nnotzero[] += 1)
+            end
+            cost = wrosen_resjac!(r, J, x)
+            last[J] = (copy(J), copy(r))
+            return cost
+        end
+        obj = JacobianObjective(wrosen_cost, recording!, 2)
+        opts = w_opts(it, :callbackchangesstate => ccs)
+        _, res = optimize([-1.2, 1.0], obj, opts)
+        @test ncompared[] >= 2 && nmismatch[] == 0 && nnotzero[] == 0      # Newton solves it in two steps
+        @test nfirst[] == (ccs || it === :newton ? 1 : 2)
+        # with rejected steps: more cost evaluations than iterations, or (Newton) a cost increase
+        @test res.costcomputations + res.gradientcomputations > res.niterations + 1 || it === :newton
+        # a reused workspace: each run starts every system's J from zero, then never writes it
+        ws = OptimizationWorkspace([-1.2, 1.0], obj, opts)
+        for _ in 1:2
+            empty!(last)
+            nfirst[] = ncompared[] = nmismatch[] = nnotzero[] = 0
+            optimize!([-1.2, 1.0], obj, opts; workspace=ws)
+            @test ncompared[] >= 2 && nmismatch[] == 0 && nnotzero[] == 0
+        end
+    end
+
+    @testset "A reused workspace does not carry J's entries from another objective: :$it" for it in Z_ITERATORS, ccs in (false, true)
+        # objA writes J[1, 2]; objB has J[1, 2] = 0 at every x and never writes it
+        objA = JacobianObjective(x -> 0.5 * ((x[1] + 3x[2] - 1)^2 + (x[2] - 2)^2),
+                                 (r, J, x) -> (r[1] = x[1] + 3x[2] - 1; r[2] = x[2] - 2; J[1, 1] = 1.0; J[1, 2] = 3.0; J[2, 2] = 1.0; 0.5 * sum(abs2, r)), 2)
+        objB = JacobianObjective(x -> 0.5 * ((x[1] - 1)^2 + (x[2] - 2)^2),
+                                 (r, J, x) -> (r[1] = x[1] - 1; r[2] = x[2] - 2; J[1, 1] = 1.0; J[2, 2] = 1.0; 0.5 * sum(abs2, r)), 2)
+        opts = w_opts(it, :callbackchangesstate => ccs)
+        ws = OptimizationWorkspace([0.0, 0.0], objA, opts)
+        optimize([0.0, 0.0], objA, opts; workspace=ws)
+        xw, rw = optimize([0.0, 0.0], objB, opts; workspace=ws)
+        xf, rf = optimize([0.0, 0.0], objB, opts)
+        @test SOO.workspacevalid(ws, [0.0, 0.0], opts, SOO.objective_structure(objB))
+        @test xw == xf && rw.niterations == rf.niterations
+        @test xw ≈ [1.0, 2.0]
+        # and zero allocation per run still holds with the per-run zeroing
+        w_allocs(zeros(2), objB, opts, ws)
+        @test w_allocs(zeros(2), objB, opts, ws) == 0
+    end
+
+    @testset "After zero!, a solve uses the newly written J, as do the column norms" begin
+        rng = Xoshiro(31)
+        J1, r1 = randn(rng, 8, 3), randn(rng, 8)
+        J2, r2 = 3.0 .* randn(rng, 8, 3), randn(rng, 8)
+        ls = SOO.DenseTallLinearSystem(8, 3)
+        SOO.TallLinearize((r, J, x) -> (r .= r1; J .= J1; 0.0))(getb(ls), getA(ls), nothing)
+        dampen!(ls, 0.0); @test solve!(ls, :auto) == Success
+        @test getx(ls) ≈ J1 \ r1
+        lmd = MarquardtData(0.0, zeros(3)); SOO.updatescaling!(lmd, ls)
+        @test SOO.max_diag(ls) ≈ maximum(sum(abs2, J1; dims=1))
+        nf, nn = getA(ls).ws.nfactor, getA(ls).ws.nnorms
+        # zero! keeps J and r, but whatever is written next is what the system solves with
+        zero!(ls)
+        @test getA(ls).J == J1 && getA(ls).r == r1 && all(iszero, getb(ls))
+        getA(ls).J .= J2; getA(ls).r .= r2; mul!(getb(ls), J2', r2)   # written directly, without markstale!
+        @test SOO.max_diag(ls) ≈ maximum(sum(abs2, J2; dims=1))
+        lmd2 = MarquardtData(0.0, zeros(3)); SOO.updatescaling!(lmd2, ls)
+        @test lmd2.scaling ≈ max.(vec(sum(abs2, J2; dims=1)), 1e-8 * maximum(sum(abs2, J2; dims=1)))
+        for λ in (0.0, 0.5)
+            dampen!(ls, λ)
+            @test solve!(ls, :auto) == Success
+            @test getx(ls) ≈ (J2' * J2 + λ * I) \ (J2' * r2)
+        end
+        dampen!(ls, 0.5, lmd2.scaling)
+        @test solve!(ls, :auto) == Success && getx(ls) ≈ (J2' * J2 + 0.5 * Diagonal(lmd2.scaling)) \ (J2' * r2)
+        @test getA(ls).ws.nfactor == nf + 1 && getA(ls).ws.nnorms == nn + 1
+        # the checker catches a zero! that keeps the old factorization
+        @test check_linear_system(s -> SOO.DenseTallLinearSystem(9, 4); n=4, linsolvers=(:auto,)) === nothing
+        err = try check_linear_system(s -> LazyZeroTall(SOO.DenseTallLinearSystem(9, 4)); n=4, linsolvers=(:auto,)); nothing catch e; e end
+        @test err isa ErrorException && occursin("zero! invalidates what was computed from the old A", err.msg)
+    end
+
+    @testset "A linearization with NaN entries is fully replaced by the next one" begin
+        rng = Xoshiro(37)
+        J, r = randn(rng, 7, 3), randn(rng, 7)
+        Jnan = copy(J); Jnan[2, 2] = NaN; Jnan[5, 1] = NaN
+        rnan = copy(r); rnan[4] = NaN
+        for ls in (SOO.DenseTallLinearSystem(7, 3), copy_structure(SOO.DenseTallLinearSystem(7, 3)))
+            lin(Jw, rw) = (zero!(ls); SOO.TallLinearize((r_, J_, x) -> (r_ .= rw; J_ .= Jw; 0.0))(getb(ls), getA(ls), nothing))
+            lin(Jnan, rnan)
+            @test solve!(ls, :auto) != Success && isnan(SOO.max_diag(ls)) && !all(isfinite, getb(ls))
+            lin(J, r)
+            @test all(isfinite, getA(ls).J) && all(isfinite, getA(ls).r) && all(isfinite, getb(ls))
+            @test SOO.max_diag(ls) ≈ maximum(sum(abs2, J; dims=1))
+            dampen!(ls, 0.0)
+            @test solve!(ls, :auto) == Success && getx(ls) ≈ J \ r
+            lmd = MarquardtData(0.0, zeros(3)); SOO.updatescaling!(lmd, ls)
+            @test all(isfinite, lmd.scaling)
+        end
+        # through optimize: the trial system linearized at a point where J and r are NaN (the
+        # cost is NaN there too, so the step is rejected) is then fully rewritten and reused
+        f(x) = x[1] > 0.6 ? NaN : 0.5 * ((x[1] - 0.5)^2 + 10 * (x[2] - x[1]^2)^2)
+        function nan_resjac!(r, J, x)
+            if x[1] > 0.6
+                r .= NaN; J .= NaN
+            else
+                r[1] = x[1] - 0.5; r[2] = sqrt(10) * (x[2] - x[1]^2)
+                J[1, 1] = 1.0; J[1, 2] = 0.0; J[2, 1] = -2sqrt(10) * x[1]; J[2, 2] = sqrt(10)
+            end
+            return f(x)
+        end
+        for it in Z_ITERATORS
+            x, res = optimize([-1.5, 2.0], JacobianObjective(f, nan_resjac!, 2), w_opts(it))
+            @test :grad_not_finite ∉ termination_reasons(res)
+            @test isfinite(res.bestcost) && res.bestcost < res.startcost
+        end
+    end
+end

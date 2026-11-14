@@ -396,7 +396,10 @@ optimize
 """
     zero!(ls)
 
-Zeroes the gradient vector and Hessian matrix in linear system `ls`.
+Prepares the linear system `ls` for a fresh linearization: zeroes the gradient vector and the
+Hessian matrix that `fdf!` accumulates into. For the tall system of a
+[`JacobianObjective`](@ref), whose `resjac!` sets `J` and `r` rather than adding to them, it
+only invalidates the cached factorization and column norms, and zeroes the gradient.
 
 # Example
 ```julia
@@ -494,7 +497,7 @@ below (those not exported are extended as `SecondOrderOptimization.name`), and s
 |:---|:---|
 | `makelinearsystem(x0, H, linsolver)` | Builds the system from the Hessian prototype `H` (see below for which type each `H` gives). `linsolver` is used to preallocate a factorization or Krylov workspace; a sparse system must then be solved with that same solver. |
 | `getA(ls)`, `getb(ls)`, `getx(ls)` | `A` is the Hessian storage and `b` the gradient vector that `fdf!(b, A, x)` fills; `x` is the vector `solve!` writes. `b` and `x` have length `n`. The iterators read and negate `x`, and dogleg writes its own step into it. `A` must support `fast_bAb(A, v)` for `v` of the type of `b`. |
-| `zero!(ls)` | Sets `A` and `b` to zero, keeping their structure (pattern, workspaces). |
+| `zero!(ls)` | Prepares the system for a fresh linearization, keeping its structure (pattern, workspaces): storage that `fdf!` accumulates into (`A`, `b`) is zeroed. A tall system only invalidates its factorization and column norms (and zeroes `b`), since `resjac!` overwrites `J` and `r`. |
 | `dampen!(ls, λ)`, `dampen!(ls, λ, s)` | Records damping without changing `A`: `solve!` then solves with `A + λI`, or `A + λ Diagonal(s)` (`s` in the units of `diag(A)`, not squared). Each call replaces the damping set before, including the scaling; `dampen!(ls, λ, nothing)` is `dampen!(ls, λ)`, and `λ = 0` is undamped. |
 | `solve!(ls, linsolver) -> SolveStatus` | Solves the damped system `A x = b` into `getx(ls)` (the step is `-x`; the iterators negate it). Returns `Success` when `x` solves it; `NotPositiveDefinite` when the factorization failed (`x` is then unspecified); `Indefinite` when it solved but found `A` indefinite (from `:ldl`, and CG's nonpositive curvature). The iterators treat anything but `Success` as failure: Newton shifts the diagonal, Levenberg-Marquardt raises `λ`, and dogleg shifts the diagonal as Newton does, taking the Cauchy step only if every shift fails. Leaves `A` and `b` exactly as written, damped or not, whether the solve succeeds or fails. `linsolver` may be a `Symbol`, a `StaticSymbol` or an `OptimizationLinearSolver`. |
 | `copy_structure(ls)` | A new system with the same structure and its own `A` and `b` (contents unspecified). It may share `x` and factorization workspaces with `ls`, provided each `solve!` is self-contained, so that solving one never changes the other's next solution. |
