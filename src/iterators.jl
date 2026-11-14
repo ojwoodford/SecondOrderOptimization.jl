@@ -338,10 +338,21 @@ reset!(lmd::LevenbergDataTrial) = (lmd.trialready = false; lmd.trialcost = NaN; 
 
 const AnyLevenbergData = Union{LevenbergData, LevenbergDataTrial}
 
+# The smallest damping applied, from the linear system's `dampingfloor`, relative to the
+# diagonal. Levenberg's λ multiplies I, so the floor is scaled by the largest diagonal entry
+# (falling back to 1e-12 when that is not finite or is zero); Marquardt's λ multiplies the scaled
+# diagonal already. Both are capped at the former constant 1e-12: a higher floor (eps times a
+# large diagonal) holds back the weak directions of an ill-conditioned problem even where Cholesky
+# still resolves a smaller damping, and failed solves are caught by the retry loop.
+function lambdafloor(::AnyLevenbergData, ls)
+    md = max_diag(ls)
+    return (isfinite(md) && md > 0) ? min(dampingfloor(ls) * md, 1e-12) : 1e-12
+end
+
 function updatescaling!(lmd::AnyLevenbergData, ls)
     if lmd.lambda == 0
         md = max_diag(ls)
-        lmd.lambda = isfinite(md) ? max(md * 1e-6, 1e-12) : 1e-6
+        lmd.lambda = isfinite(md) ? max(md * 1e-6, lambdafloor(lmd, ls)) : 1e-6
     end
 end
 
@@ -393,6 +404,8 @@ function updatescaling!(lmd::AnyMarquardtData, ls)
     end
     lmd.scaling .= max.(lmd.scaling, max(m * 1e-8, 1e-12))
 end
+
+lambdafloor(::AnyMarquardtData, ls) = min(dampingfloor(ls), 1e-12)
 
 dampen!(ls::AbstractLinearSystem, lmd::AnyMarquardtData, lambda) = dampen!(ls, max(0.0, lambda), lmd.scaling)
 dampen!(ls::AbstractLinearSystem, lmd::AnyMarquardtData) = dampen!(ls, lmd.lambda, lmd.scaling)
@@ -467,7 +480,7 @@ end
             dampen!(data.linsystem, 0.0)
             if cost_ <= data.bestcost
                 predicted = quadratic_model_change(data.linsystem, getx(data.linsystem))
-                levmardata.lambda = max(levmardata.lambda * lambda_update_factor(cost_ - data.bestcost, predicted), 1e-12)
+                levmardata.lambda = max(levmardata.lambda * lambda_update_factor(cost_ - data.bestcost, predicted), lambdafloor(levmardata, data.linsystem))
             end
             return cost_
         end
@@ -529,7 +542,7 @@ end
             dampen!(data.linsystem, 0.0)
             if cost_ <= data.bestcost
                 predicted = quadratic_model_change(data.linsystem, getx(data.linsystem))
-                levmardata.lambda = max(levmardata.lambda * lambda_update_factor(cost_ - data.bestcost, predicted), 1e-12)
+                levmardata.lambda = max(levmardata.lambda * lambda_update_factor(cost_ - data.bestcost, predicted), lambdafloor(levmardata, data.linsystem))
             end
             return cost_
         end

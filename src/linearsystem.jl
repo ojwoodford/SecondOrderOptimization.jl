@@ -306,6 +306,11 @@ function damp_marquardt!(ls::SparseLinearSystem, scaling, dlambda)
 end
 damp_marquardt!(ls, scaling, dlambda) = damp_marquardt!(getA(ls), scaling, dlambda)
 
+# The smallest damping the solver resolves, relative to the diagonal: below about eps times the
+# diagonal, Cholesky of A + λD no longer sees the damping. The tall system, solved by QR of J,
+# tolerates about eps² (see tallsystem.jl). The iterators cap the floor at 1e-12 (`lambdafloor`).
+dampingfloor(ls) = eps(Float64)
+
 # Change in the undamped quadratic model, 0.5 dx'H dx + g'dx, for a step dx (negative for a
 # descent step)
 function quadratic_model_change(ls::AbstractLinearSystem, dx)

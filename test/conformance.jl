@@ -30,6 +30,7 @@ end
 SOO.sharex(w::BrokenSystem, from) = w.broken === :sharex_copies ? BrokenSystem(SOO.copy_structure(w.inner), w.broken) :
                                                                    BrokenSystem(SOO.sharex(w.inner, from.inner), w.broken)
 SOO.zero!(w::BrokenSystem) = (w.broken === :zero_keeps_b ? fill!(w.inner.A, 0.0) : SOO.zero!(w.inner); w)
+SOO.dampingfloor(w::BrokenSystem) = w.broken === :floor_zero ? 0.0 : SOO.dampingfloor(w.inner)
 SOO.max_diag(w::BrokenSystem) = w.broken === :max_diag_skips_nan ? maximum(x -> isnan(x) ? 0.0 : abs(x), diag(w.inner.A)) : SOO.max_diag(w.inner)
 
 checker_message(make_ls; kwargs...) = try check_linear_system(make_ls; kwargs...); nothing catch e; e end
@@ -94,7 +95,8 @@ checker_message(make_ls; kwargs...) = try check_linear_system(make_ls; kwargs...
                                (:dampen_keeps_scaling, "dampen!(ls, λ) solves (A + λI) x = b"),
                                (:sharex_copies, "sharex(trial, ls) aliases x"),
                                (:zero_keeps_b, "zero! zeroes b"),
-                               (:max_diag_skips_nan, "max_diag is NaN if a diagonal entry is NaN"))
+                               (:max_diag_skips_nan, "max_diag is NaN if a diagonal entry is NaN"),
+                               (:floor_zero, "dampingfloor is a relative damping in (0, 1e-6]"))
             err = checker_message(() -> BrokenSystem(n, broken); n, linsolvers=(:cholesky,))
             @test err isa ErrorException
             @test occursin("rule \"$rule\"", err.msg)

@@ -77,11 +77,12 @@ about 20 iterations, and with `:dogleg` or `:newton` (Gauss-Newton) in under 10.
 equations with `linsolver = :cholesky` are still above the minimum after hundreds of iterations:
 their steps are only as good as the rounded $J^\top J$.
 
-`:levenbergmarquardt_dtd` does not reach the minimum on this problem in either form. Its
-damping never falls below $10^{-12}$ times the diagonal of $J^\top J$, while here the smallest
-squared singular value is about $10^{-19}$ of it, so the damping holds back the weakest
-directions. Marquardt scaling is for Jacobians whose columns differ greatly in scale, not for
-ill conditioning within a scale. Ill-conditioned Jacobians come from
+`:levenbergmarquardt_dtd` reaches the minimum too in the Jacobian form, in about 20 iterations.
+Here the smallest squared singular value is about $10^{-19}$ of the diagonal of $J^\top J$, and
+the damping of Levenberg-Marquardt can fall to what the linear solver resolves (see
+`dampingfloor` in the [`AbstractLinearSystem`](@ref) interface): about $\epsilon^2$ times the
+diagonal for QR of $J$, but only about $\epsilon$ for Cholesky of $J^\top J$, so the normal
+equations stay above the minimum. Ill-conditioned Jacobians come from
 polynomial and spline fits in a monomial basis, from parameters of very different scales, and
 from nearly redundant parameterizations.
 

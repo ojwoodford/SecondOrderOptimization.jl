@@ -344,6 +344,10 @@ function solve!(ls::DenseTallLinearSystem, ::StaticSymbol{S}) where S
     throw(ArgumentError("linsolver = :$S is not supported by a DenseTallLinearSystem; use :auto or :qr."))
 end
 
+# QR of J works with cond(J), not cond(JᵀJ) = cond(J)², so a damping down to about eps² times the
+# diagonal of JᵀJ still changes the solve
+dampingfloor(ls::DenseTallLinearSystem) = eps(Float64)^2
+
 # Marquardt scaling (`:levenbergmarquardt_dtd`) from the diagonal of JᵀJ, the squared column norms
 # of J. The rule is the generic method's (in iterators.jl), which reads `A[i, i]`: a running
 # maximum of the diagonal, a non-finite entry counting as 1, then a floor of 1e-8 times the

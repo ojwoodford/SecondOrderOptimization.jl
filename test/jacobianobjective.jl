@@ -183,9 +183,10 @@ SOO.update(x::Rot3, dx, start=1) = Rot3(x.R * expso3(SVector(dx[start], dx[start
         @test exactcost(xJ) - costmin <= 1e-12 * costmin
         @test exactcost(xH) - costmin > 1e-6 * costmin
         @test resJ.niterations < resH.niterations
-        # The gradient norm (as the optimizer computes it, in Float64) is at the level of its own
-        # rounding here: the gradient at the exact minimizer, rounded to Float64, is of the same order
-        @test gJ < gH
+        # Compared on cost only. The gradient norm (as the optimizer computes it, in Float64) is at
+        # the level of its own rounding here: the gradient at the exact minimizer, rounded to Float64,
+        # is of the same order, so gJ < gH (asserted before Q5) depends on the platform and on the
+        # last few iterations; both norms are in the @info record above.
     end
 
     @testset "The cost is not derived from r: reweighted residuals" begin

@@ -1,4 +1,4 @@
-using SecondOrderOptimization, StaticArrays, LinearAlgebra, Static, Random, Test
+using SecondOrderOptimization, StaticArrays, SparseArrays, LinearAlgebra, Static, Random, Test
 const SOO = SecondOrderOptimization
 using SecondOrderOptimization: getA, getb, getx, solve!   # explicit: Krylov, loaded by other test files, also exports solve!
 
@@ -437,11 +437,13 @@ end
         @info "Ill-conditioned fit, iterator = :$it (relative excess cost over the least-squares minimum $costmin)" tall_excess=exJ tall_iterations=resJ.niterations tall_termination=join(termination_reasons(resJ), ",") normal_excess=exH normal_iterations=resH.niterations normal_termination=join(termination_reasons(resH), ",")
         @test :linsolver_failed ∉ termination_reasons(resJ)
         @test resJ.bestcost < resJ.startcost && resH.bestcost < resH.startcost
-        # Marquardt scaling floors the damping at λ ≥ 1e-12 times diag(JᵀJ), and cond(J)² ≈ 1.5e19,
-        # so the damping holds back the small singular directions in both formulations alike (it is
-        # invariant to the variables' scale, so no rescaling of the problem avoids it)
+        # Marquardt's damping floor is the solver's (Q5): eps² times the scaled diagonal for QR of J,
+        # so the tall path resolves the small singular directions (cond(J)² ≈ 1.5e19). Before Q5 the
+        # floor was 1e-12 and both forms stalled at 81 times the minimum. The normal equations'
+        # floor is eps, and they stay above it (measured: 5.0e-4 on Julia 1.13, 1.2e-2 on 1.10).
         if it === :levenbergmarquardt_dtd
-            @test exJ > 1e-3 && exH > 1e-3
+            @test exJ <= 1e-12
+            @test exH > 1e-6
         end
         # The Gauss-Newton step of dogleg and Newton is undamped: from QR it reaches the minimum
         # in a few iterations; from Cholesky of the normal equations it does not. Measured on
@@ -774,4 +776,70 @@ end
     lsH = SOO.makelinearsystem(zeros(2), zeros(2, 2), :auto)
     tH = SOO.trialsystem(SOO.construct(static(it), lsH, static(ccs)))
     @test (!ccs && it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg)) ? (tH isa SOO.DenseLinearSystem && tH !== lsH) : tH === nothing
+end
+
+@testset "Q5: the damping floor comes from the linear system" begin
+    @testset "dampingfloor and the iterators' floor" begin
+        @test SOO.dampingfloor(SOO.DenseLinearSystem(3)) == eps()
+        @test SOO.dampingfloor(SOO.makelinearsystem(zeros(SVector{2}), nothing, :auto)) == eps()
+        @test SOO.dampingfloor(SOO.makelinearsystem(zeros(3), sparse(1.0I, 3, 3), :auto)) == eps()
+        tall = SOO.DenseTallLinearSystem(5, 3)
+        @test SOO.dampingfloor(tall) == eps()^2
+        # Levenberg: relative to the largest diagonal entry, never above the former 1e-12
+        lev = LevenbergData(0.0)
+        for (md, expected) in ((60.0, eps() * 60.0), (1e10, 1e-12), (0.0, 1e-12), (NaN, 1e-12))
+            ls = SOO.DenseLinearSystem{Float64}(Matrix(Diagonal([md, md / 2])), zeros(2), zeros(2))
+            @test SOO.lambdafloor(lev, ls) === expected
+        end
+        getA(tall).J .= [1e3 0 0; 0 1 0; 0 0 1; 0 0 0; 0 0 0]; SOO.markstale!(getA(tall))
+        @test SOO.lambdafloor(lev, tall) == eps()^2 * 1e6
+        # Marquardt: the floor itself, since λ multiplies the scaled diagonal
+        @test SOO.lambdafloor(MarquardtData(0.0, zeros(2)), SOO.DenseLinearSystem(2)) == eps()
+        @test SOO.lambdafloor(MarquardtData(0.0, zeros(3)), tall) == eps()^2
+        # the initial damping is unchanged where the old floor did not bind
+        lmd = LevenbergData(0.0)
+        SOO.updatescaling!(lmd, SOO.DenseLinearSystem{Float64}(Matrix(Diagonal([4.0, 1.0])), zeros(2), zeros(2)))
+        @test lmd.lambda == 4e-6
+    end
+
+    @testset "The ill-conditioned problem, unscaled: the tall path with :levenbergmarquardt reaches the minimum" begin
+        # Before Q5 the absolute floor 1e-12 was above the smallest squared singular value (about
+        # 4e-18 unscaled), and both forms stopped at 20 times the minimum after 500 iterations
+        tt = collect(range(0, 1; length=60))
+        V = hcat((tt .^ k for k in 0:13)...)
+        yv = @. sin(3tt) + 0.01 * cos(17tt)
+        objJ, objH = w_objectives(x -> V * x - yv, x -> V, 60, 14)
+        exactcost(x) = Float64(0.5 * sum(abs2, big.(V) * big.(x) - big.(yv)))
+        costmin = exactcost(big.(V) \ big.(yv))
+        for ccs in (false, true), it in (:levenbergmarquardt, :levenbergmarquardt_dtd)
+            xJ, resJ = optimize(zeros(14), objJ, w_opts(it, :maxiters => 500, :callbackchangesstate => ccs))
+            xH, resH = optimize(zeros(14), objH, w_opts(it, :maxiters => 500, :callbackchangesstate => ccs, :linsolver => :cholesky))
+            exJ = (exactcost(xJ) - costmin) / costmin
+            exH = (exactcost(xH) - costmin) / costmin
+            ccs || @info "Unscaled ill-conditioned fit, iterator = :$it (relative excess cost)" tall_excess=exJ tall_iterations=resJ.niterations normal_excess=exH normal_iterations=resH.niterations
+            @test exJ <= 1e-12
+            @test resJ.niterations < 50
+            @test isconverged(resJ)
+            @test exH > 1e-8                 # the normal equations do not reach it
+        end
+    end
+
+    @testset "A singular Hessian with a very small diagonal still converges" begin
+        # H = s²[1 1; 1 1] with s = 1e-8: singular, diagonal 1e-16. The floor eps·1e-16 is tiny, so
+        # the first solves fail and the retry loop raises λ until one succeeds.
+        s = 1e-8
+        f(x) = 0.5 * (s * (x[1] + x[2]) - 1)^2
+        fdf!(g, H, x) = (r = s * (x[1] + x[2]) - 1; g .= s * r; H .= s^2; 0.5 * r^2)
+        resjac!(r, J, x) = (r[1] = s * (x[1] + x[2]) - 1; J .= s; 0.5 * r[1]^2)
+        for it in (:levenbergmarquardt, :levenbergmarquardt_dtd), ccs in (false, true)
+            opts = w_opts(it, :callbackchangesstate => ccs, :maxiters => 200)
+            for (x0, obj) in (([0.0, 0.0], HessianObjective(f, fdf!; H=zeros(2, 2))), (SVector(0.0, 0.0), HessianObjective(f, fdf!)),
+                              ([0.0, 0.0], JacobianObjective(f, resjac!, 1)))
+                x, res = optimize(x0, obj, opts)
+                @test :linsolver_failed ∉ termination_reasons(res)
+                @test res.bestcost < 1e-20
+                @test s * (x[1] + x[2]) ≈ 1 rtol=1e-8
+            end
+        end
+    end
 end

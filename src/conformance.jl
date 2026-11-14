@@ -162,6 +162,8 @@ The rules, for each solver:
 - `sharex(trial, ls)` returns a system whose `getx` is `getx(ls)`.
 - `fast_bAb(getA(ls), v) ≈ v' A v` and `quadratic_model_change(ls, v) ≈ v' A v / 2 + b' v`.
 - `max_diag(ls)` is the largest absolute diagonal entry of `A`, and `NaN` if a diagonal entry is.
+- `dampingfloor(ls)` is in `(0, 1e-6]`, and a positive-definite `A` damped by
+  `dampingfloor(ls) * max_diag(ls)` solves.
 - `zero!(ls)` zeroes `A` (unless the storage is not accumulated into: see
   [`conformance_traits`](@ref)) and `b`, and the system can be refilled and solved afterwards,
   without reusing a factorization from before `zero!`.
@@ -280,6 +282,17 @@ function check_linear_system_solver(make_ls, n, s, rtol)
     dx = copy(getx(ls)); dx .= conformance_vector(n, 2.1)
     isapprox(quadratic_model_change(ls, dx), 0.5 * dot(dx, Qw * dx) + dot(b, dx); rtol=1e-10) ||
         conformance_error("quadratic_model_change(ls, dx) == dx' A dx / 2 + b' dx", s)
+
+    # dampingfloor: a relative damping, which the solver resolves on a definite A
+    fl = dampingfloor(ls)
+    (fl isa Float64 && 0 < fl <= 1e-6) || conformance_error("dampingfloor is a relative damping in (0, 1e-6]", s, "got $fl")
+    if !deficient
+        λf = fl * maximum(abs, diag(Qw))
+        dampen!(ls, λf)
+        xf = conformance_solve!(ls, s, Qw, b, "solve damped at the floor")
+        relerr(xf, (Qw + λf * I) \ b) <= rtol || conformance_error("a definite A damped at dampingfloor solves", s, "relative error $(relerr(xf, (Qw + λf * I) \ b))")
+        dampen!(ls, λ0)
+    end
 
     # max_diag, including a NaN on the diagonal
     max_diag(ls) == maximum(abs, diag(Qw)) || conformance_error("max_diag is the largest absolute diagonal entry", s,
