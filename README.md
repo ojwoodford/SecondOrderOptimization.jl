@@ -44,7 +44,9 @@ A run stops, converged, when the gradient is below `gtol`, the step below `dstep
 iteration changes the cost (up or down) by less than `reldcost` relative (default `1.5e-8`, the
 square root of machine epsilon) or `absdcost` absolute. A run that is still far from its minimum
 but improving very slowly can also stop on the cost test; lower `reldcost` if that matters, and
-check `isconverged(result)` and `termination_reasons(result)`.
+check `isconverged(result)`, and test `result.termination` against the exported
+`TERMINATION_*` masks (for example `result.termination & TERMINATION_MAX_FAILS != 0`) for a
+specific reason.
 
 ## Least Squares from a Residual and Jacobian
 

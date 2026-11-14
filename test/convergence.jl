@@ -1,27 +1,24 @@
 using SecondOrderOptimization, StaticArrays, LinearAlgebra, Test
+include("termbits.jl")
 const SOO = SecondOrderOptimization
 
 # Q6: what counts as converged (isconverged), and the two-sided cost-change tests of optimizeloop!
 
-# A termination value from reason symbols
-function q6bits(reasons::Symbol...)
-    t = 0
-    for r in reasons
-        i = findfirst(x -> x[2] === r, SOO.TERMINATION_REASONS)
-        t |= SOO.TERMINATION_REASONS[i][1]
-    end
-    return t
-end
-q6conv(reasons::Symbol...) = SOO.isconverged_bits(q6bits(reasons...))
+# A termination value from masks, and isconverged on it
+q6conv(masks::Integer...) = SOO.isconverged_bits(reduce(|, masks; init=0))
 
-const Q6_CONVERGENCE = (:rel_dcost, :abs_dcost, :step_size, :grad_tol)
-const Q6_LIMITS = (:max_fails, :max_iters, :max_time)
-const Q6_NONFINITE = (:cost_inf, :cost_nan, :step_inf, :step_nan, :grad_not_finite, :start_not_finite)
+const Q6_CONVERGENCE = (TERMINATION_REL_DCOST, TERMINATION_ABS_DCOST, TERMINATION_STEP_SIZE, TERMINATION_GRAD_TOL)
+const Q6_LIMITS = (TERMINATION_MAX_FAILS, TERMINATION_MAX_ITERS, TERMINATION_MAX_TIME)
+const Q6_NONFINITE = (TERMINATION_COST_INF, TERMINATION_COST_NAN, TERMINATION_STEP_INF, TERMINATION_STEP_NAN, TERMINATION_GRAD_NOT_FINITE, TERMINATION_START_NOT_FINITE)
 
 @testset "convergence.jl" begin
     @testset "isconverged on hand-built termination values" begin
-        # every bit is named, and q6bits builds what termination_reasons reads back
-        @test sort([x[2] for x in SOO.TERMINATION_REASONS]) == sort([Q6_CONVERGENCE..., Q6_LIMITS..., Q6_NONFINITE..., :cost_discrepancy, :linsolver_failed])
+        # Q8: termination_reasons is gone; the masks and isconverged are the public interface
+        @test !isdefined(SOO, :termination_reasons) && !isdefined(@__MODULE__, :termination_reasons)
+        @test all(b -> isdefined(SOO, b) && b in names(SOO), (:TERMINATION_REL_DCOST, :TERMINATION_MAX_FAILS, :TERMINATION_GRAD_TOL, :isconverged))
+        @test all(x -> length(x) == 2 && x[2] isa String, SOO.TERMINATION_REASONS)    # bit and message only
+        # the rules below cover every bit that has a message
+        @test Set(x[1] for x in SOO.TERMINATION_REASONS) == Set([Q6_CONVERGENCE..., Q6_LIMITS..., Q6_NONFINITE..., TERMINATION_COST_DISCREPANCY, TERMINATION_LINSOLVER_FAILED])
         # a convergence bit alone is converged
         for c in Q6_CONVERGENCE
             @test q6conv(c)
@@ -33,24 +30,24 @@ const Q6_NONFINITE = (:cost_inf, :cost_nan, :step_inf, :step_nan, :grad_not_fini
         for l in Q6_LIMITS
             @test !q6conv(l)
         end
-        @test q6conv(:rel_dcost, :abs_dcost, :max_fails, :max_iters, :max_time)
+        @test q6conv(TERMINATION_REL_DCOST, TERMINATION_ABS_DCOST, TERMINATION_MAX_FAILS, TERMINATION_MAX_ITERS, TERMINATION_MAX_TIME)
         # grad_tol with cost_discrepancy is converged; cost_discrepancy alone is not
-        @test q6conv(:grad_tol, :cost_discrepancy)
-        @test !q6conv(:cost_discrepancy)
+        @test q6conv(TERMINATION_GRAD_TOL, TERMINATION_COST_DISCREPANCY)
+        @test !q6conv(TERMINATION_COST_DISCREPANCY)
         # anything non-finite is a failure whatever else is set
         for nf in Q6_NONFINITE
             @test !q6conv(nf)
             for c in Q6_CONVERGENCE
                 @test !q6conv(c, nf)
-                @test !q6conv(c, nf, :max_iters)
+                @test !q6conv(c, nf, TERMINATION_MAX_ITERS)
             end
         end
-        @test !q6conv(:step_size, :cost_nan) && !q6conv(:step_size, :cost_inf)        # a small step to a non-finite cost
-        @test !q6conv(:grad_tol, :start_not_finite, :cost_inf)                          # a small gradient at a start with no finite cost
+        @test !q6conv(TERMINATION_STEP_SIZE, TERMINATION_COST_NAN) && !q6conv(TERMINATION_STEP_SIZE, TERMINATION_COST_INF)        # a small step to a non-finite cost
+        @test !q6conv(TERMINATION_GRAD_TOL, TERMINATION_START_NOT_FINITE, TERMINATION_COST_INF)                          # a small gradient at a start with no finite cost
         # linsolver_failed is a failure
-        @test !q6conv(:linsolver_failed)
+        @test !q6conv(TERMINATION_LINSOLVER_FAILED)
         for c in Q6_CONVERGENCE
-            @test !q6conv(c, :linsolver_failed)
+            @test !q6conv(c, TERMINATION_LINSOLVER_FAILED)
         end
         # nothing set, or only a callback's flags, is not converged
         @test !SOO.isconverged_bits(0)
@@ -76,39 +73,39 @@ const Q6_NONFINITE = (:cost_inf, :cost_nan, :step_inf, :step_nan, :grad_not_fini
         # criterion here is the change in cost.)
         opts(; kw...) = OptimizationOptions(; reldcost=1e-10, absdcost=0.0, dstep=0.0, kw...)
         _, res = optimize([1.0, 0.0], expfit, opts())
-        @test isconverged(res) && termination_reasons(res) == [:rel_dcost]
+        @test isconverged(res) && res.termination == TERMINATION_REL_DCOST
         n = res.niterations
         _, res = optimize([1.0, 0.0], expfit, opts(maxiters=n - 1))
-        @test termination_reasons(res) == [:max_iters] && !isconverged(res)              # max_iters alone
+        @test res.termination == TERMINATION_MAX_ITERS && !isconverged(res)              # max_iters alone
         _, res = optimize([1.0, 0.0], expfit, opts(maxiters=n))
-        @test termination_reasons(res) == [:rel_dcost, :max_iters]
+        @test res.termination == TERMINATION_REL_DCOST | TERMINATION_MAX_ITERS
         @test isconverged(res)                                                              # a limit with a convergence bit
         # grad_tol alone
         _, res = optimize([-1.2, 1.0], rosen, OptimizationOptions(gtol=1e-6, reldcost=0.0, absdcost=0.0, dstep=0.0))
-        @test termination_reasons(res) == [:grad_tol] && isconverged(res)
+        @test res.termination == TERMINATION_GRAD_TOL && isconverged(res)
         # a small gradient with a cost discrepancy: fdf! reports a cost 1e-6 above f away from the start
         f(x) = 0.5 * (x[1] - 1)^2
         objd = HessianObjective(f, (g, H, x) -> (g[1] = x[1] - 1; H[1, 1] = 1.0; f(x) + (x[1] == 0.0 ? 0.0 : 1e-6)))
         # (callbackchangesstate = true: the plain Newton variant scores the step with f, the
         # relinearizing one with fdf!, which would hide the discrepancy)
         _, res = optimize([0.0], objd, OptimizationOptions(iterator=:newton, gtol=1e-10, callbackchangesstate=true))
-        @test Set(termination_reasons(res)) == Set([:cost_discrepancy, :grad_tol])
+        @test res.termination == TERMINATION_COST_DISCREPANCY | TERMINATION_GRAD_TOL
         @test isconverged(res)
         # a small gradient at a start with no finite cost (converged before Q6)
         objinf = HessianObjective(x -> Inf, (g, H, x) -> (g .= 0.0; H .= I(1); Inf))
         _, res = optimize([0.0], objinf, OptimizationOptions(gtol=1e-3))
-        @test :grad_tol in termination_reasons(res) && :start_not_finite in termination_reasons(res)
+        @test hasbits(res, TERMINATION_GRAD_TOL) && hasbits(res, TERMINATION_START_NOT_FINITE)
         @test !isconverged(res)
         # a small step to a point whose cost is not finite: the cost is NaN away from the start, and
         # every trial is rejected until the step is below dstep
         fn(x) = x[1] == 0.0 ? 0.5 * (x[1] - 1)^2 : NaN
         objn = HessianObjective(fn, (g, H, x) -> (g[1] = x[1] - 1; H[1, 1] = 1.0; fn(x)))
         _, res = optimize([0.0], objn, OptimizationOptions(iterator=:dogleg, dstep=1e-3))
-        @test :cost_nan in termination_reasons(res) && !isconverged(res)
+        @test hasbits(res, TERMINATION_COST_NAN) && !isconverged(res)
         # a linear-solver failure: an indefinite Hessian that :cholesky cannot solve, even shifted
         objf = HessianObjective(x -> -0.5 * x[1]^2 - x[1], (g, H, x) -> (g[1] = -x[1] - 1; H[1, 1] = -1e300; -0.5 * x[1]^2 - x[1]); H=zeros(1, 1))
         _, res = optimize([0.0], objf, OptimizationOptions(iterator=:levenbergmarquardt, linsolver=:cholesky))
-        @test :linsolver_failed in termination_reasons(res) && !isconverged(res)
+        @test hasbits(res, TERMINATION_LINSOLVER_FAILED) && !isconverged(res)
     end
 
     @testset "Gauss-Newton converges at the minimum (it ended on max_fails before Q6)" begin
@@ -121,7 +118,7 @@ const Q6_NONFINITE = (:cost_inf, :cost_nan, :step_inf, :step_nan, :grad_not_fini
                                 (r, J, x) -> (r .= resid(x); J[:, 1] .= exp.(x[2] .* t); J[:, 2] .= x[1] .* t .* exp.(x[2] .* t); 0.5 * sum(abs2, r)), 25)
         x, res = optimize([1.0, 0.0], obj, OptimizationOptions(iterator=:newton); callback=(c, args...) -> (push!(costs, c); (c, 0)))
         @test isconverged(res)
-        @test !isempty(intersect(termination_reasons(res), (:rel_dcost, :abs_dcost)))
+        @test hasbits(res, TERMINATION_REL_DCOST | TERMINATION_ABS_DCOST)
         # the point returned is the best one, also when the last step was a small rise
         @test res.bestcost == minimum([res.startcost; costs])
         @test 0.5 * sum(abs2, resid(x)) == res.bestcost
@@ -130,7 +127,7 @@ const Q6_NONFINITE = (:cost_inf, :cost_nan, :step_inf, :step_nan, :grad_not_fini
         fd(x) = sqrt(1 + x[1]^2)
         objdiv = HessianObjective(fd, (g, H, x) -> (s = fd(x); g[1] = x[1] / s; H[1, 1] = 1 / s^3; s))
         xd, res = optimize([1.5], objdiv, OptimizationOptions(iterator=:newton, maxiters=20))
-        @test termination_reasons(res) == [:max_fails]
+        @test res.termination == TERMINATION_MAX_FAILS
         @test !isconverged(res)
         @test res.niterations == 4 && xd == [1.5]            # maxfails = 3, and the start is the best point
     end
@@ -150,11 +147,11 @@ end
     obj = JacobianObjective(x -> 0.5 * sum(abs2, V * x - yv), (r, J, x) -> (r .= V * x - yv; J .= V; 0.5 * sum(abs2, r)), 60)
     for ccs in (false, true)
         x, res = optimize(zeros(14), obj, OptimizationOptions(iterator=:newton, callbackchangesstate=ccs, maxiters=500))
-        @test isconverged(res) && :rel_dcost in termination_reasons(res)
+        @test isconverged(res) && hasbits(res, TERMINATION_REL_DCOST)
         @test (exactcost(x) - costmin) / costmin <= 1e-12
         # with the old default it ends on max_fails alone
         _, res = optimize(zeros(14), obj, OptimizationOptions(iterator=:newton, callbackchangesstate=ccs, maxiters=500, reldcost=1e-15))
-        @test termination_reasons(res) == [:max_fails] && !isconverged(res)
+        @test res.termination == TERMINATION_MAX_FAILS && !isconverged(res)
     end
     # a slowly converging run can stop on the cost test far from its minimum: uniform damping on
     # Rosenbrock with x[2] in units of 1e-6 (the case the documentation warns of). With reldcost
@@ -165,9 +162,9 @@ end
                                               J[1, 1] = -d[1]; J[2, 1] = -20 * x[1] * d[1]^2; J[2, 2] = 10 * d[2]; f(x)), 2)
     x0 = [-1.2, 1.0] ./ d
     _, res = optimize(x0, objs, OptimizationOptions(maxiters=500))
-    @test termination_reasons(res) == [:rel_dcost] && res.bestcost > 0.5
+    @test res.termination == TERMINATION_REL_DCOST && res.bestcost > 0.5
     _, res2 = optimize(x0, objs, OptimizationOptions(maxiters=500, reldcost=1e-15))
-    @test termination_reasons(res2) == [:max_iters] && res2.bestcost < res.bestcost
+    @test res2.termination == TERMINATION_MAX_ITERS && res2.bestcost < res.bestcost
     # the right iterator for it converges with the default
     _, res3 = optimize(x0, objs, OptimizationOptions(iterator=:levenbergmarquardt_dtd, maxiters=500))
     @test isconverged(res3) && res3.bestcost < 1e-20

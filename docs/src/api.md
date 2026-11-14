@@ -23,10 +23,28 @@ update!
 OptimizationOptions
 OptimizationResult
 isconverged
-termination_reasons
 OptimizationWorkspace
 OptimizationInternal
 ```
+
+Why a run stopped is in `result.termination`, a bitfield. Test it against the exported masks, for
+example `result.termination & TERMINATION_GRAD_TOL != 0`, and use [`isconverged`](@ref) for whether
+the run converged:
+
+| Mask | Set when |
+|:---|:---|
+| `TERMINATION_REL_DCOST`, `TERMINATION_ABS_DCOST` | an iteration changed the cost, up or down, by less than `reldcost` (relative) or `absdcost` |
+| `TERMINATION_STEP_SIZE` | the step was below `dstep` |
+| `TERMINATION_GRAD_TOL` | the gradient was below `gtol` |
+| `TERMINATION_MAX_FAILS` | more than `maxfails` consecutive iterations raised the cost |
+| `TERMINATION_MAX_ITERS`, `TERMINATION_MAX_TIME` | `maxiters` or `maxtime` was reached |
+| `TERMINATION_COST_INF`, `TERMINATION_COST_NAN` | the cost was not finite |
+| `TERMINATION_STEP_INF`, `TERMINATION_STEP_NAN` | the step was not finite |
+| `TERMINATION_GRAD_NOT_FINITE`, `TERMINATION_START_NOT_FINITE` | the gradient, or the cost or gradient at the start, was not finite |
+| `TERMINATION_COST_DISCREPANCY` | the cost from the linearization and from `f` disagreed |
+| `TERMINATION_LINSOLVER_FAILED` | the linear solver failed |
+
+A callback's own flags are in `result.termination >> 16`.
 
 ## Iteration Strategies
 

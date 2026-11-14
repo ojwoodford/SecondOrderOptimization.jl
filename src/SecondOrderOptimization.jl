@@ -10,7 +10,7 @@ export optimize, optimize!
 export HessianObjective, JacobianObjective
 export check_linear_system
 export usesstaticsystem, MAX_STATIC_SYSTEM
-export OptimizationOptions, OptimizationResult, OptimizationWorkspace, isconverged, termination_reasons
+export OptimizationOptions, OptimizationResult, OptimizationWorkspace, isconverged
 export CostTrajectory
 export nullcallback, printoutcallback, storecostscallback
 export AbstractLinearSystem, solve!, dampen!, validatelinsolver, zero!, makelinearsystem, copy_structure, sharex, fast_bAb, fast_dot, quadratic_model_change

@@ -1,4 +1,5 @@
 using SecondOrderOptimization, StaticArrays, SparseArrays, LinearAlgebra, Static, Random, Test
+include("termbits.jl")
 const SOO = SecondOrderOptimization
 using SecondOrderOptimization: getA, getb, getx, solve!   # explicit: Krylov, loaded by other test files, also exports solve!
 
@@ -107,8 +108,9 @@ end
             if it === :newton
                 # undamped Newton rejects no step, so at the minimum the cost's rounding noise
                 # counts as failures, and it may stop on max_fails (in both formulations alike)
-                @test all(r -> r in (:rel_dcost, :abs_dcost, :step_size, :max_fails, :grad_tol), termination_reasons(resJ))
-                @test all(r -> r in (:rel_dcost, :abs_dcost, :step_size, :max_fails, :grad_tol), termination_reasons(resH))
+                allowed = TERMINATION_REL_DCOST | TERMINATION_ABS_DCOST | TERMINATION_STEP_SIZE | TERMINATION_MAX_FAILS | TERMINATION_GRAD_TOL
+                @test onlybits(resJ, allowed)
+                @test onlybits(resH, allowed)
             else
                 @test isconverged(resJ) && isconverged(resH)
             end
@@ -308,7 +310,7 @@ end
             x, res = optimize(x0, obj, w_opts(:newton, :callbackchangesstate => ccs); callback=cb)
             @test xs[1] ≈ A \ b rtol=1e-11
             @test x ≈ A \ b rtol=1e-11
-            @test :linsolver_failed ∉ termination_reasons(res)
+            @test !hasbits(res, TERMINATION_LINSOLVER_FAILED)
         end
     end
 
@@ -374,7 +376,7 @@ end
         costs, _, _, cb = w_trace()
         x, res = optimize(zeros(3), objJ, w_opts(it, :callbackchangesstate => ccs); callback=cb)
         costmin = 0.5 * sum(abs2, hcat(a, c) * (hcat(a, c) \ y) - y)
-        @test :linsolver_failed ∉ termination_reasons(res)
+        @test !hasbits(res, TERMINATION_LINSOLVER_FAILED)
         @test isconverged(res)
         @test res.bestcost ≈ costmin rtol=1e-10
         @test costs[1] < res.startcost
@@ -385,7 +387,7 @@ end
         M = randn(rng, 3, 5); y = 0.3 * randn(rng, 3)
         objJ, _ = w_objectives(x -> M * tanh.(x) - y, x -> M * Diagonal(sech.(x) .^ 2), 3, 5)
         x, res = optimize(zeros(5), objJ, w_opts(it, :callbackchangesstate => ccs))
-        @test :linsolver_failed ∉ termination_reasons(res)
+        @test !hasbits(res, TERMINATION_LINSOLVER_FAILED)
         @test isconverged(res) && res.bestcost < 1e-20
     end
 
@@ -393,19 +395,19 @@ end
         # at the start
         objnan = JacobianObjective(x -> 1.0, (r, J, x) -> (r .= 1.0; J .= NaN; 1.0), 2)
         _, res = optimize([0.0, 0.0], objnan, w_opts(it, :callbackchangesstate => ccs))
-        @test :grad_not_finite in termination_reasons(res) && :start_not_finite in termination_reasons(res)
+        @test hasbits(res, TERMINATION_GRAD_NOT_FINITE) && hasbits(res, TERMINATION_START_NOT_FINITE)
         @test res.niterations == 0
         # after the first step: J holds an Inf once x[1] > 0.5
         f(x) = 0.5 * sum(abs2, x .- 1)
         objlate = JacobianObjective(f, (r, J, x) -> (r .= x .- 1; J .= I(2); x[1] > 0.5 && (J[1, 1] = Inf); f(x)), 2)
         _, res = optimize([0.0, 0.0], objlate, w_opts(it, :callbackchangesstate => ccs))
-        @test :grad_not_finite in termination_reasons(res)
+        @test hasbits(res, TERMINATION_GRAD_NOT_FINITE)
         @test res.niterations >= 1 && !isconverged(res)
         # a NaN cost everywhere but the start: every trial is rejected, and the run stops on it
         fnan(x) = x == [0.0, 0.0] ? f(x) : NaN
         objcost = JacobianObjective(fnan, (r, J, x) -> (r .= x .- 1; J .= I(2); fnan(x)), 2)
         x, res = optimize([0.0, 0.0], objcost, w_opts(it, :callbackchangesstate => ccs))
-        @test :cost_nan in termination_reasons(res) && !isconverged(res)
+        @test hasbits(res, TERMINATION_COST_NAN) && !isconverged(res)
         @test x == [0.0, 0.0] && res.bestcost == f(x)
     end
 
@@ -436,8 +438,8 @@ end
         xH, resH = optimize(zeros(14), objH, w_opts(it, :maxiters => 500, :linsolver => :cholesky))
         exJ = (exactcost(xJ) - costmin) / costmin
         exH = (exactcost(xH) - costmin) / costmin
-        @info "Ill-conditioned fit, iterator = :$it (relative excess cost over the least-squares minimum $costmin)" tall_excess=exJ tall_iterations=resJ.niterations tall_termination=join(termination_reasons(resJ), ",") normal_excess=exH normal_iterations=resH.niterations normal_termination=join(termination_reasons(resH), ",")
-        @test :linsolver_failed ∉ termination_reasons(resJ)
+        @info "Ill-conditioned fit, iterator = :$it (relative excess cost over the least-squares minimum $costmin)" tall_excess=exJ tall_iterations=resJ.niterations tall_termination=termnames(resJ) normal_excess=exH normal_iterations=resH.niterations normal_termination=termnames(resH)
+        @test !hasbits(resJ, TERMINATION_LINSOLVER_FAILED)
         @test resJ.bestcost < resJ.startcost && resH.bestcost < resH.startcost
         # Marquardt's damping floor is the solver's (Q5): eps² times the scaled diagonal for QR of J,
         # so the tall path resolves the small singular directions (cond(J)² ≈ 1.5e19). Before Q5 the
@@ -529,7 +531,7 @@ end
         opts = w_opts(it, :callbackchangesstate => ccs)
         cR, _, xR, cbR = w_trace()
         _, resR = optimize(x0, JacobianObjective(f, full!, n + 1), opts; callback=cbR)
-        @test isconverged(resR) || (it === :newton && :max_fails in termination_reasons(resR))
+        @test isconverged(resR) || (it === :newton && hasbits(resR, TERMINATION_MAX_FAILS))
         @test resR.bestcost < 0.1 * resR.startcost      # a nonzero-residual minimum (n + 1 residuals)
         # the banded writer gives the identical run: with an integer m, and with a prototype of
         # zeros (Q1: a prototype is used with the values it holds)
@@ -666,7 +668,7 @@ end
         end
         for it in Z_ITERATORS
             x, res = optimize([-1.5, 2.0], JacobianObjective(f, nan_resjac!, 2), w_opts(it))
-            @test :grad_not_finite ∉ termination_reasons(res)
+            @test !hasbits(res, TERMINATION_GRAD_NOT_FINITE)
             @test isfinite(res.bestcost) && res.bestcost < res.startcost
         end
     end
@@ -839,7 +841,7 @@ end
             for (x0, obj) in (([0.0, 0.0], HessianObjective(f, fdf!; H=zeros(2, 2))), (SVector(0.0, 0.0), HessianObjective(f, fdf!)),
                               ([0.0, 0.0], JacobianObjective(f, resjac!, 1)))
                 x, res = optimize(x0, obj, opts)
-                @test :linsolver_failed ∉ termination_reasons(res)
+                @test !hasbits(res, TERMINATION_LINSOLVER_FAILED)
                 @test res.bestcost < 1e-20
                 @test s * (x[1] + x[2]) ≈ 1 rtol=1e-8
             end

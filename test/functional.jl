@@ -1,4 +1,5 @@
 using SecondOrderOptimization, StaticArrays, SparseArrays, LinearAlgebra, Test, Static
+include("termbits.jl")
 
 function rosenbrock_cost(x)
     return (1.0 - x[1])^2 + 100.0 * (x[2] - x[1]^2)^2
@@ -60,14 +61,14 @@ end
     x_opt0, res0 = optimize(x_at_min, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), opts_gtol)
     @test res0.niterations == 0
     @test (res0.termination & TERMINATION_GRAD_TOL) != 0
-    # M18: termination reasons without the raw bits
-    @test termination_reasons(res0) == [:grad_tol]
-    @test :grad_tol in termination_reasons(res)
+    # M18, Q8: termination reasons from the named masks
+    @test res0.termination == TERMINATION_GRAD_TOL
+    @test hasbits(res, TERMINATION_GRAD_TOL)
     @test occursin("Gradient norm below threshold.", sprint(show, res0))
-    bits = [bit for (bit, _, _) in SecondOrderOptimization.TERMINATION_REASONS]
+    bits = [bit for (bit, _) in SecondOrderOptimization.TERMINATION_REASONS]
     @test allunique(bits) && all(ispow2, bits) && reduce(|, bits) == (1 << 15) - 1
     _, res_cb = optimize(copy(x0_dense), HessianObjective(rosenbrock_cost, rosenbrock_fdf!), OptimizationOptions(maxiters=50); callback=(c, args...) -> (c, 1))
-    @test termination_reasons(res_cb) == [:callback]
+    @test res_cb.termination == 1 << 16      # only the callback's flag
     @test !isconverged(res_cb)
 
     # Test OptimizationResult addition order

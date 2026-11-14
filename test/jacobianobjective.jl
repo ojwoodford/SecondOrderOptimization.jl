@@ -1,4 +1,5 @@
 using SecondOrderOptimization, StaticArrays, SparseArrays, LinearAlgebra, Static, Random, Test
+include("termbits.jl")
 const SOO = SecondOrderOptimization
 using SecondOrderOptimization: getA, getb, getx, solve!   # explicit: Krylov, loaded by other test files, also exports solve!
 
@@ -206,7 +207,7 @@ SOO.update(x::Rot3, dx, start=1) = Rot3(x.R * expso3(SVector(dx[start], dx[start
         end
         x, res = optimize([0.0, 0.0], JacobianObjective(cauchy, cauchy_resjac!, 30), OptimizationOptions(gtol=1e-10, reldcost=1e-15))   # gtol decides, not the default reldcost (Q6)
         @test isconverged(res)
-        @test :cost_discrepancy ∉ termination_reasons(res)
+        @test !hasbits(res, TERMINATION_COST_DISCREPANCY)
         r = zeros(30); J = zeros(30, 2)
         @test cauchy_resjac!(r, J, x) != 0.5 * sum(abs2, r)
         @test norm(J' * r, Inf) < 1e-10
@@ -325,13 +326,13 @@ SOO.update(x::Rot3, dx, start=1) = Rot3(x.R * expso3(SVector(dx[start], dx[start
         # at the start
         objnan = JacobianObjective(x -> 1.0, (r, J, x) -> (r .= 1.0; J .= NaN; 1.0), 2)
         _, res = optimize([0.0, 0.0], objnan, OptimizationOptions())
-        @test :grad_not_finite in termination_reasons(res) && :start_not_finite in termination_reasons(res)
+        @test hasbits(res, TERMINATION_GRAD_NOT_FINITE) && hasbits(res, TERMINATION_START_NOT_FINITE)
         @test res.niterations == 0
         # after the first accepted step: J holds an Inf once x[1] > 0.5
         f(x) = 0.5 * sum(abs2, x .- 1)
         objlate = JacobianObjective(f, (r, J, x) -> (r .= x .- 1; J .= I(2); x[1] > 0.5 && (J[1, 1] = Inf); f(x)), 2)
         _, res = optimize([0.0, 0.0], objlate, OptimizationOptions())
-        @test :grad_not_finite in termination_reasons(res)
+        @test hasbits(res, TERMINATION_GRAD_NOT_FINITE)
         @test res.niterations >= 1 && !isconverged(res)
     end
 
@@ -400,11 +401,11 @@ SOO.update(x::Rot3, dx, start=1) = Rot3(x.R * expso3(SVector(dx[start], dx[start
         objJ = JacobianObjective(jrosen_cost, jrosen_resjac!, 2)
         # gtol stops on ‖Jᵀr‖∞
         x, res = optimize([-1.2, 1.0], objJ, OptimizationOptions(gtol=1e-6, reldcost=0.0, absdcost=0.0, dstep=0.0))
-        @test termination_reasons(res) == [:grad_tol]
+        @test res.termination == TERMINATION_GRAD_TOL
         r = zeros(2); J = zeros(2, 2); jrosen_resjac!(r, J, x)
         @test norm(J' * r, Inf) < 1e-6
         _, res = optimize([-1.2, 1.0], objJ, OptimizationOptions(gtol=1e3))
-        @test termination_reasons(res) == [:grad_tol] && res.niterations == 0
+        @test res.termination == TERMINATION_GRAD_TOL && res.niterations == 0
         # storecostscallback records the trajectory
         traj = CostTrajectory()
         _, res = optimize([-1.2, 1.0], objJ, OptimizationOptions(); callback=storecostscallback(traj))
@@ -414,9 +415,9 @@ SOO.update(x::Rot3, dx, start=1) = Rot3(x.R * expso3(SVector(dx[start], dx[start
         @test costs == traj.costs
         # maxiters and maxtime
         _, res = optimize([-1.2, 1.0], objJ, OptimizationOptions(maxiters=3))
-        @test :max_iters in termination_reasons(res) && res.niterations == 3
+        @test hasbits(res, TERMINATION_MAX_ITERS) && res.niterations == 3
         _, res = optimize([-1.2, 1.0], objJ, OptimizationOptions(maxtime=0.0))
-        @test :max_time in termination_reasons(res) && res.niterations == 1
+        @test hasbits(res, TERMINATION_MAX_TIME) && res.niterations == 1
         # the time in resjac! is counted under gradients
         @test res.gradientcomputations >= 1 && res.timegradient > 0
     end
