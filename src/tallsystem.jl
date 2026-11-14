@@ -19,18 +19,21 @@ function geqrf_ws!(A::StridedMatrix{Float64}, tau::Vector{Float64}, work::Vector
     return A
 end
 
-# The optimal LAPACK work-array length for `dgeqrf` on an m×n matrix
+# The optimal LAPACK work-array length for `dgeqrf` on an m×n matrix. A workspace query
+# (lwork = -1) reads only the dimensions and lda, and touches neither the matrix nor tau, so
+# one-element stand-ins are passed for both, with the true m, n and lda.
 function geqrf_worksize(m::Integer, n::Integer)
     (m == 0 || n == 0) && return 1
-    A = Matrix{Float64}(undef, m, n)
-    tau = Vector{Float64}(undef, min(m, n))
-    work = Vector{Float64}(undef, 1)
+    A = Ref(0.0)
+    tau = Ref(0.0)
+    work = Ref(0.0)
     info = Ref{BlasInt}()
     ccall((LinearAlgebra.BLAS.@blasfunc(dgeqrf_), LinearAlgebra.BLAS.libblastrampoline), Cvoid,
-          (Ref{BlasInt}, Ref{BlasInt}, Ptr{Float64}, Ref{BlasInt},
-           Ptr{Float64}, Ptr{Float64}, Ref{BlasInt}, Ref{BlasInt}),
+          (Ref{BlasInt}, Ref{BlasInt}, Ref{Float64}, Ref{BlasInt},
+           Ref{Float64}, Ref{Float64}, Ref{BlasInt}, Ref{BlasInt}),
           m, n, A, max(1, m), tau, work, BlasInt(-1), info)
-    return max(1, Int(work[1]))
+    LinearAlgebra.LAPACK.chkargsok(info[])
+    return max(1, Int(work[]))
 end
 
 # The state of one linearization: the factorization and the squared column norms of J (the

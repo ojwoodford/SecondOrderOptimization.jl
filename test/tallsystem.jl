@@ -174,6 +174,20 @@ allocations(f::F, args::Vararg{Any, N}) where {F, N} = (f(args...); @allocated f
         @test_throws ArgumentError solve!(ls, :ldl)
     end
 
+    @testset "The LAPACK workspace query allocates no matrix (Q2)" begin
+        # values from the query before Q2, which passed an m×n matrix and a tau vector
+        sizes = [(1, 1), (1, 3), (3, 1), (5, 5), (10, 3), (100, 7), (1000, 50), (10_000, 100), (37, 201), (2, 9)]
+        before = [32, 96, 32, 160, 96, 224, 1600, 3200, 6432, 288]
+        @test [SOO.geqrf_worksize(m, n) for (m, n) in sizes] == before
+        @test SOO.geqrf_worksize(0, 5) == 1 && SOO.geqrf_worksize(5, 0) == 1
+        SOO.geqrf_worksize(10_000, 100)
+        @test (@allocated SOO.geqrf_worksize(10_000, 100)) < 500
+        # and the system's construction allocates its own arrays, not two more of the problem's size
+        m, n = 20_000, 50
+        SOO.DenseTallLinearSystem(m, n)
+        @test (@allocated SOO.DenseTallLinearSystem(m, n)) < 3.2 * 8 * m * (n + 1)
+    end
+
     @testset "No allocation after warm-up" begin
         J = randn(Random.Xoshiro(6), 50, 7); r = randn(Random.Xoshiro(8), 50)
         ls = tallsystem(J, r)
