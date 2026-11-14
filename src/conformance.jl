@@ -160,7 +160,8 @@ The rules, for each solver:
 - `copy_structure(ls)` has its own `A` and `b`: filling and solving it changes neither the
   original's `A` and `b` nor the original's next solution.
 - `sharex(trial, ls)` returns a system whose `getx` is `getx(ls)`.
-- `fast_bAb(getA(ls), v) ≈ v' A v` and `quadratic_model_change(ls, v) ≈ v' A v / 2 + b' v`.
+- `quadform(getA(ls), v) ≈ v' A v` (so `getA(ls)` supports `dot(v, A, v)`, or has a `quadform`
+  method), and `quadratic_model_change(ls, v) ≈ v' A v / 2 + b' v`.
 - `max_diag(ls)` is the largest absolute diagonal entry of `A`, and `NaN` if a diagonal entry is.
 - `dampingfloor(ls)` is in `(0, 1e-6]`, and a positive-definite `A` damped by
   `dampingfloor(ls) * max_diag(ls)` solves.
@@ -278,7 +279,7 @@ function check_linear_system_solver(make_ls, n, s, rtol)
 
     # Quadratic forms, with vectors of the types the iterators pass (the gradient's and the step's)
     v = copy(getb(ls)); v .= conformance_vector(n, 2.1)
-    isapprox(fast_bAb(getA(ls), v), dot(v, Qw * v); rtol=1e-10) || conformance_error("fast_bAb(getA(ls), v) == v' A v", s)
+    isapprox(quadform(getA(ls), v), dot(v, Qw * v); rtol=1e-10) || conformance_error("quadform(getA(ls), v) == v' A v", s)
     dx = copy(getx(ls)); dx .= conformance_vector(n, 2.1)
     isapprox(quadratic_model_change(ls, dx), 0.5 * dot(dx, Qw * dx) + dot(b, dx); rtol=1e-10) ||
         conformance_error("quadratic_model_change(ls, dx) == dx' A dx / 2 + b' dx", s)

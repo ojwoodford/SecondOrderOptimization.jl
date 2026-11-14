@@ -168,8 +168,6 @@ SecondOrderOptimization.getA(ls::SparseSchurLinearSystem) = ls.H
 SecondOrderOptimization.getb(ls::SparseSchurLinearSystem) = ls.b
 SecondOrderOptimization.getx(ls::SparseSchurLinearSystem) = ls.x
 
-SecondOrderOptimization.fast_bAb(H::SchurBlockMatrix, dx::AbstractVector) = BlockLinearSystems.fast_bAb(H, dx)
-
 # As for every linear system: `dampen!(ls, λ)` means λI and `dampen!(ls, λ, s)` means λ·Diagonal(s),
 # each replacing the damping set before. The reduction always applies λ·scaling, so uniform damping
 # is stored as scaling = 1.
@@ -401,9 +399,10 @@ SecondOrderOptimization.solve!(ls::SparseSchurLinearSystem, s::Symbol) = SecondO
 SecondOrderOptimization.solve!(ls::SparseSchurLinearSystem, s::OptimizationLinearSolver) = SecondOrderOptimization.solve!(ls, static(SecondOrderOptimization.linsolver_symbol(s)))
 
 # `quadratic_model_change` is intentionally not specialised: SecondOrderOptimization's generic method
-# (0.5 * fast_bAb(getA(ls), dx) + fast_dot(getb(ls), dx)) is the undamped model change, and works with
-# the `fast_bAb` for `SchurBlockMatrix` defined above. (An earlier override added the damping term with
-# the wrong sign, and used a damping value the iterators have already reset to zero when a step is scored.)
+# (0.5 * quadform(getA(ls), dx) + fast_dot(getb(ls), dx)) is the undamped model change. Its quadratic
+# form falls back to LinearAlgebra.dot(dx, H, dx), which BlockLinearSystems defines for a
+# SchurBlockMatrix. (An earlier override added the damping term with the wrong sign, and used a
+# damping value the iterators have already reset to zero when a step is scored.)
 
 function SecondOrderOptimization.copy_structure(ls::DenseSchurLinearSystem{T}) where T
     # New storage for the Hessian and gradient (the original is kept for retries); x is shared

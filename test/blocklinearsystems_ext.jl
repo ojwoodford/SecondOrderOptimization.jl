@@ -316,6 +316,23 @@ end
     end
 end
 
+# Measured through a function barrier: at testset scope Julia 1.10 boxes the Float64 result
+schur_quadform_allocations(H, v) = @allocated SecondOrderOptimization.quadform(H, v)
+@testset "quadform of a SchurBlockMatrix is BlockLinearSystems' dot, through the fallback (D1)" begin
+    p = standard_problem()
+    n = length(p.b)
+    v = randn(Random.Xoshiro(7), n)
+    for kind in (:dense, :sparse)
+        H = SecondOrderOptimization.getA(make_schur_ls(kind, p))
+        @test H isa SchurBlockMatrix
+        @test which(SecondOrderOptimization.quadform, (typeof(H), typeof(v))) == which(SecondOrderOptimization.quadform, (Any, Any))
+        @test SecondOrderOptimization.quadform(H, v) ≈ dot(v, p.H * v) rtol = 1e-12
+        @test SecondOrderOptimization.quadform(H, v) == dot(v, H, v)
+        @test (@inferred SecondOrderOptimization.quadform(H, v)) isa Float64
+        @test schur_quadform_allocations(H, v) == 0
+    end
+end
+
 @testset "Schur solve is serial and allocation free for small problems; threading matches (B11)" begin
     p = standard_problem()
     n = length(p.b)
@@ -471,9 +488,9 @@ end
 
     # Singularity tolerance scales with the precision: a block that is singular to Float32 precision is rejected
     H2 = SMatrix{2, 2, Float32, 4}(1, 1, 1, 1 + 1f-6)
-    @test !inv_sym_block(H2, 0f0, SVector{2, Float32}(1, 1)).success
+    @test !BlockLinearSystems.inv_sym_block(H2, 0f0, SVector{2, Float32}(1, 1)).success
     H2d = SMatrix{2, 2, Float64, 4}(1, 1, 1, 1 + 1e-6)
-    @test inv_sym_block(H2d, 0.0, SVector{2, Float64}(1, 1)).success
+    @test BlockLinearSystems.inv_sym_block(H2d, 0.0, SVector{2, Float64}(1, 1)).success
 end
 
 # Eliminated blocks of every size class: tiny closed forms (1-3), the generic static tier (4..D_STATIC)

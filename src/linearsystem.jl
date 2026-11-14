@@ -314,5 +314,5 @@ dampingfloor(ls) = eps(Float64)
 # Change in the undamped quadratic model, 0.5 dx'H dx + g'dx, for a step dx (negative for a
 # descent step)
 function quadratic_model_change(ls::AbstractLinearSystem, dx)
-    return 0.5 * fast_bAb(getA(ls), dx) + fast_dot(getb(ls), dx)
+    return 0.5 * quadform(getA(ls), dx) + fast_dot(getb(ls), dx)
 end

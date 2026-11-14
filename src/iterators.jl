@@ -168,7 +168,7 @@ end
     dd.trialready = false
     hessian, gradient = gethessgrad(data.linsystem)
 
-    gHg = fast_bAb(hessian, gradient)
+    gHg = quadform(hessian, gradient)
     if !isfinite(gHg)
         return NaN
     end

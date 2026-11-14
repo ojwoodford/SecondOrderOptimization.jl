@@ -1,4 +1,5 @@
 using SparseArrays, StaticArrays
+using LinearAlgebra: dot
 
 function fast_dot(a::AbstractVector, b::AbstractVector)
     total = zero(promote_type(eltype(a), eltype(b)))
@@ -8,7 +9,13 @@ function fast_dot(a::AbstractVector, b::AbstractVector)
     return total
 end
 
-function fast_bAb(A::Matrix, b::Vector)
+# quadform(A, v) is the quadratic form v' A v, for whatever storage A the Hessian has. The generic
+# method is LinearAlgebra's three-argument dot, so any storage that has a `dot(x, A, y)` method needs
+# nothing here. Matrix, StaticArray and SparseMatrixCSC have hand-written native loops instead:
+# single-threaded, so they never call BLAS (see rules.md, 23).
+quadform(A, v) = dot(v, A, v)
+
+function quadform(A::Matrix, b::Vector)
     total = zero(eltype(b))
     @inbounds for i in eachindex(b)
         subtotal = zero(eltype(b))
@@ -20,7 +27,7 @@ function fast_bAb(A::Matrix, b::Vector)
     return total
 end
 
-function fast_bAb(A::StaticArray, b::StaticArray)
+function quadform(A::StaticArray, b::StaticArray)
     total = zero(eltype(b))
     @inbounds for i in eachindex(b)
         subtotal = zero(eltype(b))
@@ -32,7 +39,7 @@ function fast_bAb(A::StaticArray, b::StaticArray)
     return total
 end
 
-function fast_bAb(A::SparseMatrixCSC, b::Vector)
+function quadform(A::SparseMatrixCSC, b::Vector)
     total = zero(eltype(b))
     for i in eachindex(b)
         coltotal = zero(eltype(b))

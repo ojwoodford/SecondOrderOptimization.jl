@@ -84,12 +84,12 @@ factorized(ws::TallQRWorkspace) = !ws.stale && ws.scratch.owner == ws.token
 
 The Hessian storage of a [`DenseTallLinearSystem`](@ref): the Jacobian `J` (`m × n`) and the
 residual `r` (length `m`), standing for `A = JᵀJ`, which is never formed.
-`fast_bAb(A, v)` is `‖J v‖²`, and the diagonal of `A` is the squared column norms of `J`.
+`quadform(A, v)` is `‖J v‖²`, and the diagonal of `A` is the squared column norms of `J`.
 """
 struct TallHessian
     J::Matrix{Float64}
     r::Vector{Float64}
-    Jv::Vector{Float64}           # scratch for fast_bAb
+    Jv::Vector{Float64}           # scratch for quadform
     ws::TallQRWorkspace
 end
 TallHessian(J::Matrix{Float64}) = TallHessian(J, zeros(size(J, 1)), zeros(size(J, 1)), TallQRWorkspace(size(J)...))
@@ -98,7 +98,7 @@ Base.size(A::TallHessian) = (size(A.J, 2), size(A.J, 2))
 Base.size(A::TallHessian, d::Integer) = size(A)[d]
 markstale!(A::TallHessian) = (A.ws.stale = true; A.ws.normsstale = true; A)
 
-function fast_bAb(A::TallHessian, v::AbstractVector)
+function quadform(A::TallHessian, v::AbstractVector)
     mul!(A.Jv, A.J, v)
     total = 0.0
     @inbounds @simd for i in eachindex(A.Jv)

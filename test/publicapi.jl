@@ -51,7 +51,7 @@ const PUBLIC_API = sort([
             :OptimizationLinearSolver, :auto_solver, :cholesky_solver, :ldl_solver, :qr_solver,
             :LINSOLVER_FAILED, :fast_dot,
             :AbstractLinearSystem, :solve!, :dampen!, :zero!, :makelinearsystem, :copy_structure,
-            :sharex, :fast_bAb, :quadratic_model_change, :validatelinsolver,
+            :sharex, :quadform, :quadratic_model_change, :validatelinsolver,
             :SolveStatus, :Success, :NotPositiveDefinite, :Indefinite,
             :check_linear_system, :usesstaticsystem, :MAX_STATIC_SYSTEM)
         @test isdefined(SecondOrderOptimization, name)

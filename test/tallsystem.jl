@@ -34,7 +34,9 @@ tall_damped(ls) = (dampen!(ls, 0.7); solve!(ls, static(:auto)))
 tall_scaled(ls, s) = (dampen!(ls, 0.7, s); solve!(ls, static(:qr)))
 tall_undamped(ls) = (SOO.markstale!(getA(ls)); dampen!(ls, 0.0); solve!(ls, static(:auto)))
 tall_relinearize(ls, w, x) = (zero!(ls); w(getb(ls), getA(ls), x))
-tall_model(ls, v) = SOO.fast_bAb(getA(ls), v) + quadratic_model_change(ls, v) + SOO.max_diag(ls)
+# Measured through a function barrier: at testset scope Julia 1.10 boxes the Float64 result (16 bytes)
+tall_quadform_allocations(A, v) = @allocated SOO.quadform(A, v)
+tall_model(ls, v) = SOO.quadform(getA(ls), v) + quadratic_model_change(ls, v) + SOO.max_diag(ls)
 allocations(f::F, args::Vararg{Any, N}) where {F, N} = (f(args...); @allocated f(args...))   # specialized: 1.10 does not specialize a plain vararg here
 
 @testset "tallsystem.jl" begin
@@ -157,7 +159,9 @@ allocations(f::F, args::Vararg{Any, N}) where {F, N} = (f(args...); @allocated f
         ls = tallsystem(J, r)
         A = SOO.getA(ls)
         v = randn(4)
-        @test SOO.fast_bAb(A, v) ≈ sum(abs2, J * v)
+        @test SOO.quadform(A, v) ≈ sum(abs2, J * v)
+        @test (@inferred SOO.quadform(A, v)) isa Float64
+        @test tall_quadform_allocations(A, v) == 0
         @test quadratic_model_change(ls, v) ≈ dot(J' * r, v) + 0.5 * sum(abs2, J * v)
         @test size(A) == (4, 4)
         trial = copy_structure(ls)
