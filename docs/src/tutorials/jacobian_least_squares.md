@@ -51,7 +51,8 @@ cost at every iteration, to rounding.
 
 The contract of `resjac!(r, J, x)`:
 - it writes the residual into `r` (length `m`) and the Jacobian into `J` (`m × nvars(x)`, taken
-  with respect to the step of [`update`](@ref), so in the tangent space for a manifold variable),
+  with respect to the step of `update`, so in the tangent space for a manifold variable; see
+  [Manifold Optimization and Custom Variable Types](manifold_optimization.md)),
   and returns the cost at `x`;
 - it sets `r` and `J`, and does not add to them. They are not zeroed before each call (unlike
   `g` and `H` for `fdf!`), and the optimizer never writes them. So every entry of `r`, and every

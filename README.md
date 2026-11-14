@@ -14,7 +14,7 @@ High-performance, zero-allocation second-order nonlinear optimization in Julia.
 - **Linear Solvers**:
   - *Built-in*: Cholesky (`:cholesky`), LDL / Bunch-Kaufman (`:ldl`, using `LDLFactorizations.jl` for sparse matrices), and QR (`:qr`), with automatic dispatch (`:auto`).
   - *Extensions*: Iterative Krylov subspace solvers (`:cg`, `:minres`, `:krylov` via `Krylov.jl`) and multi-threaded sparse direct factorizations (`:pardiso` via `Pardiso.jl`).
-- **Variable Types & Manifolds**: Supports scalars (`Float64`), static vectors (`SVector`), dense vectors (`Vector`), heterogeneous variable vectors, and non-Euclidean manifolds via `SecondOrderOptimization.nvars` / `SecondOrderOptimization.update`.
+- **Variable Types & Manifolds**: Supports scalars (`Float64`), static vectors (`SVector`), dense vectors (`Vector`), heterogeneous variable vectors, and non-Euclidean manifolds via `nvars` / `update` from [OptimizationVariableInterface.jl](https://ojwoodford.github.io/OptimizationVariableInterface.jl/dev/).
 - **Zero-Allocation Reuse**: Preallocate solver buffers and factorizations via `OptimizationWorkspace`.
 
 Looking to solve structured nonlinear least-squares factor graphs with automatic differentiation and robust kernels? See [`NLLSModel.jl`](https://github.com/ojwoodford/NLLSModel.jl), a complementary package that defines models that can be readily optimized using `SecondOrderOptimization.jl`.

@@ -9,14 +9,6 @@ optimize
 optimize!
 ```
 
-## Variable & Retraction Interface
-
-```@docs
-nvars
-update
-update!
-```
-
 ## Options & Results
 
 ```@docs

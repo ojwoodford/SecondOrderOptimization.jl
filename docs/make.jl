@@ -1,12 +1,11 @@
 using Documenter
 using SecondOrderOptimization
-using OptimizationVariableInterface
 
-DocMeta.setdocmeta!(SecondOrderOptimization, :DocTestSetup, :(using SecondOrderOptimization, OptimizationVariableInterface); recursive=true)
+DocMeta.setdocmeta!(SecondOrderOptimization, :DocTestSetup, :(using SecondOrderOptimization); recursive=true)
 
 makedocs(
     sitename = "SecondOrderOptimization.jl",
-    modules = [SecondOrderOptimization, OptimizationVariableInterface],
+    modules = [SecondOrderOptimization],
     checkdocs = :none,
     remotes = nothing,
     warnonly = false,
@@ -19,7 +18,7 @@ makedocs(
         "API Reference" => "api.md",
         "Examples & Tutorials" => [
             "Zero-Allocation Static Optimization" => "tutorials/static_optimization.md",
-            "Manifold Optimization" => "tutorials/manifold_optimization.md",
+            "Manifold Optimization and Custom Variable Types" => "tutorials/manifold_optimization.md",
             "Sparse Large-Scale Optimization" => "tutorials/sparse_optimization.md",
             "Least Squares from a Jacobian" => "tutorials/jacobian_least_squares.md",
             "Callbacks & Step Monitoring" => "tutorials/callbacks.md",

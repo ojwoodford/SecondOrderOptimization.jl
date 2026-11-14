@@ -16,7 +16,7 @@
   - **Powell's Dogleg** (`:dogleg`): Trust-region interpolation between the Cauchy (steepest descent) step and the Newton step.
   - **Standard Newton** (`:newton`): Classical undamped second-order step.
   - **Gradient Descent** (`:gradientdescent`): Quadratic-interpolation backtracking line search.
-- **Flexible Manifolds**: Native support for custom manifolds by extending [`SecondOrderOptimization.nvars`](@ref) and [`SecondOrderOptimization.update`](@ref).
+- **Flexible Manifolds**: Native support for custom variable types and manifolds, by extending `nvars` and `update` from OptimizationVariableInterface.jl (see [Manifold Optimization and Custom Variable Types](tutorials/manifold_optimization.md)).
 - **Static, Dense & Sparse Systems**: Automatically selects static (`MMatrix`), dense (`Matrix`), or sparse (`SparseMatrixCSC` with zero-allocation `LDLFactorizations.jl` and `Cholesky`) linear systems.
 - **Extensible Linear Solvers**: Choose between built-in direct solvers (`:auto`, `:cholesky`, `:ldl`, `:qr`) or package extensions for multi-threaded sparse direct solves ([Pardiso.jl](https://github.com/JuliaSparse/Pardiso.jl) with `:pardiso`) and zero-allocation iterative Krylov subspace solvers ([Krylov.jl](https://github.com/JuliaSmoothOptimizers/Krylov.jl) with `:cg`, `:minres`, `:krylov`).
 - **Rich Callbacks & Diagnostics**: Monitor optimization progress, per-iteration timing, cost reductions, trust-region radius, and allocation counts via [`OptimizationResult`](@ref) and [`CostTrajectory`](@ref).

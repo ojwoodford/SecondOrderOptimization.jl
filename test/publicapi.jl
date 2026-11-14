@@ -59,6 +59,26 @@ const PUBLIC_API = sort([
     end
 end
 
+# The API reference documents this package's exports and nothing else (P3): the variable
+# contract (nvars, update, update!) belongs to OptimizationVariableInterface, and is explained in
+# the manifold tutorial instead.
+@testset "The API page lists exactly the exports (P3)" begin
+    api = read(joinpath(@__DIR__, "..", "docs", "src", "api.md"), String)
+    documented = Symbol[]
+    for block in eachmatch(r"```@docs\n(.*?)```"s, api)
+        append!(documented, Symbol.(filter(!isempty, strip.(split(block[1], '\n')))))
+    end
+    @test allunique(documented)
+    @test sort(documented) == filter(!=(:SecondOrderOptimization), PUBLIC_API)
+    tutorial = read(joinpath(@__DIR__, "..", "docs", "src", "tutorials", "manifold_optimization.md"), String)
+    for sig in ("nvars(x::T)", "update(x::T, step, start = 1)", "update!(to::T, from::T, step)",
+                "using OptimizationVariableInterface",
+                "https://ojwoodford.github.io/OptimizationVariableInterface.jl/dev/guide/custom_variables/",
+                "https://ojwoodford.github.io/OptimizationVariableInterface.jl/dev/api/")
+        @test occursin(sig, tutorial)
+    end
+end
+
 @testset "OptimizationResult.iterator is the Symbol the options selected (P1)" begin
     obj = HessianObjective(x -> x[1]^2, (g, H, x) -> (g[1] = 2x[1]; H[1, 1] = 2.0; x[1]^2))
     # The names `show` printed before P1, when the field held the internal enum
