@@ -849,4 +849,52 @@ end
             end
         end
     end
+
+end
+
+# P6 (found by SmoothOptimizerBenchmark, not fixed): on the ill-conditioned fit, an `f` and a
+# `resjac!` that compute the same residuals in a different order (as NLLSModel's do) disagree
+# at the minimum by far more than the discrepancy test's rtol = 1e-10: the residuals, below
+# 0.6, cancel terms up to 7e8, so each form rounds the cost at about 5e-8 relative. When the
+# predicted decrease falls below reldcost, Levenberg-Marquardt evaluates the trial with `f`,
+# and the relinearization with `resjac!` at the accepted point then sets
+# TERMINATION_COST_DISCREPANCY alone, at the minimum: the run is not converged.
+@testset "P6: rounding at an ill-conditioned minimum sets COST_DISCREPANCY alone" begin
+    V, yv = w_illconditioned()
+    function f_rows(x)   # each residual summed along its row of V
+        c = 0.0
+        for i in axes(V, 1)
+            ri = 0.0
+            for k in axes(V, 2)
+                ri += V[i, k] * x[k]
+            end
+            ri -= yv[i]
+            c += ri * ri
+        end
+        return 0.5 * c
+    end
+    function resjac_cols!(r, J, x)   # J x accumulated a column at a time
+        r .= .-yv
+        for k in axes(V, 2), i in axes(V, 1)
+            r[i] += V[i, k] * x[k]
+        end
+        J .= V
+        return 0.5 * sum(abs2, r)
+    end
+    exactcost(x) = Float64(0.5 * sum(abs2, big.(V) * big.(x) - big.(yv)))
+    costmin = exactcost(big.(V) \ big.(yv))
+    for opts in (OptimizationOptions(iterator = :levenbergmarquardt),
+                 OptimizationOptions(iterator = :levenbergmarquardt, gtol = 1e-8, dstep = 1e-8, reldcost = 1e-8, maxiters = 500))   # the benchmark's
+        x, res = optimize(zeros(14), JacobianObjective(f_rows, resjac_cols!, 60), opts)
+        excess = (exactcost(x) - costmin) / costmin
+        discrepancy = abs(f_rows(x) - resjac_cols!(zeros(60), zeros(60, 14), x)) / f_rows(x)
+        @info "P6: tall Levenberg-Marquardt on the ill-conditioned fit, f and resjac! rounded differently" excess discrepancy iterations=res.niterations termination=termnames(res)
+        @test res.termination == TERMINATION_COST_DISCREPANCY   # alone (measured: 18 iterations)
+        @test excess < 1e-13                                      # at the minimum (measured: 8.4e-16 on 1.13, 3.4e-15 on 1.10)
+        @test discrepancy > 1e-9                                  # the two costs differ by noise far above rtol = 1e-10 (measured: 1.7e-8, 2.4e-8)
+        @test_broken isconverged(res)
+    end
+    # With f and resjac! rounded alike, the same run converges (the section's tests above)
+    x, res = optimize(zeros(14), JacobianObjective(f_rows, (r, J, x) -> (for i in axes(V, 1); ri = 0.0; for k in axes(V, 2); ri += V[i, k] * x[k]; end; r[i] = ri - yv[i]; end; J .= V; f_rows(x)), 60), OptimizationOptions(iterator = :levenbergmarquardt))
+    @test isconverged(res)
 end
