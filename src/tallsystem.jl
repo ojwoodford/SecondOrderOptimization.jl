@@ -98,13 +98,42 @@ Base.size(A::TallHessian) = (size(A.J, 2), size(A.J, 2))
 Base.size(A::TallHessian, d::Integer) = size(A)[d]
 markstale!(A::TallHessian) = (A.ws.stale = true; A.ws.normsstale = true; A)
 
+# ‖J v‖², with J v formed one scaled column at a time into the scratch `Jv`: a plain loop, not
+# BLAS gemv, so that per-cost work stays single-threaded (rules.md 23)
 function quadform(A::TallHessian, v::AbstractVector)
-    mul!(A.Jv, A.J, v)
-    total = 0.0
-    @inbounds @simd for i in eachindex(A.Jv)
-        total += A.Jv[i] * A.Jv[i]
+    J, Jv = A.J, A.Jv
+    m, n = size(J)
+    n == 0 && return 0.0
+    @inbounds begin
+        v1 = v[1]
+        @fastmath @simd for i in 1:m
+            Jv[i] = J[i, 1] * v1
+        end
+        for j in 2:n
+            vj = v[j]
+            @fastmath @simd for i in 1:m
+                Jv[i] += J[i, j] * vj
+            end
+        end
+        total = 0.0
+        @simd for i in 1:m
+            total += Jv[i] * Jv[i]
+        end
     end
     return total
+end
+
+# g = Jᵀ r as one dot product per column of J: a plain loop, not BLAS gemv (rules.md 23)
+function jtr!(g::AbstractVector, J::Matrix{Float64}, r::Vector{Float64})
+    m, n = size(J)
+    @inbounds for j in 1:n
+        total = 0.0
+        @fastmath @simd for i in 1:m
+            total += J[i, j] * r[i]
+        end
+        g[j] = total
+    end
+    return g
 end
 
 # Squared norm of column j of J, summed in row order (as `conformance_matrix` sums), so the two agree exactly
@@ -243,7 +272,7 @@ struct TallLinearize{RJ}
 end
 function (t::TallLinearize)(g::AbstractVector, A::TallHessian, x)
     cost = t.resjac!(A.r, A.J, x)
-    mul!(g, transpose(A.J), A.r)
+    jtr!(g, A.J, A.r)
     markstale!(A)
     return cost
 end

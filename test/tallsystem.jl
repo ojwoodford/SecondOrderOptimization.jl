@@ -179,6 +179,24 @@ allocations(f::F, args::Vararg{Any, N}) where {F, N} = (f(args...); @allocated f
         @test_throws ArgumentError solve!(ls, :ldl)
     end
 
+    @testset "J v and Jᵀ r are plain loops that equal mul! to rounding (P4)" begin
+        for (m, n) in ((40, 6), (6, 6), (40, 1), (1, 1), (3, 7))   # tall, square, one column, 1×1, wide
+            rng = Random.Xoshiro(m + 100n)
+            J = randn(rng, m, n); r = randn(rng, m); v = randn(rng, n)
+            ls = tallsystem(J, r)
+            A = getA(ls)
+            Jv = mul!(zeros(m), J, v)
+            @test SOO.quadform(A, v) ≈ dot(Jv, Jv) rtol = 4eps()
+            @test A.Jv ≈ Jv rtol = 4eps()
+            @test tall_quadform_allocations(A, v) == 0
+            g = fill(NaN, n)
+            wrapper = SOO.TallLinearize((r_, J_, x) -> (copyto!(r_, x[1]); copyto!(J_, x[2]); 0.0))
+            wrapper(g, A, (r, J))
+            @test g ≈ mul!(zeros(n), transpose(J), r) rtol = 4eps()
+            @test allocations(tall_relinearize, ls, wrapper, (r, J)) == 0
+        end
+    end
+
     @testset "The LAPACK workspace query allocates no matrix (Q2)" begin
         # values from the query before Q2, which passed an m×n matrix and a tau vector
         sizes = [(1, 1), (1, 3), (3, 1), (5, 5), (10, 3), (100, 7), (1000, 50), (10_000, 100), (37, 201), (2, 9)]
