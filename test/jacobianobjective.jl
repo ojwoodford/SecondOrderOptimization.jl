@@ -208,7 +208,6 @@ SOO.update(x::Rot3, dx, start=1) = Rot3(x.R * expso3(SVector(dx[start], dx[start
         end
         x, res = optimize([0.0, 0.0], JacobianObjective(cauchy, cauchy_resjac!, 30), OptimizationOptions(gtol=1e-10, reldcost=1e-15, stalltol=0.0))   # gtol decides, not the cost tests (Q6, Q7)
         @test isconverged(res)
-        @test !hasbits(res, TERMINATION_COST_DISCREPANCY)
         r = zeros(30); J = zeros(30, 2)
         @test cauchy_resjac!(r, J, x) != 0.5 * sum(abs2, r)
         @test norm(J' * r, Inf) < 1e-10

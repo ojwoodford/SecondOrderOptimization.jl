@@ -188,9 +188,7 @@ end
             break
         end
 
-        cost_ = linearize!(iteratedata, data, fdf!)
-        # Guards against an `f` that computes a different cost from `fdf!` (see COST_DISCREPANCY_RTOL)
-        converged |= !isapprox(cost_, cost; rtol=COST_DISCREPANCY_RTOL, atol=1.0e-25)  << 10
+        linearize!(iteratedata, data, fdf!)
         maxgrad = maximum(abs, getgrad(data.linsystem))::Float64
         converged |= !isfinite(maxgrad)                                  << 12
         converged |= (maxgrad < options.gtol)                            << 13

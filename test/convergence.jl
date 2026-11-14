@@ -18,7 +18,7 @@ const Q6_NONFINITE = (TERMINATION_COST_INF, TERMINATION_COST_NAN, TERMINATION_ST
         @test all(b -> isdefined(SOO, b) && b in names(SOO), (:TERMINATION_REL_DCOST, :TERMINATION_MAX_FAILS, :TERMINATION_GRAD_TOL, :isconverged))
         @test all(x -> length(x) == 2 && x[2] isa String, SOO.TERMINATION_REASONS)    # bit and message only
         # the rules below cover every bit that has a message
-        @test Set(x[1] for x in SOO.TERMINATION_REASONS) == Set([Q6_CONVERGENCE..., Q6_LIMITS..., Q6_NONFINITE..., TERMINATION_COST_DISCREPANCY, TERMINATION_LINSOLVER_FAILED])
+        @test Set(x[1] for x in SOO.TERMINATION_REASONS) == Set([Q6_CONVERGENCE..., Q6_LIMITS..., Q6_NONFINITE..., TERMINATION_LINSOLVER_FAILED])
         # a convergence bit alone is converged
         for c in Q6_CONVERGENCE
             @test q6conv(c)
@@ -31,9 +31,6 @@ const Q6_NONFINITE = (TERMINATION_COST_INF, TERMINATION_COST_NAN, TERMINATION_ST
             @test !q6conv(l)
         end
         @test q6conv(TERMINATION_REL_DCOST, TERMINATION_ABS_DCOST, TERMINATION_MAX_FAILS, TERMINATION_MAX_ITERS, TERMINATION_MAX_TIME)
-        # grad_tol with cost_discrepancy is converged; cost_discrepancy alone is not
-        @test q6conv(TERMINATION_GRAD_TOL, TERMINATION_COST_DISCREPANCY)
-        @test !q6conv(TERMINATION_COST_DISCREPANCY)
         # anything non-finite is a failure whatever else is set
         for nf in Q6_NONFINITE
             @test !q6conv(nf)
@@ -83,23 +80,15 @@ const Q6_NONFINITE = (TERMINATION_COST_INF, TERMINATION_COST_NAN, TERMINATION_ST
         # grad_tol alone
         _, res = optimize([-1.2, 1.0], rosen, OptimizationOptions(gtol=1e-6, reldcost=0.0, absdcost=0.0, dstep=0.0))
         @test res.termination == TERMINATION_GRAD_TOL && isconverged(res)
-        # a small gradient with a cost discrepancy: fdf! reports a cost 1e-6 above f away from the start
+        # f and fdf! are not compared (that check and its bit, 1 << 10, are gone): an fdf! whose
+        # cost is 1e-6 above f's away from the start runs to the gradient test. (callbackchangesstate
+        # = true: the plain Newton variant scores the step with f and relinearizes with fdf!)
         f(x) = 0.5 * (x[1] - 1)^2
         objd = HessianObjective(f, (g, H, x) -> (g[1] = x[1] - 1; H[1, 1] = 1.0; f(x) + (x[1] == 0.0 ? 0.0 : 1e-6)))
-        # (callbackchangesstate = true: the plain Newton variant scores the step with f, the
-        # relinearizing one with fdf!, which would hide the discrepancy)
         _, res = optimize([0.0], objd, OptimizationOptions(iterator=:newton, gtol=1e-10, callbackchangesstate=true))
-        @test res.termination == TERMINATION_COST_DISCREPANCY | TERMINATION_GRAD_TOL
-        @test isconverged(res)
-        # P6: the tolerance is COST_DISCREPANCY_RTOL = 1e-6 relative, for user errors, not rounding
-        @test SOO.COST_DISCREPANCY_RTOL == 1e-6
-        g1(x) = 0.5 * (x[1] - 1)^2 + 1
-        for (scale, flagged) in ((1 + 1e-8, false), (1 + 1e-7, false), (1 + 1e-5, true))
-            objr = HessianObjective(g1, (g, H, x) -> (g[1] = x[1] - 1; H[1, 1] = 1.0; x[1] == 0.0 ? g1(x) : scale * g1(x)))
-            _, res = optimize([0.0], objr, OptimizationOptions(iterator=:newton, gtol=1e-10, callbackchangesstate=true))
-            @test hasbits(res, TERMINATION_COST_DISCREPANCY) == flagged
-            @test hasbits(res, TERMINATION_GRAD_TOL)
-        end
+        @test res.termination == TERMINATION_GRAD_TOL && isconverged(res)
+        @test !isdefined(SOO, :TERMINATION_COST_DISCREPANCY) && !isdefined(SOO, :COST_DISCREPANCY_RTOL)
+        @test all(x -> x[1] != 1 << 10, SOO.TERMINATION_REASONS)
         # a small gradient at a start with no finite cost (converged before Q6)
         objinf = HessianObjective(x -> Inf, (g, H, x) -> (g .= 0.0; H .= I(1); Inf))
         _, res = optimize([0.0], objinf, OptimizationOptions(gtol=1e-3))

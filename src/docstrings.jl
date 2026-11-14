@@ -663,14 +663,6 @@ Test it with `result.termination & TERMINATION_START_NOT_FINITE != 0`; see [`isc
 TERMINATION_START_NOT_FINITE
 
 """
-    TERMINATION_COST_DISCREPANCY
-
-Bit mask of [`OptimizationResult`](@ref)`.termination`, set when the cost from the linearization and the cost from `f` disagreed by more than `1e-6` relative at the same point: `f` and `fdf!` (or `resjac!`) compute different costs. Rounding alone does not set it; the tolerance is a starting value, not a measured one. Not convergence on its own.
-Test it with `result.termination & TERMINATION_COST_DISCREPANCY != 0`; see [`isconverged`](@ref).
-"""
-TERMINATION_COST_DISCREPANCY
-
-"""
     TERMINATION_LINSOLVER_FAILED
 
 Bit mask of [`OptimizationResult`](@ref)`.termination`, set when the linear solver failed. A failure.

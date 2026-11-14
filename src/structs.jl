@@ -38,7 +38,7 @@ const TERMINATION_STEP_SIZE         = 1 << 6
 const TERMINATION_MAX_FAILS         = 1 << 7
 const TERMINATION_MAX_ITERS         = 1 << 8
 const TERMINATION_MAX_TIME          = 1 << 9
-const TERMINATION_COST_DISCREPANCY  = 1 << 10
+# 1 << 10 is free
 const TERMINATION_START_NOT_FINITE  = 1 << 11
 const TERMINATION_GRAD_NOT_FINITE   = 1 << 12
 const TERMINATION_GRAD_TOL          = 1 << 13
@@ -50,16 +50,10 @@ const SUCCESS_CONVERGENCE_MASK = TERMINATION_REL_DCOST | TERMINATION_ABS_DCOST |
 const NONFINITE_TERMINATION_MASK = TERMINATION_COST_INF | TERMINATION_COST_NAN | TERMINATION_STEP_INF | TERMINATION_STEP_NAN | TERMINATION_GRAD_NOT_FINITE | TERMINATION_START_NOT_FINITE
 # The bits that make a run a failure even with a convergence bit set (see `isconverged`)
 const FAILED_CONVERGENCE_MASK = NONFINITE_TERMINATION_MASK | TERMINATION_LINSOLVER_FAILED
-# Every bit that is not a convergence criterion. No longer used by `isconverged` (a limit or a cost
-# discrepancy alongside a convergence bit is converged); kept for SmoothOptimizerBenchmark, which
-# reads it until it moves to `isconverged`.
-const FAILURE_TERMINATION_MASK = TERMINATION_COST_INF | TERMINATION_COST_NAN | TERMINATION_STEP_INF | TERMINATION_STEP_NAN | TERMINATION_MAX_FAILS | TERMINATION_MAX_ITERS | TERMINATION_MAX_TIME | TERMINATION_COST_DISCREPANCY | TERMINATION_START_NOT_FINITE | TERMINATION_GRAD_NOT_FINITE | TERMINATION_LINSOLVER_FAILED
-
-# The relative tolerance of the check that `f` and `fdf!` agree on the cost (TERMINATION_COST_DISCREPANCY).
-# The check guards against a user error, an `f` computing a different cost; rounding must not trip
-# it, and at an ill-conditioned minimum the two can differ by 3.7e-8 relative from rounding alone
-# (P6). A starting value, not a measured one (rules.md 26); listed in improvements.md.
-const COST_DISCREPANCY_RTOL = 1e-6
+# Every bit that is not a convergence criterion. No longer used by `isconverged` (a limit alongside
+# a convergence bit is converged); kept for SmoothOptimizerBenchmark, which reads it until it moves
+# to `isconverged`.
+const FAILURE_TERMINATION_MASK = TERMINATION_COST_INF | TERMINATION_COST_NAN | TERMINATION_STEP_INF | TERMINATION_STEP_NAN | TERMINATION_MAX_FAILS | TERMINATION_MAX_ITERS | TERMINATION_MAX_TIME | TERMINATION_START_NOT_FINITE | TERMINATION_GRAD_NOT_FINITE | TERMINATION_LINSOLVER_FAILED
 
 # Each termination bit and the message `show` prints for it
 const TERMINATION_REASONS = (
@@ -73,7 +67,6 @@ const TERMINATION_REASONS = (
     (TERMINATION_MAX_FAILS,        "Too many iterations without a significant improvement in cost, and the cost did not settle."),
     (TERMINATION_MAX_ITERS,        "Maximum number of outer iterations reached."),
     (TERMINATION_MAX_TIME,         "Maximum allowed computation time exceeded."),
-    (TERMINATION_COST_DISCREPANCY, "Internal discrepancy in cost computations."),
     (TERMINATION_START_NOT_FINITE, "Cost or gradient not finite at the start point."),
     (TERMINATION_GRAD_NOT_FINITE,  "Gradient not finite."),
     (TERMINATION_GRAD_TOL,         "Gradient norm below threshold."),
@@ -211,11 +204,10 @@ went wrong that makes the point it returned untrustworthy.
   `TERMINATION_GRAD_NOT_FINITE`, `TERMINATION_START_NOT_FINITE`), and
   `TERMINATION_LINSOLVER_FAILED`. So a small step to a point whose cost is not finite is not
   converged, nor is a small gradient at a start point whose cost is not finite.
-- **Neither:** a limit (`TERMINATION_MAX_FAILS`, `TERMINATION_MAX_ITERS`, `TERMINATION_MAX_TIME`)
-  and `TERMINATION_COST_DISCREPANCY`. Alone they are not convergence, but with a convergence
-  criterion the run is converged: one that meets a criterion on its last allowed iteration, or
-  whose cost bounces at the minimum until `maxstall` is reached, has converged; and a small
-  gradient is a stationary point however `f` and the linearization disagree about the cost.
+- **Neither:** a limit (`TERMINATION_MAX_FAILS`, `TERMINATION_MAX_ITERS`, `TERMINATION_MAX_TIME`).
+  Alone it is not convergence, but with a convergence criterion the run is converged: one that
+  meets a criterion on its last allowed iteration, or whose cost bounces at the minimum until
+  `maxstall` is reached, has converged.
 
 To ask why a run stopped, test the exported bit masks against `result.termination`, for example
 `result.termination & TERMINATION_MAX_FAILS != 0`. A callback that asked to stop leaves its flags

@@ -33,7 +33,6 @@ the run converged:
 | `TERMINATION_COST_INF`, `TERMINATION_COST_NAN` | the cost was not finite |
 | `TERMINATION_STEP_INF`, `TERMINATION_STEP_NAN` | the step was not finite |
 | `TERMINATION_GRAD_NOT_FINITE`, `TERMINATION_START_NOT_FINITE` | the gradient, or the cost or gradient at the start, was not finite |
-| `TERMINATION_COST_DISCREPANCY` | the cost from the linearization and from `f` disagreed |
 | `TERMINATION_LINSOLVER_FAILED` | the linear solver failed |
 
 A callback's own flags are in `result.termination >> 16`.
@@ -53,7 +52,6 @@ TERMINATION_STEP_INF
 TERMINATION_STEP_NAN
 TERMINATION_GRAD_NOT_FINITE
 TERMINATION_START_NOT_FINITE
-TERMINATION_COST_DISCREPANCY
 TERMINATION_LINSOLVER_FAILED
 ```
 

@@ -854,13 +854,11 @@ end
 
 # P6 (found by SmoothOptimizerBenchmark): on the ill-conditioned fit, an `f` and a `resjac!` that
 # compute the same residuals in a different order disagree at the minimum by up to 3.7e-8
-# relative: the residuals, below 0.6, cancel terms up to 7e8. NLLSModel's two paths do so through
-# StaticArrays' `dot`, whose @simd sum rounds differently depending on where it is inlined. Once the
-# predicted decrease falls below reldcost, Levenberg-Marquardt scores the trial with `f`, and the
-# relinearization compares it with `resjac!`'s cost. At rtol = 1e-10 that set
-# TERMINATION_COST_DISCREPANCY alone, at the minimum; the check guards against a user's `f`
-# computing a different cost, so its tolerance is now COST_DISCREPANCY_RTOL = 1e-6.
-@testset "P6: rounding at an ill-conditioned minimum is not a cost discrepancy" begin
+# relative: the residuals, below 0.6, cancel terms up to 7e8 (NLLSModel's two paths do so through
+# StaticArrays' `dot`, whose @simd sum rounds differently depending on where it is inlined). A
+# check comparing the two costs stopped such runs at the minimum, unconverged; it is removed, and
+# this test keeps the case converging.
+@testset "P6: f and resjac! rounded differently at an ill-conditioned minimum" begin
     V, yv = w_illconditioned()
     function f_rows(x)   # each residual summed along its row of V
         c = 0.0
@@ -888,27 +886,13 @@ end
                  OptimizationOptions(iterator = :levenbergmarquardt, gtol = 1e-8, dstep = 1e-8, reldcost = 1e-8, maxiters = 500))   # the benchmark's
         x, res = optimize(zeros(14), JacobianObjective(f_rows, resjac_cols!, 60), opts)
         excess = (exactcost(x) - costmin) / costmin
-        discrepancy = abs(f_rows(x) - resjac_cols!(zeros(60), zeros(60, 14), x)) / f_rows(x)
-        @info "P6: tall Levenberg-Marquardt on the ill-conditioned fit, f and resjac! rounded differently" excess discrepancy iterations=res.niterations termination=termnames(res)
-        @test discrepancy > 1e-9      # the two costs differ by far more than eps (measured: 1.7e-8 on 1.13, 2.4e-8 on 1.10)
-        @test !hasbits(res, TERMINATION_COST_DISCREPANCY)
+        disagreement = abs(f_rows(x) - resjac_cols!(zeros(60), zeros(60, 14), x)) / f_rows(x)
+        @info "P6: tall Levenberg-Marquardt on the ill-conditioned fit, f and resjac! rounded differently" excess disagreement iterations=res.niterations termination=termnames(res)
+        @test disagreement > 1e-9     # the two costs differ by far more than eps (measured: 1.7e-8 on 1.13, 2.4e-8 on 1.10)
         @test isconverged(res)
         @test excess < 1e-13          # at the minimum
     end
     # With f and resjac! rounded alike, the same run converges too
     x, res = optimize(zeros(14), JacobianObjective(f_rows, (r, J, x) -> (for i in axes(V, 1); ri = 0.0; for k in axes(V, 2); ri += V[i, k] * x[k]; end; r[i] = ri - yv[i]; end; J .= V; f_rows(x)), 60), OptimizationOptions(iterator = :levenbergmarquardt))
     @test isconverged(res)
-    # A user error is still caught: an `f` whose cost is 1e-4 relative, or half, below resjac!'s
-    for s in (1 - 1e-4, 0.5)
-        _, res = optimize(zeros(14), JacobianObjective(x -> s * f_rows(x), resjac_cols!, 60), OptimizationOptions(iterator = :levenbergmarquardt))
-        @test hasbits(res, TERMINATION_COST_DISCREPANCY) && !isconverged(res)
-    end
-    # Not caught, whatever the tolerance (found with P6, not fixed): an `f` above resjac!'s cost
-    # makes every trial Levenberg-Marquardt scores with `f` look worse, so it is rejected, no point
-    # `f` scored is relinearized, and the two costs are never compared. The run stops on the step
-    # size and counts as converged (measured for f = 1.0001, 1.01 and 2 times the cost).
-    for s in (1 + 1e-4, 2.0)
-        _, res = optimize(zeros(14), JacobianObjective(x -> s * f_rows(x), resjac_cols!, 60), OptimizationOptions(iterator = :levenbergmarquardt))
-        @test_broken hasbits(res, TERMINATION_COST_DISCREPANCY)
-    end
 end

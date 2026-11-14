@@ -11,7 +11,6 @@ const PUBLIC_API = sort([
     :OptimizationWorkspace,
     :SecondOrderOptimization,
     :TERMINATION_ABS_DCOST,
-    :TERMINATION_COST_DISCREPANCY,
     :TERMINATION_COST_INF,
     :TERMINATION_COST_NAN,
     :TERMINATION_GRAD_NOT_FINITE,
