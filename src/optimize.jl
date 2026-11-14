@@ -128,6 +128,7 @@ end
             data.bestcost = cost
             fails = 0
         else
+            dcost = -dcost # Avoid bouncing around a local minimum
             fails += 1
             if fails == 1
                 if !data.varbestvalid
@@ -144,10 +145,8 @@ end
         maxstep = maximum(abs, getx(data.linsystem))::Float64
         converged |= isinf(cost)                                         << 0
         converged |= isnan(cost)                                         << 1
-        if dcost >= 0
-            converged |= (dcost < abs(data.bestcost) * options.reldcost) << 2
-            converged |= (dcost < options.absdcost)                      << 3
-        end
+        converged |= (dcost < abs(data.bestcost) * options.reldcost)     << 2
+        converged |= (dcost < options.absdcost)                          << 3
         converged |= isinf(maxstep)                                      << 4
         converged |= isnan(maxstep)                                      << 5
         converged |= (maxstep < options.dstep)                           << 6
