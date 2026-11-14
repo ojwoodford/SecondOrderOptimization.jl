@@ -40,6 +40,14 @@ linearizer(obj::JacobianObjective) = TallLinearize(obj.resjac!)
 # What a run with a reused workspace must set up before it starts: for a JacobianObjective, the
 # Jacobian storage (see `initjacobian!`)
 initlinearization!(cached, obj::HessianObjective) = nothing
+
+# The iterator's spare linear system, for reusing the trial linearization, or `nothing`. An
+# iterator data type that holds one must have a method, so that whatever prepares a run's systems
+# finds it.
+trialsystem(iteratedata) = nothing
+trialsystem(lmd::LevenbergDataTrial) = lmd.trial
+trialsystem(lmd::MarquardtDataTrial) = lmd.trial
+trialsystem(dd::DoglegData) = dd.trial          # nothing when callbackchangesstate = true
 # The system a workspace caches. For a JacobianObjective with a Matrix prototype it owns its
 # Jacobian storage (a copy of the prototype), so that a later run with another prototype never
 # writes into this one's (see `workspace_linearsystem` in tallsystem.jl)

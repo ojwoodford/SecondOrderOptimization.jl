@@ -757,3 +757,21 @@ q_prototype(c12) = (P = zeros(3, 2); P[1, 2] = c12; P)
         @test nnotzero[] == 0 && length(seen) == (ccs || it === :newton ? 1 : 2)
     end
 end
+
+@testset "Q4: trialsystem finds the iterator's spare system: :$it, callbackchangesstate = $ccs" for it in (Z_ITERATORS..., :gradientdescent), ccs in (false, true)
+    ls = SOO.makelinearsystem(zeros(2), JacobianObjective(wrosen_cost, wrosen_resjac!, 3), :auto)
+    itd = SOO.construct(static(it), ls, static(ccs))
+    t = SOO.trialsystem(itd)
+    if !ccs && it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg)
+        # the system copy_structure produced: of the same type, its own J, sharing x
+        @test t isa SOO.DenseTallLinearSystem && t !== ls
+        @test getA(t).J !== getA(ls).J && getx(t) === getx(ls)
+        @test t === itd.trial
+    else
+        @test t === nothing
+    end
+    # on a HessianObjective's systems too
+    lsH = SOO.makelinearsystem(zeros(2), zeros(2, 2), :auto)
+    tH = SOO.trialsystem(SOO.construct(static(it), lsH, static(ccs)))
+    @test (!ccs && it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg)) ? (tH isa SOO.DenseLinearSystem && tH !== lsH) : tH === nothing
+end

@@ -221,7 +221,7 @@ initjacobian!(ls, J) = ls
 function initlinearization!(cached::Tuple, obj::JacobianObjective)
     data, iteratedata = cached
     initjacobian!(data.linsystem, obj.J)
-    hasfield(typeof(iteratedata), :trial) && initjacobian!(getfield(iteratedata, :trial), obj.J)
+    initjacobian!(trialsystem(iteratedata), obj.J)
     return nothing
 end
 
