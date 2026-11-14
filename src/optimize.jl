@@ -99,12 +99,16 @@ end
 
 @inline function optimizeloop!(data::D, iteratedata::ID, f::F, fdf!::FDF, options::OptimizationOptions, callback::CB) where {D, ID, F, FDF, CB}
     stoptime = typemax(UInt64) - options.maxtime <= Base.time_ns() ? typemax(UInt64) : Base.time_ns() + options.maxtime
-    fails = 0
+    stalls = 0       # consecutive iterations without a significant improvement of the best cost
+    rose = false    # whether the previous iteration raised the cost (for the best-point bookkeeping)
     converged = 0
 
     cost = computelinearization!(data, fdf!, data.variables)
     data.startcost = cost
     data.bestcost = cost
+    refcost = cost  # the best cost when `stalls` was last reset
+    lowsince = Inf  # the lowest cost of the iterations since then (excluding the one that reset it)
+    highsince = -Inf # and the highest
 
     converged |= isinf(cost)                                         << 0
     converged |= isnan(cost)                                         << 1
@@ -126,11 +130,27 @@ end
         dcost = data.bestcost - cost
         if dcost >= 0
             data.bestcost = cost
-            fails = 0
+            rose = false
+            # A significant improvement resets the stall counter. With stalltol = 0 every iteration
+            # that does not raise the cost resets it (refcost then always equals bestcost), so
+            # maxstall counts consecutive rises, as before stalltol existed.
+            if cost <= refcost - options.stalltol * abs(refcost)
+                refcost = cost
+                lowsince = Inf
+                highsince = -Inf
+                stalls = 0
+            else
+                stalls += 1
+                lowsince = min(lowsince, cost)
+                highsince = max(highsince, cost)
+            end
         else
             dcost = -dcost # Avoid bouncing around a local minimum
-            fails += 1
-            if fails == 1
+            stalls += 1
+            lowsince = min(lowsince, cost)
+            highsince = max(highsince, cost)
+            if !rose     # the first rise since the best cost: keep the best point
+                rose = true
                 if !data.varbestvalid
                     data.varbest = copyvars(data.variables)
                     data.varbestvalid = true
@@ -150,7 +170,17 @@ end
         converged |= isinf(maxstep)                                      << 4
         converged |= isnan(maxstep)                                      << 5
         converged |= (maxstep < options.dstep)                           << 6
-        converged |= (fails > options.maxfails)                          << 7
+        if stalls > options.maxstall
+            # Stalled (converged) if the cost has settled: some iteration since the last significant
+            # improvement stayed within the stall band above refcost, and none rose by more than
+            # stallrise = sqrt(stalltol). Otherwise too many rises (failure). The lowest such cost, not
+            # the last, decides settling, so that a run bouncing at its minimum by about the band's
+            # width is not classified by its last bounce; the highest keeps a run whose cost jumps
+            # (divergence after one insignificant improvement) from being called converged. With
+            # stalltol = 0 every iteration counted is a rise, so this is max_fails, as before.
+            settled = lowsince <= refcost + options.stalltol * abs(refcost) && highsince <= refcost + options.stallrise * abs(refcost)
+            converged |= settled ? TERMINATION_STALLED : TERMINATION_MAX_FAILS
+        end
         converged |= (data.iternum >= options.maxiters)                  << 8
         converged |= (Base.time_ns() > stoptime)                         << 9
         converged |= terminate                                           << 16

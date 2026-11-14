@@ -8,15 +8,18 @@ struct OptimizationOptions{S, L, B <: StaticBool}
     absdcost::Float64           # Minimum absolute change in cost (either direction) required to avoid termination
     dstep::Float64              # Minimum L-infinity norm of the update vector required to avoid termination
     gtol::Float64               # Minimum L-infinity norm of the gradient required to avoid termination
-    maxfails::Int               # Maximum number of consecutive iterations that have a higher cost than current best before termination
+    maxstall::Int               # Maximum number of consecutive iterations without a significant improvement in the best cost before termination
+    stalltol::Float64           # Relative improvement in the best cost that counts as significant (0: any improvement, or no rise)
+    stallrise::Float64          # sqrt(stalltol), set by the constructor: the largest relative rise a stalled stop may contain
     maxiters::Int               # Maximum number of outer iterations
     maxtime::UInt64             # Maximum optimization time allowed, in nanoseconds
     iterator::StaticSymbol{S}   # Static Symbol of the inner iterator (:newton, :levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :gradientdescent)
     linsolver::StaticSymbol{L}  # Static Symbol of the linear solver (:auto, :cholesky, :ldl, :qr)
     callbackchangesstate::B     # True if callback can modify problem state/cost
 
-    function OptimizationOptions(reldcost, absdcost, dstep, gtol, maxfails, maxiters, maxtime, iterator::StaticSymbol{S}, linsolver::StaticSymbol{L}, callbackchangesstate::B) where {S, L, B <: StaticBool}
-        return new{S, L, B}(reldcost, absdcost, dstep, gtol, maxfails, maxiters, maxtime, iterator, linsolver, callbackchangesstate)
+    function OptimizationOptions(reldcost, absdcost, dstep, gtol, maxstall, stalltol, maxiters, maxtime, iterator::StaticSymbol{S}, linsolver::StaticSymbol{L}, callbackchangesstate::B) where {S, L, B <: StaticBool}
+        # The rise bound is derived from stalltol here, once, so the two can never disagree
+        return new{S, L, B}(reldcost, absdcost, dstep, gtol, maxstall, stalltol, sqrt(stalltol), maxiters, maxtime, iterator, linsolver, callbackchangesstate)
     end
 end
 
@@ -40,8 +43,9 @@ const TERMINATION_START_NOT_FINITE  = 1 << 11
 const TERMINATION_GRAD_NOT_FINITE   = 1 << 12
 const TERMINATION_GRAD_TOL          = 1 << 13
 const TERMINATION_LINSOLVER_FAILED  = 1 << 14
+const TERMINATION_STALLED           = 1 << 15   # the last bit below the callback's flags (16 and up)
 
-const SUCCESS_CONVERGENCE_MASK = TERMINATION_REL_DCOST | TERMINATION_ABS_DCOST | TERMINATION_STEP_SIZE | TERMINATION_GRAD_TOL
+const SUCCESS_CONVERGENCE_MASK = TERMINATION_REL_DCOST | TERMINATION_ABS_DCOST | TERMINATION_STEP_SIZE | TERMINATION_GRAD_TOL | TERMINATION_STALLED
 # Something non-finite: a failure whatever else is set
 const NONFINITE_TERMINATION_MASK = TERMINATION_COST_INF | TERMINATION_COST_NAN | TERMINATION_STEP_INF | TERMINATION_STEP_NAN | TERMINATION_GRAD_NOT_FINITE | TERMINATION_START_NOT_FINITE
 # The bits that make a run a failure even with a convergence bit set (see `isconverged`)
@@ -60,7 +64,7 @@ const TERMINATION_REASONS = (
     (TERMINATION_STEP_INF,         "Step contains an infinite value."),
     (TERMINATION_STEP_NAN,         "Step contains a NaN."),
     (TERMINATION_STEP_SIZE,        "Step size below threshold."),
-    (TERMINATION_MAX_FAILS,        "Too many consecutive iterations increasing the cost."),
+    (TERMINATION_MAX_FAILS,        "Too many iterations without a significant improvement in cost, and the cost did not settle."),
     (TERMINATION_MAX_ITERS,        "Maximum number of outer iterations reached."),
     (TERMINATION_MAX_TIME,         "Maximum allowed computation time exceeded."),
     (TERMINATION_COST_DISCREPANCY, "Internal discrepancy in cost computations."),
@@ -68,17 +72,19 @@ const TERMINATION_REASONS = (
     (TERMINATION_GRAD_NOT_FINITE,  "Gradient not finite."),
     (TERMINATION_GRAD_TOL,         "Gradient norm below threshold."),
     (TERMINATION_LINSOLVER_FAILED, "Linear solver failed to solve the linear system."),
+    (TERMINATION_STALLED,          "The best cost improved by less than the stall tolerance over the last iterations."),
 )
 
 const LINSOLVER_FAILED = reinterpret(Float64, 0x7ff8000000000001)
 
 function OptimizationOptions(;
     maxiters=100,
-    reldcost=1.5e-8,
+    reldcost=1e-12,
     absdcost=1.e-15,
     dstep=1.e-15,
     gtol=0.0,
-    maxfails=3,
+    maxstall=3,
+    stalltol=1.5e-8,
     maxtime=30.0,
     iterator=:levenbergmarquardt,
     linsolver=:auto,
@@ -97,7 +103,7 @@ function OptimizationOptions(;
     maxtime_ns = maxtime_s * 1e9 < Float64(typemax(UInt64)) ? UInt64(round(maxtime_s * 1e9)) : typemax(UInt64)
     return OptimizationOptions(
         Float64(reldcost), Float64(absdcost), Float64(dstep), Float64(gtol),
-        Int(maxfails), Int(maxiters), maxtime_ns,
+        Int(maxstall), Float64(stalltol), Int(maxiters), maxtime_ns,
         static(iter_sym), static(linsolv_sym),
         makestaticbool(callbackchangesstate)
     )
@@ -189,8 +195,12 @@ went wrong that makes the point it returned untrustworthy.
 
 - **Convergence criteria:** `TERMINATION_REL_DCOST` and `TERMINATION_ABS_DCOST` (an iteration
   changed the cost, in either direction, by less than `reldcost` or `absdcost`),
-  `TERMINATION_STEP_SIZE` (the step was below `dstep`) and `TERMINATION_GRAD_TOL` (the gradient
-  was below `gtol`). At least one must be set.
+  `TERMINATION_STEP_SIZE` (the step was below `dstep`), `TERMINATION_GRAD_TOL` (the gradient
+  was below `gtol`) and `TERMINATION_STALLED` (the best cost improved by less than `stalltol`
+  relative for more than `maxstall` iterations, at least one of them stayed within that band,
+  and none rose by more than `sqrt(stalltol)` relative).
+  At least one must be set. A stalled run has stopped making progress at the best point it
+  found; that is not proof of a minimum (see [`OptimizationOptions`](@ref)).
 - **Failures, whatever else is set:** anything non-finite (`TERMINATION_COST_INF`,
   `TERMINATION_COST_NAN`, `TERMINATION_STEP_INF`, `TERMINATION_STEP_NAN`,
   `TERMINATION_GRAD_NOT_FINITE`, `TERMINATION_START_NOT_FINITE`), and
@@ -199,7 +209,7 @@ went wrong that makes the point it returned untrustworthy.
 - **Neither:** a limit (`TERMINATION_MAX_FAILS`, `TERMINATION_MAX_ITERS`, `TERMINATION_MAX_TIME`)
   and `TERMINATION_COST_DISCREPANCY`. Alone they are not convergence, but with a convergence
   criterion the run is converged: one that meets a criterion on its last allowed iteration, or
-  whose cost bounces at the minimum until `maxfails` is reached, has converged; and a small
+  whose cost bounces at the minimum until `maxstall` is reached, has converged; and a small
   gradient is a stationary point however `f` and the linearization disagree about the cost.
 
 To ask why a run stopped, test the exported bit masks against `result.termination`, for example

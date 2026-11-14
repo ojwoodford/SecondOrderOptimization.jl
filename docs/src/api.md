@@ -36,7 +36,8 @@ the run converged:
 | `TERMINATION_REL_DCOST`, `TERMINATION_ABS_DCOST` | an iteration changed the cost, up or down, by less than `reldcost` (relative) or `absdcost` |
 | `TERMINATION_STEP_SIZE` | the step was below `dstep` |
 | `TERMINATION_GRAD_TOL` | the gradient was below `gtol` |
-| `TERMINATION_MAX_FAILS` | more than `maxfails` consecutive iterations raised the cost |
+| `TERMINATION_STALLED` | the best cost improved by less than `stalltol` relative for more than `maxstall` iterations, at least one of them stayed within that band, and none rose by more than `sqrt(stalltol)` (converged: progress has become negligible at the best point, which is not proof of a minimum) |
+| `TERMINATION_MAX_FAILS` | more than `maxstall` iterations without a significant improvement, and the cost did not settle: every one rose beyond the stall band, or one rose by more than `sqrt(stalltol)` |
 | `TERMINATION_MAX_ITERS`, `TERMINATION_MAX_TIME` | `maxiters` or `maxtime` was reached |
 | `TERMINATION_COST_INF`, `TERMINATION_COST_NAN` | the cost was not finite |
 | `TERMINATION_STEP_INF`, `TERMINATION_STEP_NAN` | the step was not finite |

@@ -66,7 +66,7 @@ end
     @test hasbits(res, TERMINATION_GRAD_TOL)
     @test occursin("Gradient norm below threshold.", sprint(show, res0))
     bits = [bit for (bit, _) in SecondOrderOptimization.TERMINATION_REASONS]
-    @test allunique(bits) && all(ispow2, bits) && reduce(|, bits) == (1 << 15) - 1
+    @test allunique(bits) && all(ispow2, bits) && reduce(|, bits) == (1 << 16) - 1
     _, res_cb = optimize(copy(x0_dense), HessianObjective(rosenbrock_cost, rosenbrock_fdf!), OptimizationOptions(maxiters=50); callback=(c, args...) -> (c, 1))
     @test res_cb.termination == 1 << 16      # only the callback's flag
     @test !isconverged(res_cb)

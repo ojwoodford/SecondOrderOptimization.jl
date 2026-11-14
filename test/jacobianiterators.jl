@@ -153,10 +153,11 @@ end
         J0 = jac(x0)
         @test norm(J0[:, 1]) / norm(J0[:, 2]) > 1e6
         for (obj, ls) in ((objJ, :auto), (objH, :cholesky))
-            # reldcost = 1e-15: uniform damping crawls here, decreasing the cost by under 1e-10
-            # relative per iteration, and the default (1.5e-8) would stop it at cost 0.72 (Q6)
-            _, rL = optimize(x0, obj, OptimizationOptions(iterator=:levenbergmarquardt, linsolver=ls, maxiters=500, reldcost=1e-15))
-            _, rM = optimize(x0, obj, OptimizationOptions(iterator=:levenbergmarquardt_dtd, linsolver=ls, maxiters=500, reldcost=1e-15))
+            # stalltol = 0: uniform damping crawls here in bursts, with stretches of several
+            # iterations that improve the cost by under 1e-8 relative in all, and the stall test
+            # would stop it at cost 0.72 (Q7). (The per-iteration test at its default 1e-12 does not.)
+            _, rL = optimize(x0, obj, OptimizationOptions(iterator=:levenbergmarquardt, linsolver=ls, maxiters=500, stalltol=0.0))
+            _, rM = optimize(x0, obj, OptimizationOptions(iterator=:levenbergmarquardt_dtd, linsolver=ls, maxiters=500, stalltol=0.0))
             @test isconverged(rM) && rM.bestcost < 1e-20
             @test rM.niterations < 50
             @test 5 * rM.niterations < rL.niterations

@@ -5,19 +5,30 @@ Stores configuration options and stopping criteria for second-order optimization
 
 # Keyword Arguments
 - `maxiters::Int = 100`: Maximum number of outer iterations (linearization evaluations).
-- `reldcost::Float64 = 1.5e-8`: Minimum relative change in cost required to continue: the run
-  stops (converged, `:rel_dcost`) when an iteration changes the cost by less than
-  `reldcost * abs(bestcost)`, a rise as well as a fall. The default is `sqrt(eps(Float64))`: the
-  cost is computed to about machine epsilon at best, and near a minimum a relative change in cost
-  of `eps` corresponds to a relative change in the variables of about `sqrt(eps)`. A slowly
-  converging run (one whose cost decreases by less than this per iteration while still far from
-  its minimum, as uniform damping on a badly scaled problem can) stops on this test; lower
-  `reldcost`, or set it to `0`, to keep it going, and rely on `gtol`, `dstep` or `maxiters`.
-- `absdcost::Float64 = 1e-15`: Minimum absolute change in cost, in either direction, required to
-  continue (converged, `:abs_dcost`).
+- `reldcost::Float64 = 1e-12`: Minimum relative change in cost in one iteration required to
+  continue: the run stops, converged (`TERMINATION_REL_DCOST`), when an iteration changes the
+  cost by less than `reldcost * abs(bestcost)`, a rise as well as a fall. It is kept tight, since
+  a single iteration with a tiny change is not convergence (a run crawling across a flat valley
+  has many); the slower test is `stalltol`.
+- `absdcost::Float64 = 1e-15`: Minimum absolute change in cost, in either direction, in one
+  iteration required to continue (converged, `TERMINATION_ABS_DCOST`).
 - `dstep::Float64 = 1e-15`: Minimum infinity-norm of parameter step vector to continue.
 - `gtol::Float64 = 0.0`: Gradient infinity-norm threshold for termination.
-- `maxfails::Int = 3`: Maximum consecutive failed steps (cost increases) before termination.
+- `maxstall::Int = 3`: Maximum number of consecutive iterations in which the best cost does not
+  improve significantly (by more than `stalltol` relative, counted from the last significant
+  improvement; a rise in cost never improves it). After more than that the run stops: stalled
+  (`TERMINATION_STALLED`, converged) if the cost has settled: at least one of those iterations
+  left the cost within `stalltol` (relative) above the cost at the last significant
+  improvement, and none raised it by more than `sqrt(stalltol)` (relative; the bound is computed
+  from `stalltol` when the options are created). Otherwise `TERMINATION_MAX_FAILS` (a failure:
+  the cost kept rising, or jumped).
+- `stalltol::Float64 = 1.5e-8`: Relative improvement in the best cost that counts as significant
+  for `maxstall`; about `sqrt(eps(Float64))`, the change in cost that rounding can produce near a
+  minimum computed with cancellation. With `stalltol = 0`, `maxstall` counts consecutive
+  iterations that raise the cost, as it did before `stalltol` existed. A stalled termination says
+  that progress has become negligible at the best point found. It cannot tell a minimum from a
+  flat valley crossed slowly: whether the step was held back by damping or a trust radius is
+  known only to the iterator. Check the gradient (`gtol`) when that matters.
 - `maxtime::Float64 = 30.0`: Maximum wall-clock optimization runtime in seconds.
 - `iterator::Union{Symbol, OptimizationIterator} = :levenbergmarquardt`: Iterator algorithm (`:newton`, `:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg`, `:gradientdescent`).
 - `linsolver::Union{Symbol, OptimizationLinearSolver} = :auto`: Linear solver method (`:auto`, `:cholesky`, `:ldl`, `:qr`, or `:cg`, `:minres`, `:krylov` via `Krylov.jl`, or `:pardiso` via `Pardiso.jl`).
