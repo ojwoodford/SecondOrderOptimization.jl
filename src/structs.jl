@@ -55,6 +55,12 @@ const FAILED_CONVERGENCE_MASK = NONFINITE_TERMINATION_MASK | TERMINATION_LINSOLV
 # reads it until it moves to `isconverged`.
 const FAILURE_TERMINATION_MASK = TERMINATION_COST_INF | TERMINATION_COST_NAN | TERMINATION_STEP_INF | TERMINATION_STEP_NAN | TERMINATION_MAX_FAILS | TERMINATION_MAX_ITERS | TERMINATION_MAX_TIME | TERMINATION_COST_DISCREPANCY | TERMINATION_START_NOT_FINITE | TERMINATION_GRAD_NOT_FINITE | TERMINATION_LINSOLVER_FAILED
 
+# The relative tolerance of the check that `f` and `fdf!` agree on the cost (TERMINATION_COST_DISCREPANCY).
+# The check guards against a user error, an `f` computing a different cost; rounding must not trip
+# it, and at an ill-conditioned minimum the two can differ by 3.7e-8 relative from rounding alone
+# (P6). A starting value, not a measured one (rules.md 26); listed in improvements.md.
+const COST_DISCREPANCY_RTOL = 1e-6
+
 # Each termination bit and the message `show` prints for it
 const TERMINATION_REASONS = (
     (TERMINATION_COST_INF,         "Cost is infinite."),

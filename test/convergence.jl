@@ -91,6 +91,15 @@ const Q6_NONFINITE = (TERMINATION_COST_INF, TERMINATION_COST_NAN, TERMINATION_ST
         _, res = optimize([0.0], objd, OptimizationOptions(iterator=:newton, gtol=1e-10, callbackchangesstate=true))
         @test res.termination == TERMINATION_COST_DISCREPANCY | TERMINATION_GRAD_TOL
         @test isconverged(res)
+        # P6: the tolerance is COST_DISCREPANCY_RTOL = 1e-6 relative, for user errors, not rounding
+        @test SOO.COST_DISCREPANCY_RTOL == 1e-6
+        g1(x) = 0.5 * (x[1] - 1)^2 + 1
+        for (scale, flagged) in ((1 + 1e-8, false), (1 + 1e-7, false), (1 + 1e-5, true))
+            objr = HessianObjective(g1, (g, H, x) -> (g[1] = x[1] - 1; H[1, 1] = 1.0; x[1] == 0.0 ? g1(x) : scale * g1(x)))
+            _, res = optimize([0.0], objr, OptimizationOptions(iterator=:newton, gtol=1e-10, callbackchangesstate=true))
+            @test hasbits(res, TERMINATION_COST_DISCREPANCY) == flagged
+            @test hasbits(res, TERMINATION_GRAD_TOL)
+        end
         # a small gradient at a start with no finite cost (converged before Q6)
         objinf = HessianObjective(x -> Inf, (g, H, x) -> (g .= 0.0; H .= I(1); Inf))
         _, res = optimize([0.0], objinf, OptimizationOptions(gtol=1e-3))
