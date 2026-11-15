@@ -122,6 +122,7 @@ tp1_run(x, obj, opts, ws) = (x .= (1.0, 0.0); optimize!(x, obj, opts; workspace 
             ws = OptimizationWorkspace([1.0, 0.0], obj, opts)
             x = [1.0, 0.0]
             tp1_run(x, obj, opts, ws)
+            GC.gc()   # pending finalizers (SuiteSparse objects of earlier tests) would count as allocations
             res = tp1_run(x, obj, opts, ws)
             k = tp1_allocations(ws.data[1].linsystem, 1.0)
             @test isconverged(res) && res.linearsolves > 0
