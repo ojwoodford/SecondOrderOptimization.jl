@@ -97,14 +97,18 @@ optimizer, and there is no residual-only callable. The model's gradient matches 
 gradient only when the cost is `½‖r‖²` near `x`; for a reweighted cost, scale `r` and `J` so
 that this holds.
 
-# Supported so far
-| Accepted | Rejected (`ArgumentError`, before `f` or `resjac!` is called) |
-|:---|:---|
-| `J` a `Matrix{Float64}` or `SparseMatrixCSC{Float64, Int}` prototype, or an integer `m ≥ 1` | any other prototype, including other sparse types; another element or index type |
-| `iterator = :levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg` or `:newton` | `:gradientdescent`, which uses only the gradient `Jᵀr` and so gains nothing from the Jacobian form |
-| `linsolver = :auto` or `:qr` (the same QR solve); `:lsmr` with Krylov.jl loaded | every other linear solver |
-| with a `SchurBlockJacobian{Float64, Matrix{Float64}}`: `:auto` or `:qr` (dense QR of the reduced Jacobian), `:cholesky` or `:ldl` (dense factorization of its normal equations), `:lsmr` | any other, or another element type |
-| with a `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}`: `:auto` or `:cholesky` (sparse Cholesky of the reduced normal equations, falling back to LDLᵀ), `:ldl`, `:lsmr` | `:qr` (the sparse reduced system is only formed as normal equations) and any other |
+# Supported combinations
+| Jacobian prototype `J` | Linear system | `linsolver` |
+|:---|:---|:---|
+| integer `m ≥ 1`, or `Matrix{Float64}` (`m × n`) | dense QR of `J`; static QR when `x0` has a static size and `m·n ≤ 48` | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
+| `SparseMatrixCSC{Float64, Int}` | sparse QR of `J` (SPQR) | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
+| `SchurBlockJacobian{Float64, Matrix{Float64}}` (with BlockLinearSystems.jl) | QR elimination, dense reduced system | `:auto`, `:qr` (QR of the reduced Jacobian); `:cholesky`, `:ldl` (factor its normal equations); `:lsmr` (with Krylov.jl) |
+| `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}` (with BlockLinearSystems.jl) | QR elimination, sparse reduced system | `:auto`, `:cholesky` (sparse Cholesky of the reduced normal equations, falling back to LDLᵀ); `:ldl`; `:lsmr` (with Krylov.jl) |
+
+Every row takes `iterator = :levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg` or `:newton`
+(Gauss-Newton). Everything else is rejected with an `ArgumentError` before `f` or `resjac!` is
+called: any other prototype type, element type or index type; `iterator = :gradientdescent`, which
+uses only the gradient `Jᵀr` and gains nothing from the Jacobian form; and any other `linsolver`.
 
 The model Hessian is `JᵀJ`, so `iterator = :newton` is Gauss-Newton: each step solves
 `JᵀJ dx = -Jᵀr` by QR of `J`, with Newton's diagonal shift if `J` is numerically rank deficient.

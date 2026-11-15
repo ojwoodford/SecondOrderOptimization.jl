@@ -116,12 +116,17 @@ shift the diagonal.
 
 ## What is supported
 
-| Accepted | Rejected, with an `ArgumentError` before `f` or `resjac!` is called |
-|:---|:---|
-| `J` a `Matrix{Float64}` or `SparseMatrixCSC{Float64, Int}` prototype, or an integer `m ≥ 1` | any other prototype, including other sparse types, or another element or index type |
-| `iterator = :levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg` or `:newton` (Gauss-Newton) | `:gradientdescent`, which uses only the gradient $J^\top r$ and gains nothing from the Jacobian |
-| `linsolver = :auto` or `:qr` (both the QR solve above); `:lsmr` (LSMR on $J$, with `using Krylov`) | every other linear solver |
-| with `using BlockLinearSystems`, `J` a `SchurBlockJacobian{Float64, RType}`: QR elimination (below) | |
+| Jacobian prototype `J` | Linear system | `linsolver` |
+|:---|:---|:---|
+| integer `m ≥ 1`, or `Matrix{Float64}` (`m × n`) | dense QR of `J`; static QR when `x0` has a static size and `m·n ≤ 48` | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
+| `SparseMatrixCSC{Float64, Int}` | sparse QR of `J` (SPQR) | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
+| `SchurBlockJacobian{Float64, Matrix{Float64}}` (with BlockLinearSystems.jl) | QR elimination, dense reduced system | `:auto`, `:qr` (QR of the reduced Jacobian); `:cholesky`, `:ldl` (factor its normal equations); `:lsmr` (with Krylov.jl) |
+| `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}` (with BlockLinearSystems.jl) | QR elimination, sparse reduced system | `:auto`, `:cholesky` (sparse Cholesky of the reduced normal equations, falling back to LDLᵀ); `:ldl`; `:lsmr` (with Krylov.jl) |
+
+Every row takes `iterator = :levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg` or `:newton`
+(Gauss-Newton). Everything else is rejected with an `ArgumentError` before `f` or `resjac!` is
+called: any other prototype type, element type or index type; `iterator = :gradientdescent`, which
+uses only the gradient $J^\top r$ and gains nothing from the Jacobian form; and any other `linsolver`.
 
 With `linsolver = :lsmr` each damped step is solved iteratively by LSMR on $J$ (dense or sparse):
 the damping enters as LSMR's regularization parameter and the Marquardt scaling as its
@@ -149,12 +154,8 @@ eliminates them by QR, the Jacobian counterpart of the Schur complement
 (BlockLinearSystems' QR-elimination tutorial explains the layout). Each step factors every
 eliminated block's rows with its damping, solves the reduced problem in the retained variables
 and back-substitutes; it never forms $J^\top J$ unless the chosen reduced solver does. `RType` is
-the storage of the reduced system, and `linsolver` its solver:
-
-| `RType` | `:auto` | `:qr` | `:cholesky`, `:ldl` | `:lsmr` (with `using Krylov`) |
-|:---|:---|:---|:---|:---|
-| `Matrix{Float64}` | dense QR of the reduced Jacobian | the same | form the reduced normal equations and factor them | LSMR on the reduced Jacobian |
-| `SparseMatrixCSC{Float64, Int}` | sparse Cholesky of the reduced normal equations, falling back to LDLᵀ | rejected | as `:auto` / LDLᵀ | LSMR on the reduced Jacobian |
+the storage of the reduced system, and `linsolver` its solver: the last two rows of the table
+above.
 
 `resjac!` writes the Jacobian blocks and the residuals into the tables of `J` through
 BlockLinearSystems' assembly views; its first argument is then an empty vector. An eliminated

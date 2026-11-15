@@ -26,4 +26,5 @@ using Test
     include("lsmr.jl")
     include("blocklinearsystems_ext.jl")
     include("qrelimination.jl")
+    include("jacobiancombinations.jl")
 end
