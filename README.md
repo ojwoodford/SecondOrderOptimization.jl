@@ -1,6 +1,7 @@
 # SecondOrderOptimization.jl
 
-[![Documentation](https://img.shields.io/badge/docs-dev-blue.svg)](https://ojwoodford.github.io/SecondOrderOptimization.jl/dev/)
+[![docs-stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://ojwoodford.github.io/SecondOrderOptimization.jl/stable/)
+[![docs-dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://ojwoodford.github.io/SecondOrderOptimization.jl/dev/)
 [![Build Status](https://github.com/ojwoodford/SecondOrderOptimization.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/ojwoodford/SecondOrderOptimization.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![codecov](https://codecov.io/gh/ojwoodford/SecondOrderOptimization.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/ojwoodford/SecondOrderOptimization.jl)
 
