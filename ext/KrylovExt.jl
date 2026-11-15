@@ -11,6 +11,7 @@ import SecondOrderOptimization: AbstractLinearSystem, SparseLinearSystem, DenseL
 import SecondOrderOptimization: SolveStatus, Success, NotPositiveDefinite, Indefinite
 import SecondOrderOptimization: uniformscaling!, damp_marquardt!, builtfor, solvermismatch
 import SecondOrderOptimization: DenseTallLinearSystem, SparseTallLinearSystem, maketallws, jmul!, jtr!
+import SecondOrderOptimization: LSMR_ETOL, LSMR_AXTOL, LSMR_BTOL, LSMR_CONLIM
 
 # Validation of Krylov solver symbols
 validatelinsolver(::StaticSymbol{:cg}) = true
@@ -170,13 +171,7 @@ solve!(ls::DenseLinearSystem, ::StaticSymbol{:krylov}) = solve!(ls, static(:cg))
 # preconditioner N = F⁻¹. Nothing is augmented and JᵀJ is never formed. J's products are this
 # package's plain loops (`jmul!`, `jtr!`), not BLAS (rules.md 23).
 
-# The tolerances are starting values, not measured (rules.md 26; improvements.md item 5): Krylov's
-# own defaults for LSMR, stated here so that a change in Krylov does not change them.
-const LSMR_ETOL = sqrt(eps(Float64))     # stopping on the normal-equation residual
-const LSMR_AXTOL = sqrt(eps(Float64))
-const LSMR_BTOL = sqrt(eps(Float64))
-const LSMR_CONLIM = 1 / sqrt(eps(Float64))
-# itmax: Krylov's default, m + n iterations
+# The tolerances (LSMR_ETOL and the rest, in tallsystem.jl) are starting values, not measured.
 
 struct TallLsmrWorkspace{W}
     ws::W

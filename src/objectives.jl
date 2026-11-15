@@ -79,7 +79,14 @@ dense Householder QR for a dense `J`, and SuiteSparse's sparse QR (SPQR) for a s
   (`m × nvars(x0)`), or an integer `m`, the number of residuals, for a dense system with its own
   matrix. A sparse prototype's stored entries are its pattern: `resjac!` must write only stored
   entries (through `nonzeros(J)`, or `J[i, j]` for a stored `(i, j)`). Writing any other entry
-  inserts it, which changes the pattern, and the run throws an `ArgumentError`. A prototype is the matrix `resjac!` writes
+  inserts it, which changes the pattern, and the run throws an `ArgumentError`.
+- With BlockLinearSystems.jl loaded, `J` may also be a `SchurBlockJacobian{Float64, RType}`: the
+  variables are partitioned into retained and eliminated blocks, and each step eliminates the
+  eliminated blocks by QR (BlockLinearSystems' `reduce_qr!`), solves the reduced problem in the
+  retained variables and back-substitutes. `resjac!` writes the Jacobian blocks and the residuals
+  into `J`'s tables (BlockLinearSystems' `coupling_block`, `eliminated_block` and
+  `residual_block`); its `r` argument is then an empty vector. `RType`, `Matrix{Float64}` or
+  `SparseMatrixCSC{Float64, Int}`, is the storage of the reduced system. A prototype is the matrix `resjac!` writes
   into, with its values (a trial system, for `callbackchangesstate = false`, works on a copy
   made at the start of the run), except with an [`OptimizationWorkspace`](@ref): a workspace owns
   its Jacobian storage, set from the prototype handed in at the start of each run, and the
@@ -96,6 +103,8 @@ that this holds.
 | `J` a `Matrix{Float64}` or `SparseMatrixCSC{Float64, Int}` prototype, or an integer `m ≥ 1` | any other prototype, including other sparse types; another element or index type |
 | `iterator = :levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg` or `:newton` | `:gradientdescent`, which uses only the gradient `Jᵀr` and so gains nothing from the Jacobian form |
 | `linsolver = :auto` or `:qr` (the same QR solve); `:lsmr` with Krylov.jl loaded | every other linear solver |
+| with a `SchurBlockJacobian{Float64, Matrix{Float64}}`: `:auto` or `:qr` (dense QR of the reduced Jacobian), `:cholesky` or `:ldl` (dense factorization of its normal equations), `:lsmr` | any other, or another element type |
+| with a `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}`: `:auto` or `:cholesky` (sparse Cholesky of the reduced normal equations, falling back to LDLᵀ), `:ldl`, `:lsmr` | `:qr` (the sparse reduced system is only formed as normal equations) and any other |
 
 The model Hessian is `JᵀJ`, so `iterator = :newton` is Gauss-Newton: each step solves
 `JᵀJ dx = -Jᵀr` by QR of `J`, with Newton's diagonal shift if `J` is numerically rank deficient.
@@ -145,7 +154,7 @@ end
 # The iterators accepted with a JacobianObjective
 const JACOBIAN_ITERATORS = (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton)
 
-const JACOBIAN_SUPPORT = "JacobianObjective supports a Matrix{Float64} or SparseMatrixCSC{Float64, Int} Jacobian prototype or an integer number of residuals m, with iterator = " *
+const JACOBIAN_SUPPORT = "JacobianObjective supports a Matrix{Float64} or SparseMatrixCSC{Float64, Int} Jacobian prototype, an integer number of residuals m, or (with BlockLinearSystems.jl loaded) a SchurBlockJacobian{Float64, RType}, with iterator = " *
     join((":$s" for s in JACOBIAN_ITERATORS), ", ", " or ") * " and linsolver = :auto or :qr (or :lsmr, with Krylov.jl loaded)"
 
 # The Jacobian prototype: a Matrix{Float64} with at least one row, or an integer m >= 1
@@ -173,13 +182,22 @@ nresiduals_of(J) = J isa Integer ? Int(J) : size(J, 1)
 function checkobjective(x0, obj::JacobianObjective, options::OptimizationOptions)
     checkjacobian(obj.J)
     n = dynamic(nvars(x0))
-    if obj.J isa AbstractMatrix && size(obj.J, 2) != n
-        throw(DimensionMismatch("Jacobian prototype J has size $(size(obj.J)), but the variables have $n degrees of freedom, so J must have $n columns."))
+    nc = jacobian_ncols(obj.J)
+    if !isnothing(nc) && nc != n
+        throw(DimensionMismatch("Jacobian prototype J has $nc columns, but the variables have $n degrees of freedom, so J must have $n columns."))
     end
     iter = dynamic(options.iterator)
     iter === :gradientdescent && throw(ArgumentError("iterator = :gradientdescent is not supported with a JacobianObjective: gradient descent uses only the gradient Jᵀr, so it gains nothing from the residual-and-Jacobian form; use a HessianObjective. $JACOBIAN_SUPPORT."))
     iter in JACOBIAN_ITERATORS || throw(ArgumentError("iterator = :$iter is not supported with a JacobianObjective. $JACOBIAN_SUPPORT."))
-    s = dynamic(options.linsolver)
+    check_jacobian_linsolver(obj.J, linsolver_symbol(options.linsolver))
+    return nothing
+end
+
+# The prototype's column count (nothing for an integer m, whose J is sized from x0), and the solvers it
+# accepts. An extension adds methods for its prototype types.
+jacobian_ncols(J::AbstractMatrix) = size(J, 2)
+jacobian_ncols(J) = nothing
+function check_jacobian_linsolver(J, s::Symbol)
     s in (:auto, :qr, :lsmr) || throw(ArgumentError("linsolver = :$s is not supported with a JacobianObjective. $JACOBIAN_SUPPORT."))
     return nothing
 end

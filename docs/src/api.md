@@ -79,6 +79,7 @@ or `:qr`, and those the extensions below add.
 - **`BlockLinearSystems.jl` (via `BlockLinearSystemsExt`)**: Schur-complement elimination for a `SchurBlockMatrix` Hessian.
   The type of `H` selects the linear system, including elimination for a `SchurBlockMatrix`: there is no solver symbol or option for it.
   `linsolver` then names the solver for the reduced system: `:auto` or `:cholesky` (Cholesky, falling back to Bunch-Kaufman) or `:ldl` (Bunch-Kaufman); any other is an `ArgumentError` when the system is built.
+  On the Jacobian path, a `SchurBlockJacobian{Float64, RType}` prototype for a [`JacobianObjective`](@ref) selects QR elimination of the eliminated blocks; `RType` (dense `Matrix{Float64}` or `SparseMatrixCSC{Float64, Int}`) is the storage of the reduced system, and `linsolver` names its solver (see the [`JacobianObjective`](@ref) docstring). With Krylov.jl also loaded (`BlockLinearSystemsKrylovExt`), `:lsmr` solves the reduced problem by LSMR on the reduced Jacobian.
   To enable: `using BlockLinearSystems`.
 
 ## Callbacks & Diagnostics

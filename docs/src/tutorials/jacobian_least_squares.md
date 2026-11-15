@@ -121,6 +121,7 @@ shift the diagonal.
 | `J` a `Matrix{Float64}` or `SparseMatrixCSC{Float64, Int}` prototype, or an integer `m ≥ 1` | any other prototype, including other sparse types, or another element or index type |
 | `iterator = :levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg` or `:newton` (Gauss-Newton) | `:gradientdescent`, which uses only the gradient $J^\top r$ and gains nothing from the Jacobian |
 | `linsolver = :auto` or `:qr` (both the QR solve above); `:lsmr` (LSMR on $J$, with `using Krylov`) | every other linear solver |
+| with `using BlockLinearSystems`, `J` a `SchurBlockJacobian{Float64, RType}`: QR elimination (below) | |
 
 With `linsolver = :lsmr` each damped step is solved iteratively by LSMR on $J$ (dense or sparse):
 the damping enters as LSMR's regularization parameter and the Marquardt scaling as its
@@ -129,6 +130,27 @@ tolerances are Krylov's defaults, starting values that have not been measured. I
 $J$ whose QR factorization is too expensive; it does not detect a numerically rank-deficient $J$.
 A `HessianObjective` rejects `:lsmr`: on the normal equations it would square their condition
 number again.
+
+## Eliminating variables: QR elimination
+
+When the variables split into retained ones and many small, mutually independent eliminated
+blocks (each residual involving at most one eliminated block, as for points in bundle
+adjustment), a `SchurBlockJacobian{Float64, RType}` prototype from BlockLinearSystems.jl
+eliminates them by QR, the Jacobian counterpart of the Schur complement
+(BlockLinearSystems' QR-elimination tutorial explains the layout). Each step factors every
+eliminated block's rows with its damping, solves the reduced problem in the retained variables
+and back-substitutes; it never forms $J^\top J$ unless the chosen reduced solver does. `RType` is
+the storage of the reduced system, and `linsolver` its solver:
+
+| `RType` | `:auto` | `:qr` | `:cholesky`, `:ldl` | `:lsmr` (with `using Krylov`) |
+|:---|:---|:---|:---|:---|
+| `Matrix{Float64}` | dense QR of the reduced Jacobian | the same | form the reduced normal equations and factor them | LSMR on the reduced Jacobian |
+| `SparseMatrixCSC{Float64, Int}` | sparse Cholesky of the reduced normal equations, falling back to LDLᵀ | rejected | as `:auto` / LDLᵀ | LSMR on the reduced Jacobian |
+
+`resjac!` writes the Jacobian blocks and the residuals into the tables of `J` through
+BlockLinearSystems' assembly views; its first argument is then an empty vector. An eliminated
+block with fewer residuals than dimensions is singular without damping, and is reported as the
+Schur path reports it.
 
 Everything else works as for a `HessianObjective`: every variable type, including immutable and
 manifold variables through [`optimize`](@ref); both variants of each iterator

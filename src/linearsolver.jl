@@ -11,9 +11,10 @@ builtfor(ws) = "an unknown solver (workspace type $(typeof(ws)))"
 # The error for a system solved with a solver it was not built for. A user cannot reach it: an
 # `OptimizationWorkspace` is keyed on the options' type, which includes the solver, so a workspace
 # reused with another `linsolver` is rebuilt. Only code calling `solve!` directly can.
+solverworkspace(ls) = ls.solver_ws
 function solvermismatch(ls, asked::Symbol)
     throw(ArgumentError("Internal inconsistency: solve! was asked for linsolver = :$asked, but this " *
-        "$(nameof(typeof(ls))) was built by makelinearsystem for linsolver = $(builtfor(ls.solver_ws)). " *
+        "$(nameof(typeof(ls))) was built by makelinearsystem for linsolver = $(builtfor(solverworkspace(ls))). " *
         "A linear system must be solved with the linsolver that makelinearsystem built it with."))
 end
 

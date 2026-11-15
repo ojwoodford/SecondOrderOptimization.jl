@@ -237,6 +237,20 @@ needsqr(linsolver) = linsolver_symbol(linsolver) in (:auto, :qr)
 maketallws(m, n, linsolver) = maketallws(m, n, static(linsolver_symbol(linsolver)))
 maketallws(m, n, ::StaticSymbol) = nothing
 
+# LSMR's stopping tolerances, for every system it solves (KrylovExt on J, BlockLinearSystemsKrylovExt on the
+# reduced Jacobian of QR elimination). Starting values, not measured (rules.md 26; improvements.md item 5):
+# Krylov's own defaults, stated here so that a change in Krylov does not change them. itmax is Krylov's
+# default, m + n iterations.
+const LSMR_ETOL = sqrt(eps(Float64))     # stopping on the normal-equation residual
+const LSMR_AXTOL = sqrt(eps(Float64))
+const LSMR_BTOL = sqrt(eps(Float64))
+const LSMR_CONLIM = 1 / sqrt(eps(Float64))
+
+# The reduced solver of QR elimination (BlockLinearSystemsExt): its storage, built once, and its solve. Declared
+# here so that an extension triggered by two packages can add a method without naming the other extension's types.
+function make_reduced end
+function solve_reduced! end
+
 # A Matrix prototype is the storage resjac! writes into, used with the values it holds: entries
 # resjac! never writes keep the caller's values. With an integer m the matrix starts as zeros.
 # The prototype's type selects the system (a sparse one in sparsetallsystem.jl).

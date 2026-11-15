@@ -24,4 +24,5 @@ using Test
     include("extensions.jl")
     include("lsmr.jl")
     include("blocklinearsystems_ext.jl")
+    include("qrelimination.jl")
 end

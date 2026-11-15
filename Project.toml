@@ -23,6 +23,7 @@ BlockLinearSystems = "a7d4e89f-9c3b-4d0e-8f5a-5b8c7d1e4f28"
 
 [extensions]
 BlockLinearSystemsExt = "BlockLinearSystems"
+BlockLinearSystemsKrylovExt = ["BlockLinearSystems", "Krylov"]
 KrylovExt = "Krylov"
 PardisoExt = "Pardiso"
 
