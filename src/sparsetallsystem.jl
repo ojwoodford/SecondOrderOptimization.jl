@@ -93,13 +93,13 @@ end
 
 # The per-system state: squared column norms of J and whether they are current
 mutable struct SparseTallWorkspace
-    const spqr::SPQRWorkspace
+    const spqr::Union{Nothing, SPQRWorkspace}   # nothing for an iterative solver
     const colnorm2::Vector{Float64}
     const nnzJ::Int               # stored entries of J, which resjac! must not change
     normsstale::Bool
     nfactor::Int                  # number of SPQR numeric factorizations, for tests
 end
-SparseTallWorkspace(spqr::SPQRWorkspace, J::SparseMatrixCSC) = SparseTallWorkspace(spqr, Vector{Float64}(undef, size(J, 2)), nnz(J), true, 0)
+SparseTallWorkspace(spqr, J::SparseMatrixCSC) = SparseTallWorkspace(spqr, Vector{Float64}(undef, size(J, 2)), nnz(J), true, 0)
 
 """
     SparseTallHessian
@@ -125,17 +125,22 @@ function checkpattern(A::SparseTallHessian)
     return nothing
 end
 
-# ‖J v‖², J v accumulated column by column over the stored entries: plain loops (rules.md 23)
-function quadform(A::SparseTallHessian, v::AbstractVector)
-    J, Jv = A.J, A.Jv
-    fill!(Jv, 0.0)   # each entry of J v sums over a row's stored entries, so it starts from zero
+# y = J v, accumulated column by column over the stored entries: plain loops (rules.md 23)
+function jmul!(y::AbstractVector, J::SparseMatrixCSC{Float64, Int}, v::AbstractVector)
+    fill!(y, 0.0)   # each entry of J v sums over a row's stored entries, so it starts from zero
     rv, nzv = rowvals(J), nonzeros(J)
     @inbounds for j in axes(J, 2)
         vj = v[j]
         for q in nzrange(J, j)
-            Jv[rv[q]] += nzv[q] * vj
+            y[rv[q]] += nzv[q] * vj
         end
     end
+    return y
+end
+
+# ‖J v‖²
+function quadform(A::SparseTallHessian, v::AbstractVector)
+    Jv = jmul!(A.Jv, A.J, v)
     total = 0.0
     @inbounds @simd for i in eachindex(Jv)
         total += Jv[i] * Jv[i]
@@ -204,21 +209,23 @@ tolerance, and a `NaN` or `Inf` in `J` or `r` returns `NotPositiveDefinite` with
 writing any other entry inserts it, which changes the pattern, and the linearization throws an
 `ArgumentError`.
 """
-mutable struct SparseTallLinearSystem <: AbstractTallLinearSystem
+mutable struct SparseTallLinearSystem{W} <: AbstractTallLinearSystem
     const A::SparseTallHessian
     const b::Vector{Float64}
     const x::Vector{Float64}
+    const solver_ws::W            # an iterative solver's workspace (`maketallws`), or nothing for SPQR
     lambda::Float64
     scaling::Union{Nothing, Vector{Float64}}
 end
-function SparseTallLinearSystem(J::SparseMatrixCSC{Float64, Int})
+function SparseTallLinearSystem(J::SparseMatrixCSC{Float64, Int}; linsolver = :auto)
     m, n = size(J)
-    A = SparseTallHessian(J, zeros(m), zeros(m), SparseTallWorkspace(SPQRWorkspace(J), J))
-    return SparseTallLinearSystem(A, zeros(n), zeros(n), 0.0, nothing)
+    spqr = needsqr(linsolver) ? SPQRWorkspace(J) : nothing   # an iterative solver needs no analysis
+    A = SparseTallHessian(J, zeros(m), zeros(m), SparseTallWorkspace(spqr, J))
+    return SparseTallLinearSystem(A, zeros(n), zeros(n), maketallws(m, n, linsolver), 0.0, nothing)
 end
 
-tall_linearsystem(x0, J::SparseMatrixCSC{Float64, Int}, linsolver) = SparseTallLinearSystem(J)
-workspace_tall_linearsystem(x0, J::SparseMatrixCSC{Float64, Int}, linsolver) = SparseTallLinearSystem(copy(J))
+tall_linearsystem(x0, J::SparseMatrixCSC{Float64, Int}, linsolver) = SparseTallLinearSystem(J; linsolver)
+workspace_tall_linearsystem(x0, J::SparseMatrixCSC{Float64, Int}, linsolver) = SparseTallLinearSystem(copy(J); linsolver)
 
 zero!(ls::SparseTallLinearSystem) = (fill!(ls.b, 0.0); markstale!(ls.A); ls)
 
@@ -237,9 +244,9 @@ function copy_structure(ls::SparseTallLinearSystem)
     m, n = size(A.J)
     J = copy(A.J)
     At = SparseTallHessian(J, zeros(m), zeros(m), SparseTallWorkspace(A.ws.spqr, J))
-    return SparseTallLinearSystem(At, zeros(length(ls.b)), ls.x, ls.lambda, ls.scaling)
+    return SparseTallLinearSystem(At, zeros(length(ls.b)), ls.x, ls.solver_ws, ls.lambda, ls.scaling)
 end
-sharex(ls::SparseTallLinearSystem, from) = ls.x === from.x ? ls : SparseTallLinearSystem(ls.A, ls.b, from.x, ls.lambda, ls.scaling)
+sharex(ls::SparseTallLinearSystem, from) = ls.x === from.x ? ls : SparseTallLinearSystem(ls.A, ls.b, from.x, ls.solver_ws, ls.lambda, ls.scaling)
 
 function (t::TallLinearize)(g::AbstractVector, A::SparseTallHessian, x)
     cost = t.resjac!(A.r, A.J, x)
@@ -258,6 +265,7 @@ function solve!(ls::SparseTallLinearSystem, ::Union{StaticSymbol{:auto}, StaticS
         return NotPositiveDefinite
     end
     sp = A.ws.spqr
+    isnothing(sp) && solvermismatch(ls, :qr)
     lambda = max(ls.lambda, 0.0)
     scaling = ls.scaling
     nzv = nonzeros(J)

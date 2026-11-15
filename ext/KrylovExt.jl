@@ -10,11 +10,13 @@ import SecondOrderOptimization: validatelinsolver, makesparsews, makedensews, so
 import SecondOrderOptimization: AbstractLinearSystem, SparseLinearSystem, DenseLinearSystem
 import SecondOrderOptimization: SolveStatus, Success, NotPositiveDefinite, Indefinite
 import SecondOrderOptimization: uniformscaling!, damp_marquardt!, builtfor, solvermismatch
+import SecondOrderOptimization: DenseTallLinearSystem, SparseTallLinearSystem, maketallws, jmul!, jtr!
 
 # Validation of Krylov solver symbols
 validatelinsolver(::StaticSymbol{:cg}) = true
 validatelinsolver(::StaticSymbol{:minres}) = true
 validatelinsolver(::StaticSymbol{:krylov}) = true
+validatelinsolver(::StaticSymbol{:lsmr}) = true   # for a JacobianObjective only; a HessianObjective rejects it
 
 # A Krylov workspace plus storage for a Jacobi (diagonal) preconditioner
 struct JacobiWorkspace{W}
@@ -158,5 +160,81 @@ function solve!(ls::DenseLinearSystem, ::StaticSymbol{:minres})
 end
 
 solve!(ls::DenseLinearSystem, ::StaticSymbol{:krylov}) = solve!(ls, static(:cg))
+
+# ------------------------------------------------------------------------------------------------
+# LSMR on the Jacobian of a tall system (TP2)
+#
+# The damped step solves min ‖J x − r‖² + λ Σᵢ sᵢ xᵢ², with λ the optimizer's damping and s the
+# Marquardt scaling (all ones without it). That is LSMR's regularized problem
+# min ‖b − A x‖² + λₗ² ‖x‖²_F with A = J, b = r, λₗ = √λ and F = Diagonal(s), passed as LSMR's
+# preconditioner N = F⁻¹. Nothing is augmented and JᵀJ is never formed. J's products are this
+# package's plain loops (`jmul!`, `jtr!`), not BLAS (rules.md 23).
+
+# The tolerances are starting values, not measured (rules.md 26; improvements.md item 5): Krylov's
+# own defaults for LSMR, stated here so that a change in Krylov does not change them.
+const LSMR_ETOL = sqrt(eps(Float64))     # stopping on the normal-equation residual
+const LSMR_AXTOL = sqrt(eps(Float64))
+const LSMR_BTOL = sqrt(eps(Float64))
+const LSMR_CONLIM = 1 / sqrt(eps(Float64))
+# itmax: Krylov's default, m + n iterations
+
+struct TallLsmrWorkspace{W}
+    ws::W
+    invscale::Vector{Float64}     # N = F⁻¹, the inverse of the Marquardt scaling
+end
+maketallws(m, n, ::StaticSymbol{:lsmr}) = TallLsmrWorkspace(Krylov.LsmrWorkspace(m, n, Vector{Float64}), Vector{Float64}(undef, n))
+builtfor(::TallLsmrWorkspace) = ":lsmr"
+
+# J as an operator, and its adjoint, for Krylov
+struct TallOperator{M}
+    J::M
+end
+struct TallOperatorT{M}
+    J::M
+end
+Base.size(A::TallOperator) = size(A.J)
+Base.size(A::TallOperator, d::Integer) = size(A.J, d)
+Base.size(A::TallOperatorT) = reverse(size(A.J))
+Base.size(A::TallOperatorT, d::Integer) = size(A)[d]
+Base.eltype(::Union{TallOperator, TallOperatorT}) = Float64
+Base.adjoint(A::TallOperator) = TallOperatorT(A.J)
+LinearAlgebra.mul!(y::AbstractVector, A::TallOperator, v::AbstractVector) = jmul!(y, A.J, v)
+LinearAlgebra.mul!(y::AbstractVector, A::TallOperatorT, w::AbstractVector) = jtr!(y, A.J, w)
+
+const LsmrTallSystem = Union{DenseTallLinearSystem{<:TallLsmrWorkspace}, SparseTallLinearSystem{<:TallLsmrWorkspace}}
+
+function solve!(ls::LsmrTallSystem, ::StaticSymbol{:lsmr})
+    A = ls.A
+    J, r = A.J, A.r
+    m, n = size(J)
+    lw = ls.solver_ws
+    vals = J isa SparseMatrixCSC ? nonzeros(J) : J
+    if !(all(isfinite, vals) && all(isfinite, r))
+        fill!(ls.x, NaN)
+        return NotPositiveDefinite
+    end
+    lambda = max(ls.lambda, 0.0)
+    # Undamped with fewer residuals than variables, J is rank deficient: report it as the QR solve
+    # does. (LSMR cannot detect numerical rank deficiency with m ≥ n; it returns a least-squares
+    # solution there.)
+    lambda == 0 && m < n && return NotPositiveDefinite
+    op = TallOperator(J)
+    if lambda > 0 && !isnothing(ls.scaling)
+        @inbounds for i in 1:n
+            lw.invscale[i] = inv(ls.scaling[i])
+        end
+        Krylov.lsmr!(lw.ws, op, r; λ = sqrt(lambda), N = Diagonal(lw.invscale),
+                     etol = LSMR_ETOL, axtol = LSMR_AXTOL, btol = LSMR_BTOL, conlim = LSMR_CONLIM)
+    else
+        Krylov.lsmr!(lw.ws, op, r; λ = sqrt(lambda),
+                     etol = LSMR_ETOL, axtol = LSMR_AXTOL, btol = LSMR_BTOL, conlim = LSMR_CONLIM)
+    end
+    x = lw.ws.x
+    (lw.ws.stats.solved && all(isfinite, x)) || return NotPositiveDefinite
+    copyto!(ls.x, x)
+    return Success
+end
+solve!(ls::DenseTallLinearSystem, ::StaticSymbol{:lsmr}) = solvermismatch(ls, :lsmr)
+solve!(ls::SparseTallLinearSystem, ::StaticSymbol{:lsmr}) = solvermismatch(ls, :lsmr)
 
 end # module KrylovExt

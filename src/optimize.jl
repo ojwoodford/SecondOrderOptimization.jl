@@ -27,7 +27,12 @@ end
 # What differs between the objective kinds: the checks at entry, the checks before a linear
 # system is built, the linear system, the structure the workspace is keyed on, and the function
 # the iterators call to linearize, `fdf!(b, A, x)`
-checkentry(x, obj::HessianObjective, options::OptimizationOptions) = nothing
+# LSMR works on a Jacobian. On the normal equations it would work with HᵀH, squaring the
+# condition number a second time (M10), so a HessianObjective rejects it.
+function checkentry(x, obj::HessianObjective, options::OptimizationOptions)
+    dynamic(options.linsolver) === :lsmr && throw(ArgumentError("linsolver = :lsmr is only for a JacobianObjective: it solves the least-squares problem in J. On the normal equations of a HessianObjective it would square their condition number again; use :cg or :minres there."))
+    return nothing
+end
 checkentry(x, obj::JacobianObjective, options::OptimizationOptions) = checkobjective(x, obj, options)
 checkbuild(x, obj::HessianObjective) = checkhessian(x, obj.H)
 checkbuild(x, obj::JacobianObjective) = nothing

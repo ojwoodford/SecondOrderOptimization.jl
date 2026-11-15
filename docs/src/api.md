@@ -71,6 +71,7 @@ or `:qr`, and those the extensions below add.
   - `:minres`: MINRES for symmetric indefinite systems.
   - On sparse systems, `:cg` and `:minres` are Jacobi (diagonal) preconditioned whenever the damped diagonal is positive.
   - `:krylov`: Alias for `:cg`.
+  - `:lsmr`: LSMR on the Jacobian of a [`JacobianObjective`](@ref) (dense or sparse), with the damping as its regularization parameter. Rejected for a `HessianObjective`, where it would square the condition number of the normal equations again.
   To enable: `using Krylov`.
 - **`Pardiso.jl` (via `PardisoExt`)**: Provides multithreaded direct sparse factorization using Intel MKL PARDISO or Panua Pardiso.
   - `:pardiso`: Multi-threaded sparse direct solver for large sparse matrices. The symbolic analysis runs once, when the linear system is built; each solve runs only the positive-definite numerical factorization, and reports the system as not positive definite when it fails.

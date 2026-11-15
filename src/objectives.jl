@@ -95,7 +95,7 @@ that this holds.
 |:---|:---|
 | `J` a `Matrix{Float64}` or `SparseMatrixCSC{Float64, Int}` prototype, or an integer `m ≥ 1` | any other prototype, including other sparse types; another element or index type |
 | `iterator = :levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg` or `:newton` | `:gradientdescent`, which uses only the gradient `Jᵀr` and so gains nothing from the Jacobian form |
-| `linsolver = :auto` or `:qr` (the same QR solve) | every other linear solver |
+| `linsolver = :auto` or `:qr` (the same QR solve); `:lsmr` with Krylov.jl loaded | every other linear solver |
 
 The model Hessian is `JᵀJ`, so `iterator = :newton` is Gauss-Newton: each step solves
 `JᵀJ dx = -Jᵀr` by QR of `J`, with Newton's diagonal shift if `J` is numerically rank deficient.
@@ -106,6 +106,14 @@ With a sparse `J`, each solve (each damping value tried) is a numeric SPQR facto
 `[J; √λ D^½]`, whose ordering and symbolic analysis are done once, when the system is built. SPQR
 allocates its working memory inside each factorization and frees it again; nothing else allocates
 in the loop.
+
+`linsolver = :lsmr` (with `using Krylov`) solves each damped step iteratively by LSMR on `J`,
+dense or sparse, with the damping as LSMR's regularization and the Marquardt scaling as its
+preconditioner `N`: nothing is factorized or augmented, `JᵀJ` is never formed, and nothing
+allocates. Its tolerances are Krylov's defaults (`etol`, `axtol`, `btol` = √eps, `conlim` = 1/√eps,
+at most `m + n` iterations), starting values that have not been measured. LSMR does not detect a
+numerically rank-deficient `J`, except `m < n` undamped, which is reported as the QR solve reports
+it.
 
 A prototype whose column count is not `nvars(x0)` is a `DimensionMismatch`.
 
@@ -138,7 +146,7 @@ end
 const JACOBIAN_ITERATORS = (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton)
 
 const JACOBIAN_SUPPORT = "JacobianObjective supports a Matrix{Float64} or SparseMatrixCSC{Float64, Int} Jacobian prototype or an integer number of residuals m, with iterator = " *
-    join((":$s" for s in JACOBIAN_ITERATORS), ", ", " or ") * " and linsolver = :auto or :qr"
+    join((":$s" for s in JACOBIAN_ITERATORS), ", ", " or ") * " and linsolver = :auto or :qr (or :lsmr, with Krylov.jl loaded)"
 
 # The Jacobian prototype: a Matrix{Float64} with at least one row, or an integer m >= 1
 function checkjacobian(J)
@@ -172,6 +180,6 @@ function checkobjective(x0, obj::JacobianObjective, options::OptimizationOptions
     iter === :gradientdescent && throw(ArgumentError("iterator = :gradientdescent is not supported with a JacobianObjective: gradient descent uses only the gradient Jᵀr, so it gains nothing from the residual-and-Jacobian form; use a HessianObjective. $JACOBIAN_SUPPORT."))
     iter in JACOBIAN_ITERATORS || throw(ArgumentError("iterator = :$iter is not supported with a JacobianObjective. $JACOBIAN_SUPPORT."))
     s = dynamic(options.linsolver)
-    s in (:auto, :qr) || throw(ArgumentError("linsolver = :$s is not supported with a JacobianObjective. $JACOBIAN_SUPPORT."))
+    s in (:auto, :qr, :lsmr) || throw(ArgumentError("linsolver = :$s is not supported with a JacobianObjective. $JACOBIAN_SUPPORT."))
     return nothing
 end

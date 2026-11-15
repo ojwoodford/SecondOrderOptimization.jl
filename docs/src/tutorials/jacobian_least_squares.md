@@ -120,7 +120,15 @@ shift the diagonal.
 |:---|:---|
 | `J` a `Matrix{Float64}` or `SparseMatrixCSC{Float64, Int}` prototype, or an integer `m ≥ 1` | any other prototype, including other sparse types, or another element or index type |
 | `iterator = :levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg` or `:newton` (Gauss-Newton) | `:gradientdescent`, which uses only the gradient $J^\top r$ and gains nothing from the Jacobian |
-| `linsolver = :auto` or `:qr` (both the QR solve above) | every other linear solver |
+| `linsolver = :auto` or `:qr` (both the QR solve above); `:lsmr` (LSMR on $J$, with `using Krylov`) | every other linear solver |
+
+With `linsolver = :lsmr` each damped step is solved iteratively by LSMR on $J$ (dense or sparse):
+the damping enters as LSMR's regularization parameter and the Marquardt scaling as its
+preconditioner, so nothing is augmented, factorized or formed, and nothing allocates. Its stopping
+tolerances are Krylov's defaults, starting values that have not been measured. It suits a large
+$J$ whose QR factorization is too expensive; it does not detect a numerically rank-deficient $J$.
+A `HessianObjective` rejects `:lsmr`: on the normal equations it would square their condition
+number again.
 
 Everything else works as for a `HessianObjective`: every variable type, including immutable and
 manifold variables through [`optimize`](@ref); both variants of each iterator

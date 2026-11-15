@@ -102,27 +102,36 @@ Base.size(A::TallHessian) = (size(A.J, 2), size(A.J, 2))
 Base.size(A::TallHessian, d::Integer) = size(A)[d]
 markstale!(A::TallHessian) = (A.ws.stale = true; A.ws.normsstale = true; A)
 
-# ‖J v‖², with J v formed one scaled column at a time into the scratch `Jv`: a plain loop, not
-# BLAS gemv, so that per-cost work stays single-threaded (rules.md 23)
-function quadform(A::TallHessian, v::AbstractVector)
-    J, Jv = A.J, A.Jv
+# y = J v, one scaled column at a time: a plain loop, not BLAS gemv, so that per-cost work stays
+# single-threaded (rules.md 23). The first column is written, not added, so y needs no zeroing.
+function jmul!(y::AbstractVector, J::Matrix{Float64}, v::AbstractVector)
     m, n = size(J)
-    n == 0 && return 0.0
+    if n == 0
+        fill!(y, 0.0)
+        return y
+    end
     @inbounds begin
         v1 = v[1]
         @fastmath @simd for i in 1:m
-            Jv[i] = J[i, 1] * v1
+            y[i] = J[i, 1] * v1
         end
         for j in 2:n
             vj = v[j]
             @fastmath @simd for i in 1:m
-                Jv[i] += J[i, j] * vj
+                y[i] += J[i, j] * vj
             end
         end
-        total = 0.0
-        @simd for i in 1:m
-            total += Jv[i] * Jv[i]
-        end
+    end
+    return y
+end
+
+# ‖J v‖², with J v formed into the scratch `Jv`
+function quadform(A::TallHessian, v::AbstractVector)
+    size(A.J, 2) == 0 && return 0.0
+    Jv = jmul!(A.Jv, A.J, v)
+    total = 0.0
+    @inbounds @simd for i in eachindex(Jv)
+        total += Jv[i] * Jv[i]
     end
     return total
 end
@@ -205,22 +214,35 @@ Code that writes `getA(ls).J` or `.r` directly must call `zero!` (before or afte
 [`optimize`](@ref) with a `Matrix` prototype; with an integer `m`, `J` starts as zeros.
 `copy_structure` copies `J`, so a trial system starts with the same entries.
 """
-mutable struct DenseTallLinearSystem <: AbstractTallLinearSystem
+mutable struct DenseTallLinearSystem{W} <: AbstractTallLinearSystem
     const A::TallHessian
     const b::Vector{Float64}      # the gradient Jᵀr
     const x::Vector{Float64}
+    const solver_ws::W            # an iterative solver's workspace (`maketallws`), or nothing for QR
     lambda::Float64
     scaling::Union{Nothing, Vector{Float64}}
 end
-DenseTallLinearSystem(J::Matrix{Float64}) = DenseTallLinearSystem(TallHessian(J), zeros(size(J, 2)), zeros(size(J, 2)), 0.0, nothing)
-DenseTallLinearSystem(m::Integer, n::Integer) = DenseTallLinearSystem(zeros(Float64, m, n))
+function DenseTallLinearSystem(J::Matrix{Float64}; linsolver = :auto)
+    m, n = size(J)
+    # An iterative solver needs no QR scratch, only its own workspace
+    scratch = needsqr(linsolver) ? TallQRScratch(m, n) : TallQRScratch(0, n)
+    A = TallHessian(J, zeros(m), zeros(m), TallQRWorkspace(scratch, n))
+    return DenseTallLinearSystem(A, zeros(n), zeros(n), maketallws(m, n, linsolver), 0.0, nothing)
+end
+DenseTallLinearSystem(m::Integer, n::Integer; linsolver = :auto) = DenseTallLinearSystem(zeros(Float64, m, n); linsolver)
+
+# The solvers of the tall systems: QR (`:auto`, `:qr`) in this package, and those an extension
+# adds through `maketallws` (LSMR, in KrylovExt), which builds the solver's workspace
+needsqr(linsolver) = linsolver_symbol(linsolver) in (:auto, :qr)
+maketallws(m, n, linsolver) = maketallws(m, n, static(linsolver_symbol(linsolver)))
+maketallws(m, n, ::StaticSymbol) = nothing
 
 # A Matrix prototype is the storage resjac! writes into, used with the values it holds: entries
 # resjac! never writes keep the caller's values. With an integer m the matrix starts as zeros.
 # The prototype's type selects the system (a sparse one in sparsetallsystem.jl).
 makelinearsystem(x0, obj::JacobianObjective, linsolver) = tall_linearsystem(x0, obj.J, linsolver)
-tall_linearsystem(x0, m::Integer, linsolver) = DenseTallLinearSystem(m, dynamic(nvars(x0)))
-tall_linearsystem(x0, J::Matrix{Float64}, linsolver) = DenseTallLinearSystem(J)
+tall_linearsystem(x0, m::Integer, linsolver) = DenseTallLinearSystem(m, dynamic(nvars(x0)); linsolver)
+tall_linearsystem(x0, J::Matrix{Float64}, linsolver) = DenseTallLinearSystem(J; linsolver)
 
 # resjac! sets every entry of r and every entry of J that can be non-zero, so a fresh
 # linearization needs no zeroing: only the cached factorization and column norms are invalidated.
@@ -237,7 +259,7 @@ end
 # handed this prototype again would start from the other's.
 workspace_linearsystem(x0, obj::JacobianObjective, linsolver) = workspace_tall_linearsystem(x0, obj.J, linsolver)
 workspace_tall_linearsystem(x0, m::Integer, linsolver) = tall_linearsystem(x0, m, linsolver)
-workspace_tall_linearsystem(x0, J::Matrix{Float64}, linsolver) = DenseTallLinearSystem(copy(J))
+workspace_tall_linearsystem(x0, J::Matrix{Float64}, linsolver) = DenseTallLinearSystem(copy(J); linsolver)
 
 # The start of a run with a reused workspace. Every J the run uses (the main system's, and the
 # trial system's if the iterator has one) must start as the J a fresh run would: the prototype as
@@ -264,9 +286,9 @@ function copy_structure(ls::DenseTallLinearSystem)
     A = ls.A
     m, n = size(A.J)
     At = TallHessian(copy(A.J), zeros(m), zeros(m), TallQRWorkspace(A.ws.scratch, n))
-    return DenseTallLinearSystem(At, zeros(length(ls.b)), ls.x, ls.lambda, ls.scaling)
+    return DenseTallLinearSystem(At, zeros(length(ls.b)), ls.x, ls.solver_ws, ls.lambda, ls.scaling)
 end
-sharex(ls::DenseTallLinearSystem, from) = ls.x === from.x ? ls : DenseTallLinearSystem(ls.A, ls.b, from.x, ls.lambda, ls.scaling)
+sharex(ls::DenseTallLinearSystem, from) = ls.x === from.x ? ls : DenseTallLinearSystem(ls.A, ls.b, from.x, ls.solver_ws, ls.lambda, ls.scaling)
 
 # How the iterators and the outer loop drive the tall system unchanged: they call
 # `fdf!(getb(ls), getA(ls), x)`, and this wrapper turns that into `resjac!(r, J, x)` and g = Jᵀr
@@ -331,6 +353,7 @@ function solve!(ls::DenseTallLinearSystem, ::Union{StaticSymbol{:auto}, StaticSy
     A = ls.A
     ws = A.ws
     m, n = size(A.J)
+    size(ws.scratch.Jr, 1) == m || solvermismatch(ls, :qr)
     factorized(ws) || factor_tall!(A)
     if ws.nonfinite
         fill!(ls.x, NaN)

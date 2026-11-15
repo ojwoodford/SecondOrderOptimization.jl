@@ -35,9 +35,9 @@ end
 
     @test SecondOrderOptimization.validatelinsolver(:cg)
     @test SecondOrderOptimization.validatelinsolver(:minres)
-    # M10: LSMR on the Hessian works with H'H, squaring its condition number again, so it isn't offered
-    @test !SecondOrderOptimization.validatelinsolver(:lsmr)
-    @test_throws ArgumentError OptimizationOptions(linsolver=:lsmr)
+    # M10: LSMR on the Hessian works with H'H, squaring its condition number again, so only a
+    # JacobianObjective accepts it (TP2, test/lsmr.jl)
+    @test SecondOrderOptimization.validatelinsolver(:lsmr)
     @test SecondOrderOptimization.validatelinsolver(:krylov)
 
     # Quadratic test problem: f(x) = 0.5 * x' A x - b' x

@@ -34,13 +34,17 @@ function tp1_cost(x)
     return 0.5 * total
 end
 function tp1_resjac!(r, J, x)
-    nz = J isa SparseMatrixCSC ? nonzeros(J) : vec(J)
     m = length(TP1_T)
     for i in 1:m
         e = exp(x[2] * TP1_T[i])
         r[i] = x[1] * e - TP1_Y[i]
-        nz[i] = e
-        nz[m + i] = x[1] * TP1_T[i] * e
+        if J isa SparseMatrixCSC
+            nonzeros(J)[i] = e
+            nonzeros(J)[m + i] = x[1] * TP1_T[i] * e
+        else
+            J[i, 1] = e
+            J[i, 2] = x[1] * TP1_T[i] * e
+        end
     end
     return tp1_cost(x)
 end
