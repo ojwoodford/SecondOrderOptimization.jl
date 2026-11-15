@@ -9,7 +9,7 @@ using Static
 import SecondOrderOptimization: validatelinsolver, makesparsews, makedensews, solve!
 import SecondOrderOptimization: AbstractLinearSystem, SparseLinearSystem, DenseLinearSystem
 import SecondOrderOptimization: SolveStatus, Success, NotPositiveDefinite, Indefinite
-import SecondOrderOptimization: uniformscaling!, damp_marquardt!
+import SecondOrderOptimization: uniformscaling!, damp_marquardt!, builtfor, solvermismatch
 
 # Validation of Krylov solver symbols
 validatelinsolver(::StaticSymbol{:cg}) = true
@@ -45,11 +45,14 @@ makedensews(n, ::StaticSymbol{:cg}) = Krylov.CgWorkspace(n, n, Vector{Float64})
 makedensews(n, ::StaticSymbol{:minres}) = Krylov.MinresWorkspace(n, n, Vector{Float64})
 makedensews(n, ::StaticSymbol{:krylov}) = makedensews(n, static(:cg))
 
+builtfor(::JacobiWorkspace{<:Krylov.CgWorkspace}) = ":cg or :krylov"
+builtfor(::JacobiWorkspace{<:Krylov.MinresWorkspace}) = ":minres"
+
 # The sparse workspace is built once, by `makesparsews`, and `solver_ws` is a `const` field,
 # so it cannot be replaced when it doesn't match the requested solver.
-function check_krylov_ws(ws, ::Type{W}) where W
-    ws isa W && return ws
-    throw(ArgumentError("This workspace was built for a different linear solver; build the `OptimizationWorkspace` with the same `linsolver` option that you optimize with."))
+function check_krylov_ws(ls, ::Type{W}, asked::Symbol) where W
+    ls.solver_ws isa W && return ls.solver_ws
+    solvermismatch(ls, asked)
 end
 
 # With `linesearch=true`, nonpositive curvature sets both `indefinite` and `solved`, so check it first
@@ -60,7 +63,7 @@ end
 
 # SparseLinearSystem execution
 function solve!(ls::SparseLinearSystem, ::StaticSymbol{:cg})
-    jws = check_krylov_ws(ls.solver_ws, JacobiWorkspace{<:Krylov.CgWorkspace})
+    jws = check_krylov_ws(ls, JacobiWorkspace{<:Krylov.CgWorkspace}, :cg)
     ws = jws.ws
     if ls.lambda > 0
         if isnothing(ls.scaling)
@@ -87,7 +90,7 @@ function solve!(ls::SparseLinearSystem, ::StaticSymbol{:cg})
 end
 
 function solve!(ls::SparseLinearSystem, ::StaticSymbol{:minres})
-    jws = check_krylov_ws(ls.solver_ws, JacobiWorkspace{<:Krylov.MinresWorkspace})
+    jws = check_krylov_ws(ls, JacobiWorkspace{<:Krylov.MinresWorkspace}, :minres)
     ws = jws.ws
     if ls.lambda > 0
         if isnothing(ls.scaling)

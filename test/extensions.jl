@@ -3,17 +3,16 @@
 using SecondOrderOptimization, SparseArrays, LinearAlgebra, Test, Static
 using SecondOrderOptimization: dampen!, Success, NotPositiveDefinite, Indefinite   # internal names
 
-# P2: the message for a system built for another solver names no internal function
-function mismatch_message(ls, solver)
-    err = try SecondOrderOptimization.solve!(ls, static(solver)); nothing catch e; e end
+# P2b: a system solved with a solver it was not built for is an internal inconsistency (no user
+# can reach it: a workspace reused with another linsolver is rebuilt). The message says so and
+# names the solver asked for and the one the system was built for.
+function mismatch_message(ls, asked, builtfor)
+    err = try SecondOrderOptimization.solve!(ls, static(asked)); nothing catch e; e end
     @test err isa ArgumentError
     msg = sprint(showerror, err)
-    @test occursin("OptimizationWorkspace", msg) && occursin("linsolver", msg)
-    for name in names(SecondOrderOptimization; all = true)
-        s = String(name)
-        (startswith(s, "#") || name in names(SecondOrderOptimization) || length(s) < 4) && continue
-        occursin(Regex("\\b\\Q" * s * "\\E\\b"), msg) && @test "internal name $s in message" == ""
-    end
+    @test occursin("Internal inconsistency", msg)
+    @test occursin("asked for linsolver = :$asked", msg)
+    @test occursin("built by makelinearsystem for linsolver = $builtfor", msg)
     return msg
 end
 
@@ -74,12 +73,20 @@ end
         ls_wrong = SecondOrderOptimization.makelinearsystem(zeros(3), copy(A_spd), static(:auto))
         ls_wrong.b .= b_vec
         @test_throws ArgumentError SecondOrderOptimization.solve!(ls_wrong, static(solver))
-        mismatch_message(ls_wrong, solver)
+        mismatch_message(ls_wrong, solver, ":auto or :ldl")
         ls_right = SecondOrderOptimization.makelinearsystem(zeros(3), copy(A_spd), static(solver))
         ls_right.b .= b_vec
         @test SecondOrderOptimization.solve!(ls_right, static(solver)) == Success
         @test isapprox(ls_right.x, x_exact; rtol=1e-5)
     end
+    # P2b: each workspace type names the solver it was built for
+    for (built, asked, text) in ((:cg, :minres, ":cg or :krylov"), (:minres, :cg, ":minres"),
+                                 (:cholesky, :cg, ":cholesky"), (:qr, :minres, ":qr"))
+        ls_other = SecondOrderOptimization.makelinearsystem(zeros(3), copy(A_spd), static(built))
+        mismatch_message(ls_other, asked, text)
+    end
+    ls_odd = SecondOrderOptimization.SparseLinearSystem(copy(A_spd), zeros(3), zeros(3), [1, 4, 7], :not_a_workspace)
+    mismatch_message(ls_odd, :cg, "an unknown solver (workspace type Symbol)")
 
     # M11: sparse CG and MINRES are Jacobi preconditioned, which helps on a badly scaled matrix
     n_sc = 400
@@ -170,7 +177,8 @@ end
         end
         ls_wrong = SecondOrderOptimization.makelinearsystem(zeros(3), copy(A_spd), static(:auto))
         @test_throws ArgumentError SecondOrderOptimization.solve!(ls_wrong, static(:pardiso))
-        mismatch_message(ls_wrong, :pardiso)
+        mismatch_message(ls_wrong, :pardiso, ":auto or :ldl")
+        mismatch_message(ls, :cg, ":pardiso")
         # B8: damping changes values only, so the analysed pattern is reused
         dampen!(ls, 2.0)
         @test SecondOrderOptimization.solve!(ls, static(:pardiso)) == Success

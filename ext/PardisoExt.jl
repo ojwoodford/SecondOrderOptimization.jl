@@ -8,7 +8,7 @@ using Static
 import SecondOrderOptimization: validatelinsolver, makesparsews, solve!
 import SecondOrderOptimization: AbstractLinearSystem, SparseLinearSystem, DenseLinearSystem
 import SecondOrderOptimization: SolveStatus, Success, NotPositiveDefinite, Indefinite
-import SecondOrderOptimization: uniformscaling!, damp_marquardt!, ensure_diag_and_inds
+import SecondOrderOptimization: uniformscaling!, damp_marquardt!, ensure_diag_and_inds, builtfor, solvermismatch
 
 # Validation of Pardiso solver symbol
 validatelinsolver(::StaticSymbol{:pardiso}) = true
@@ -61,6 +61,7 @@ function PardisoWorkspace(A::SparseMatrixCSC{Float64})
     Pardiso.pardiso(ps, L, zeros(Float64, size(A, 1)))
     return PardisoWorkspace(ps, L, map)
 end
+builtfor(::PardisoWorkspace) = ":pardiso"
 
 function makesparsews(A, ::StaticSymbol{:pardiso})
     pardiso_is_available() || return nothing
@@ -69,10 +70,10 @@ end
 
 # The sparse workspace is built once, by `makesparsews`, and `solver_ws` is a `const` field,
 # so it cannot be replaced here.
-function check_pardiso_ws(ws)
-    ws isa PardisoWorkspace && return ws
+function check_pardiso_ws(ls)
+    ls.solver_ws isa PardisoWorkspace && return ls.solver_ws
     pardiso_is_available() || pardiso_unavailable_error()
-    throw(ArgumentError("This workspace was built for a different linear solver; build the `OptimizationWorkspace` with the same `linsolver` option that you optimize with."))
+    solvermismatch(ls, :pardiso)
 end
 
 # Factorize and solve with the current (already damped) values of `A`, whose pattern must be
@@ -95,7 +96,7 @@ function pardiso_solve!(ws::PardisoWorkspace, x, A::SparseMatrixCSC, b)
 end
 
 function solve!(ls::SparseLinearSystem, ::StaticSymbol{:pardiso})
-    ws = check_pardiso_ws(ls.solver_ws)
+    ws = check_pardiso_ws(ls)
     if ls.lambda > 0
         if isnothing(ls.scaling)
             uniformscaling!(ls, ls.lambda)

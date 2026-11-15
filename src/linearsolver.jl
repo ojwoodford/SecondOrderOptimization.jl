@@ -1,5 +1,22 @@
 using LDLFactorizations, LinearAlgebra, StaticArrays, SparseArrays, Static
 
+# The linsolver a sparse system's solver workspace was built for by `makesparsews`, as text, for
+# the error raised when `solve!` is asked for another solver. Extensions add methods for their
+# workspace types.
+builtfor(::LDLFactorizations.LDLFactorization) = ":auto or :ldl"
+builtfor(::SparseArrays.CHOLMOD.Factor) = ":cholesky"
+builtfor(::Nothing) = ":qr"
+builtfor(ws) = "an unknown solver (workspace type $(typeof(ws)))"
+
+# The error for a system solved with a solver it was not built for. A user cannot reach it: an
+# `OptimizationWorkspace` is keyed on the options' type, which includes the solver, so a workspace
+# reused with another `linsolver` is rebuilt. Only code calling `solve!` directly can.
+function solvermismatch(ls, asked::Symbol)
+    throw(ArgumentError("Internal inconsistency: solve! was asked for linsolver = :$asked, but this " *
+        "$(nameof(typeof(ls))) was built by makelinearsystem for linsolver = $(builtfor(ls.solver_ws)). " *
+        "A linear system must be solved with the linsolver that makelinearsystem built it with."))
+end
+
 validatelinsolver(::StaticSymbol{:auto}) = true
 validatelinsolver(::StaticSymbol{:cholesky}) = true
 validatelinsolver(::StaticSymbol{:ldl}) = true
