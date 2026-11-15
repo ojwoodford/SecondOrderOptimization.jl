@@ -1,11 +1,15 @@
 using Test, Random, LinearAlgebra, SparseArrays, StaticArrays, Static
-using SecondOrderOptimization, BlockLinearSystems
+using SecondOrderOptimization, BlockLinearSystems, Polyester   # Polyester: BlockLinearSystems' threaded kernels
 using SecondOrderOptimization: check_linear_system   # internal names
 
 # Tests for the BlockLinearSystems extension (ext/BlockLinearSystemsExt.jl): Schur-complement linear systems.
 # Every Schur solve is compared against a dense Cholesky solve of the full damped system.
 
 const SOOExt = Base.get_extension(SecondOrderOptimization, :BlockLinearSystemsExt)
+
+# rules.md 21: a warm kernel call allocates nothing, except that on Julia 1.10 a threaded call may allocate up to
+# 2 048 bytes per thread (decided 2026-11-15, BlockLinearSystems R2; its `threaded_allocs_ok`)
+threaded_allocs_ok(bytes) = bytes == 0 || (VERSION < v"1.11" && Threads.nthreads() > 1 && bytes <= 2048 * Threads.nthreads())
 
 """
     SchurTestProblem
@@ -136,6 +140,17 @@ function standard_problem(seed=1; rr_pairs=Tuple{Int, Int}[])
         [1], [2], [3], [4], [1, 2], [3, 4], [2, 3], [1, 4],
     ]
     return SchurTestProblem(rng, r_dims, e_dims, couplings; rr_pairs)
+end
+
+# Eliminated blocks of every size class: tiny closed forms (1-3), the generic static tier (4..D_STATIC)
+# and the dynamic tier above D_STATIC
+function mixed_dims_problem(seed=11)
+    rng = Random.Xoshiro(seed)
+    r_dims = [6, 3, 9, 6]
+    e_dims = [12, 12, 9, 9, 8, 8, 5, 5, 4, 4, 3, 3, 2, 2, 1, 1]
+    coupled = 1:4
+    couplings = [sort(unique([rand(rng, coupled) for _ in 1:3])) for _ in e_dims]
+    return SchurTestProblem(rng, r_dims, e_dims, couplings)
 end
 
 @testset "BlockLinearSystemsExt: Schur solve equals full Cholesky solve" begin
@@ -334,6 +349,7 @@ schur_quadform_allocations(H, v) = @allocated SecondOrderOptimization.quadform(H
 end
 
 @testset "Schur solve is serial and allocation free for small problems; threading matches (B11)" begin
+    @test Base.get_extension(BlockLinearSystems, :PolyesterExt) !== nothing
     p = standard_problem()
     n = length(p.b)
     x_ref = reference_solve(p, 0.4, ones(n))
@@ -342,22 +358,42 @@ end
         SecondOrderOptimization.dampen!(ls, 0.4)
         SecondOrderOptimization.solve!(ls)
         @test norm(ls.x - x_ref) <= 1e-10 * norm(x_ref)
-        H = ls.H
-        ws = ls.workspace
-        # The reduction and back-substitution kernels allocate nothing when serial
-        if kind === :dense
-            run_reduce() = reduce_schur_dense!(ls.S, ls.g_S, ls.b_r, ls.b_e, ls.scaling_e, ls.lambda, H.structure, H.E_data, H.C_data, ws)
-            @test run_reduce()
-            @test (@allocated run_reduce()) == 0
-        else
-            run_reduce_s() = reduce_schur_sparse!(ls.S, ls.g_S, ls.b_r, ls.b_e, ls.scaling_e, ls.lambda, H.structure, H.E_data, H.C_data,
-                ls.block_colptr, ls.block_rowval, ls.block_row_offsets, ls.col_heights, ws)
-            @test run_reduce_s()
-            @test (@allocated run_reduce_s()) == 0
+    end
+
+    # The reduction and back-substitution kernels allocate nothing (TP3b): with one chunk per thread and the
+    # threading threshold at zero, so that on more than one thread the threaded paths run (rules.md 30), and on
+    # a problem with eliminated blocks above D_STATIC (9 and 12) as well as the standard one
+    old = BlockLinearSystems.SCHUR_THREAD_MIN_WORK[]
+    try
+        BlockLinearSystems.SCHUR_THREAD_MIN_WORK[] = 0
+        @test maximum(mixed_dims_problem().e_dims) > BlockLinearSystems.D_STATIC
+        for q in (standard_problem(), mixed_dims_problem()), kind in (:dense, :sparse)
+            ls = make_schur_ls(kind, q; nchunks=Threads.nthreads())
+            SecondOrderOptimization.dampen!(ls, 0.4)
+            @test SecondOrderOptimization.solve!(ls) == SecondOrderOptimization.Success
+            xq = reference_solve(q, 0.4, ones(length(q.b)))
+            @test norm(ls.x - xq) <= 1e-9 * norm(xq)
+            H = ls.H
+            ws = ls.workspace
+            if kind === :dense
+                run_reduce() = reduce_schur_dense!(ls.S, ls.g_S, ls.b_r, ls.b_e, ls.scaling_e, ls.lambda, H.structure, H.E_data, H.C_data, ws)
+                @test run_reduce()
+                GC.gc()   # @allocated counts every thread: no finalizer from earlier tests runs inside the measurement
+                @test threaded_allocs_ok(@allocated run_reduce())
+            else
+                run_reduce_s() = reduce_schur_sparse!(ls.S, ls.g_S, ls.b_r, ls.b_e, ls.scaling_e, ls.lambda, H.structure, H.E_data, H.C_data,
+                    ls.block_colptr, ls.block_rowval, ls.block_row_offsets, ls.col_heights, ws)
+                @test run_reduce_s()
+                GC.gc()
+                @test threaded_allocs_ok(@allocated run_reduce_s())
+            end
+            run_back() = backsubstitute!(ls.x_e, ls.x_r, H.structure, H.C_data, ws)
+            run_back()
+            GC.gc()
+            @test threaded_allocs_ok(@allocated run_back())
         end
-        run_back() = backsubstitute!(ls.x_e, ls.x_r, H.structure, H.C_data, ws)
-        run_back()
-        @test (@allocated run_back()) == 0
+    finally
+        BlockLinearSystems.SCHUR_THREAD_MIN_WORK[] = old
     end
 
     # Force the threaded code paths (they only engage with more than one thread) and compare
@@ -491,17 +527,6 @@ end
     @test !BlockLinearSystems.inv_sym_block(H2, 0f0, SVector{2, Float32}(1, 1)).success
     H2d = SMatrix{2, 2, Float64, 4}(1, 1, 1, 1 + 1e-6)
     @test BlockLinearSystems.inv_sym_block(H2d, 0.0, SVector{2, Float64}(1, 1)).success
-end
-
-# Eliminated blocks of every size class: tiny closed forms (1-3), the generic static tier (4..D_STATIC)
-# and the dynamic tier above D_STATIC
-function mixed_dims_problem(seed=11)
-    rng = Random.Xoshiro(seed)
-    r_dims = [6, 3, 9, 6]
-    e_dims = [12, 12, 9, 9, 8, 8, 5, 5, 4, 4, 3, 3, 2, 2, 1, 1]
-    coupled = 1:4
-    couplings = [sort(unique([rand(rng, coupled) for _ in 1:3])) for _ in e_dims]
-    return SchurTestProblem(rng, r_dims, e_dims, couplings)
 end
 
 

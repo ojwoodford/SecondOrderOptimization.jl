@@ -1,4 +1,5 @@
 using SecondOrderOptimization, BlockLinearSystems, Krylov, SparseArrays, LinearAlgebra, Static, Random, Test
+using Polyester   # BlockLinearSystems' kernels thread only with Polyester loaded
 using SecondOrderOptimization: dampen!, zero!, Success, NotPositiveDefinite, check_linear_system   # internal names
 using SecondOrderOptimization: getA, getb, getx, solve!
 const SOO = SecondOrderOptimization
@@ -12,11 +13,11 @@ const TP3_SOLVERS = Dict(Matrix{Float64} => (:auto, :qr, :cholesky, :ldl, :lsmr)
 
 # Three retained blocks; six eliminated blocks, one above D_STATIC (9) and, with `under`, one with fewer rows
 # than dimensions; a free group of rows coupled to every retained block
-function tp3_structure(; under = false)
+function tp3_structure(; under = false, nchunks = 1)
     r_dims, e_dims = [6, 6, 6], [3, 3, 3, 9, 2, 1]
     couplings = [[1, 2], [1, 2, 3], [2, 3], [1, 3], [1, 2], [3]]
     e_rows = [8, 10, 6, 12, under ? 1 : 4, 3]
-    return SchurJacobianStructure(r_dims, e_dims, couplings, e_rows; free_rows = [20], free_retained = [[1, 2, 3]])
+    return SchurJacobianStructure(r_dims, e_dims, couplings, e_rows; free_rows = [20], free_retained = [[1, 2, 3]], nchunks)
 end
 
 # Where each Jacobian entry and residual of the dense problem lives in the tables: (table index, dense row, dense
@@ -131,6 +132,14 @@ function tp3_schur(p, x)
     return ls, Jd, rd
 end
 
+# A warm threaded run allocates nothing, except on Julia 1.10, where each threaded BlockLinearSystems kernel call
+# may allocate up to 2 048 bytes per thread (rules.md 21, BlockLinearSystems R2). A run makes many such calls, so
+# on 1.10 the bound is per run: 48 KB per thread, a starting value above the largest measured (2026-11-15, 4
+# threads, nchunks = 4: 140 640 bytes for :lsmr, 35 160 per thread). 1.11 and later, and every serial run: zero.
+const TP3_110_RUN_BYTES_PER_THREAD = 48 * 1024
+tp3_threaded_run_ok(bytes) = bytes == 0 ||
+    (VERSION < v"1.11" && Threads.nthreads() > 1 && bytes <= TP3_110_RUN_BYTES_PER_THREAD * Threads.nthreads())
+
 tp3_solve!(ls, s, lambda, scaling) = (dampen!(ls, lambda, scaling); solve!(ls, static(s)))
 tp3_run(x, obj, opts, ws) = (x .= 0.1; @allocated optimize!(x, obj, opts; workspace = ws))
 # Bytes allocated by a warm run with a workspace, behind a function barrier (Julia 1.10 boxes variables
@@ -140,6 +149,7 @@ function tp3_warm_bytes(p, ::Type{RT}, opts) where RT
     ws = OptimizationWorkspace(fill(0.1, p.lay.n), obj, opts)
     x = fill(0.1, p.lay.n)
     tp3_run(x, obj, opts, ws)
+    GC.gc()   # @allocated counts every thread: no finalizer from earlier tests runs inside the measurement
     return tp3_run(x, obj, opts, ws)
 end
 
@@ -196,24 +206,22 @@ end
     end
 
     @testset "Threaded elimination: the same steps; allocation" begin
+        @test Base.get_extension(BlockLinearSystems, :PolyesterExt) !== nothing
         old = BlockLinearSystems.SCHUR_THREAD_MIN_WORK[]
         try
+            # One chunk per thread and no threshold, so that on more than one thread the kernels run threaded
+            # (rules.md 30)
             BlockLinearSystems.SCHUR_THREAD_MIN_WORK[] = 0
-            p = TP3Problem(tp3_structure())
+            p = TP3Problem(tp3_structure(; nchunks = Threads.nthreads()))
             x = 0.1 .* randn(Xoshiro(2), p.lay.n)
             lsS, Jd, rd = tp3_schur(p, x)
             for RT in keys(TP3_SOLVERS), s in TP3_SOLVERS[RT]
                 ls = tp3_system(p, RT, s, x)
                 @test tp3_solve!(ls, s, 0.3, nothing) == Success == tp3_solve!(lsS, :cholesky, 0.3, nothing)
                 @test getx(ls) ≈ getx(lsS) rtol = s === :lsmr ? 1e-6 : 1e-10
-                RT <: SparseMatrixCSC && s in (:auto, :cholesky) && continue
-                # Threaded, BlockLinearSystems' Polyester kernels (jtr!, jtj_diag!, reduced_jacobian!,
-                # reduced_mul!) allocate their closures (found 2026-11-15, recorded in
-                # BlockLinearSystems.jl-fixes.md); this system allocates nothing of its own
-                if Threads.nthreads() > 1
-                    @test_broken tp3_warm_bytes(p, RT, OptimizationOptions(; linsolver = s)) == 0
-                else
-                    @test tp3_warm_bytes(p, RT, OptimizationOptions(; linsolver = s)) == 0
+                RT <: SparseMatrixCSC && s in (:auto, :cholesky) && continue   # CHOLMOD's working memory
+                for it in SOO.JACOBIAN_ITERATORS
+                    @test tp3_threaded_run_ok(tp3_warm_bytes(p, RT, OptimizationOptions(; iterator = it, linsolver = s)))
                 end
             end
         finally

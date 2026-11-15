@@ -80,6 +80,7 @@ or `:qr`, and those the extensions below add.
   The type of `H` selects the linear system, including elimination for a `SchurBlockMatrix`: there is no solver symbol or option for it.
   `linsolver` then names the solver for the reduced system: `:auto` or `:cholesky` (Cholesky, falling back to Bunch-Kaufman) or `:ldl` (Bunch-Kaufman); any other is an `ArgumentError` when the system is built.
   On the Jacobian path, a `SchurBlockJacobian{Float64, RType}` prototype for a [`JacobianObjective`](@ref) selects QR elimination of the eliminated blocks; `RType` (dense `Matrix{Float64}` or `SparseMatrixCSC{Float64, Int}`) is the storage of the reduced system, and `linsolver` names its solver (see the [`JacobianObjective`](@ref) docstring). With Krylov.jl also loaded (`BlockLinearSystemsKrylovExt`), `:lsmr` solves the reduced problem by LSMR on the reduced Jacobian.
+  The elimination kernels run threaded over the structure's chunks only when Polyester.jl is also loaded (BlockLinearSystems' `PolyesterExt`); otherwise they run serially. A warm run allocates nothing, except that on Julia 1.10 each threaded kernel call may allocate a little (up to 2 048 bytes per thread).
   To enable: `using BlockLinearSystems`.
 
 ## Callbacks & Diagnostics
