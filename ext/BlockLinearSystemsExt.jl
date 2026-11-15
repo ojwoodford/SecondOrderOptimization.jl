@@ -328,7 +328,7 @@ function SecondOrderOptimization.solve!(ls::DenseSchurLinearSystem, solver_opt::
     end
     status == Success || return status
 
-    backsubstitute!(ls.x_e, ls.x_r, ls.H.structure, ls.H.C_data, ls.workspace.E_inv_data, ls.workspace.z_data)
+    backsubstitute!(ls.x_e, ls.x_r, ls.H.structure, ls.H.C_data, ls.workspace)
     return Success
 end
 SecondOrderOptimization.solve!(ls::DenseSchurLinearSystem, s::Symbol) = SecondOrderOptimization.solve!(ls, static(s))
@@ -394,7 +394,7 @@ function SecondOrderOptimization.solve!(ls::SparseSchurLinearSystem, solver_opt:
         end
     end
 
-    backsubstitute!(ls.x_e, ls.x_r, ls.H.structure, ls.H.C_data, ls.workspace.E_inv_data, ls.workspace.z_data)
+    backsubstitute!(ls.x_e, ls.x_r, ls.H.structure, ls.H.C_data, ls.workspace)
     return Success
 end
 SecondOrderOptimization.solve!(ls::SparseSchurLinearSystem, s::Symbol) = SecondOrderOptimization.solve!(ls, static(s))

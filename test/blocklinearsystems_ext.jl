@@ -355,7 +355,7 @@ end
             @test run_reduce_s()
             @test (@allocated run_reduce_s()) == 0
         end
-        run_back() = backsubstitute!(ls.x_e, ls.x_r, H.structure, H.C_data, ws.E_inv_data, ws.z_data)
+        run_back() = backsubstitute!(ls.x_e, ls.x_r, H.structure, H.C_data, ws)
         run_back()
         @test (@allocated run_back()) == 0
     end
