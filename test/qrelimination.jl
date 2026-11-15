@@ -248,6 +248,11 @@ end
         @test !called[]
         # iterator = :gradientdescent stays rejected
         @test_throws ArgumentError optimize(x0, JacobianObjective(f, rj!, SchurBlockJacobian{Float64, Matrix{Float64}}(p.jst)), OptimizationOptions(iterator = :gradientdescent))
+        # ...and its message, shared by every Jacobian-path error, names the solvers each SchurBlockJacobian takes
+        msg = sprint(showerror, try optimize(x0, JacobianObjective(f, rj!, SchurBlockJacobian{Float64, Matrix{Float64}}(p.jst)), OptimizationOptions(iterator = :gradientdescent)); nothing catch e; e end)
+        @test occursin("SchurBlockJacobian{Float64, Matrix{Float64}}, linsolver = :auto, :qr, :cholesky or :ldl", msg)
+        @test occursin("SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}, linsolver = :auto, :cholesky or :ldl", msg)
+        @test !called[]
     end
 
     @testset "Workspaces: reused for the same structure, rebuilt for another" begin

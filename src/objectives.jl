@@ -165,8 +165,11 @@ end
 # The iterators accepted with a JacobianObjective
 const JACOBIAN_ITERATORS = (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton)
 
-const JACOBIAN_SUPPORT = "JacobianObjective supports a Matrix{Float64} or SparseMatrixCSC{Float64, Int} Jacobian prototype, an integer number of residuals m, or (with BlockLinearSystems.jl loaded) a SchurBlockJacobian{Float64, RType}, with iterator = " *
-    join((":$s" for s in JACOBIAN_ITERATORS), ", ", " or ") * " and linsolver = :auto or :qr (or :lsmr, with Krylov.jl loaded)"
+const JACOBIAN_SUPPORT = "JacobianObjective supports iterator = " * join((":$s" for s in JACOBIAN_ITERATORS), ", ", " or ") *
+    " with a Matrix{Float64} or SparseMatrixCSC{Float64, Int} Jacobian prototype or an integer number of residuals m, and linsolver = :auto or :qr;" *
+    " or, with BlockLinearSystems.jl loaded, a SchurBlockJacobian{Float64, Matrix{Float64}}, linsolver = :auto, :qr, :cholesky or :ldl," *
+    " or a SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}, linsolver = :auto, :cholesky or :ldl." *
+    " Every prototype also takes linsolver = :lsmr, with Krylov.jl loaded"
 
 # The Jacobian prototype: a Matrix{Float64} with at least one row, or an integer m >= 1
 function checkjacobian(J)
