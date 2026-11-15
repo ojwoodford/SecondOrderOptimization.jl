@@ -94,13 +94,21 @@ cheaper.
 
 For $J$ of size $m \times n$:
 
-| | Normal equations (`HessianObjective`) | QR of the Jacobian (`JacobianObjective`) |
+| | Normal equations (`HessianObjective`) | QR of a dense Jacobian (`JacobianObjective`) |
 |:---|:---|:---|
 | Once per linearization | form $J^\top J$ and $J^\top r$: $O(mn^2)$, in your `fdf!` | Householder QR of $[J\ r]$: $O(mn^2)$, about twice the flops of forming $J^\top J$ |
 | Per damping value tried | Cholesky of $J^\top J + \lambda D$: $O(n^3)$ | QR of the stacked $2n \times n$ matrix $[R;\ \sqrt{\lambda} D^{1/2}]$: $O(n^3)$, independent of $m$ |
 | Storage | $n \times n$ (twice that with trial reuse) | $J$, plus one $m \times (n + 1)$ scratch copy of $[J\ r]$ for the factorization, plus $2n \times (n + 1)$: about twice the storage of $J$. With trial reuse (`callbackchangesstate = false`, the default) a second $J$, which shares the scratch: about three times |
 
-The per-damping cost does not depend on $m$, so the retries with a larger $\lambda$ after a
+With a sparse `J` (a `SparseMatrixCSC{Float64, Int}` prototype) the system is solved by
+SuiteSparse's sparse QR (SPQR) of $[J;\ \sqrt{\lambda} D^{1/2}]$. Its column ordering and symbolic
+analysis are computed once, when the system is built; every damping value tried is a numeric
+factorization of the whole augmented matrix, so a retry costs as much as the first solve. SPQR
+allocates its working memory inside each factorization (and frees it again); nothing else
+allocates in the loop. `resjac!` must write only the entries the prototype stores, for example
+through `nonzeros(J)`.
+
+For a dense `J`, the per-damping cost does not depend on $m$, so the retries with a larger $\lambda$ after a
 rejected step stay cheap however many residuals there are. An undamped solve on a numerically
 rank-deficient $J$ (including $m < n$) is reported as not positive definite, just as Cholesky
 reports singular normal equations: Levenberg-Marquardt raises $\lambda$, and Newton and dogleg
@@ -110,7 +118,7 @@ shift the diagonal.
 
 | Accepted | Rejected, with an `ArgumentError` before `f` or `resjac!` is called |
 |:---|:---|
-| `J` a `Matrix{Float64}` prototype, or an integer `m ≥ 1` | a sparse or any other prototype, or another element type (for now) |
+| `J` a `Matrix{Float64}` or `SparseMatrixCSC{Float64, Int}` prototype, or an integer `m ≥ 1` | any other prototype, including other sparse types, or another element or index type |
 | `iterator = :levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg` or `:newton` (Gauss-Newton) | `:gradientdescent`, which uses only the gradient $J^\top r$ and gains nothing from the Jacobian |
 | `linsolver = :auto` or `:qr` (both the QR solve above) | every other linear solver |
 

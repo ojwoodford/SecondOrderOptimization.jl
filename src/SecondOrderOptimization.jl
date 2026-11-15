@@ -45,8 +45,10 @@ include("callbacks.jl")
 # Iterators
 include("iterators.jl")
 
-# The residual-and-Jacobian linear system (after the iterators, for its Marquardt scaling method)
+# The residual-and-Jacobian linear systems, dense and sparse (after the iterators, for their
+# Marquardt scaling method)
 include("tallsystem.jl")
+include("sparsetallsystem.jl")
 
 # Optimization driver and loop
 include("optimize.jl")

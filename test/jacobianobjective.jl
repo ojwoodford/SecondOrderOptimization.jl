@@ -26,10 +26,14 @@ end
         J = zeros(2, 2)
         @test JacobianObjective(jrosen_cost, jrosen_resjac!, J).J === J
         @test SOO.nresiduals(obj) == 2 && SOO.nresiduals(JacobianObjective(jrosen_cost, jrosen_resjac!, zeros(5, 2))) == 5
+        # TP1: a SparseMatrixCSC{Float64, Int} prototype is accepted
+        Js = spzeros(5, 2)
+        @test JacobianObjective(jrosen_cost, jrosen_resjac!, Js).J === Js
+        @test SOO.nresiduals(JacobianObjective(jrosen_cost, jrosen_resjac!, Js)) == 5
     end
 
     @testset "Unsupported Jacobian prototypes are rejected when the objective is built" begin
-        for (J, needle) in ((spzeros(2, 2), "sparse"), (zeros(Float32, 2, 2), "Float64"), (zeros(Int, 2, 2), "Float64"),
+        for (J, needle) in ((spzeros(Float64, Int32, 2, 2), "sparse"), (spzeros(Float32, 2, 2), "sparse"), (spzeros(0, 2), "no rows"), (zeros(Float32, 2, 2), "Float64"), (zeros(Int, 2, 2), "Float64"),
                             (zeros(MMatrix{2, 2}), "not supported"), (view(zeros(3, 2), 1:2, :), "not supported"),
                             (Diagonal(ones(2)), "not supported"), (nothing, "not supported"), (2.0, "not supported"),
                             (true, "not supported"), (0, "at least 1"), (-3, "at least 1"), (zeros(0, 2), "no rows"))

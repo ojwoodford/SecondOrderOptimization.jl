@@ -55,6 +55,10 @@ function TallQRScratch(m::Integer, n::Integer)
                          Vector{Float64}(undef, lwork), 0)
 end
 
+# The tall systems, dense and sparse: they share the Marquardt scaling (from the squared column
+# norms of J, `colnorms2!`) and the damping floor
+abstract type AbstractTallLinearSystem <: AbstractLinearSystem end
+
 const TALL_TOKENS = Threads.Atomic{Int}(0)
 
 # The state of one system's linearization: whether its factorization and the squared column norms
@@ -201,7 +205,7 @@ Code that writes `getA(ls).J` or `.r` directly must call `zero!` (before or afte
 [`optimize`](@ref) with a `Matrix` prototype; with an integer `m`, `J` starts as zeros.
 `copy_structure` copies `J`, so a trial system starts with the same entries.
 """
-mutable struct DenseTallLinearSystem <: AbstractLinearSystem
+mutable struct DenseTallLinearSystem <: AbstractTallLinearSystem
     const A::TallHessian
     const b::Vector{Float64}      # the gradient Jᵀr
     const x::Vector{Float64}
@@ -213,10 +217,10 @@ DenseTallLinearSystem(m::Integer, n::Integer) = DenseTallLinearSystem(zeros(Floa
 
 # A Matrix prototype is the storage resjac! writes into, used with the values it holds: entries
 # resjac! never writes keep the caller's values. With an integer m the matrix starts as zeros.
-function makelinearsystem(x0, obj::JacobianObjective, linsolver)
-    obj.J isa Integer && return DenseTallLinearSystem(nresiduals(obj), dynamic(nvars(x0)))
-    return DenseTallLinearSystem(obj.J)
-end
+# The prototype's type selects the system (a sparse one in sparsetallsystem.jl).
+makelinearsystem(x0, obj::JacobianObjective, linsolver) = tall_linearsystem(x0, obj.J, linsolver)
+tall_linearsystem(x0, m::Integer, linsolver) = DenseTallLinearSystem(m, dynamic(nvars(x0)))
+tall_linearsystem(x0, J::Matrix{Float64}, linsolver) = DenseTallLinearSystem(J)
 
 # resjac! sets every entry of r and every entry of J that can be non-zero, so a fresh
 # linearization needs no zeroing: only the cached factorization and column norms are invalidated.
@@ -231,10 +235,9 @@ end
 # A workspace's system owns its Jacobian storage: a copy of a Matrix prototype. Were it the
 # prototype itself, a later run with another prototype would set this one's contents, and a run
 # handed this prototype again would start from the other's.
-function workspace_linearsystem(x0, obj::JacobianObjective, linsolver)
-    obj.J isa Integer && return makelinearsystem(x0, obj, linsolver)
-    return DenseTallLinearSystem(copy(obj.J))
-end
+workspace_linearsystem(x0, obj::JacobianObjective, linsolver) = workspace_tall_linearsystem(x0, obj.J, linsolver)
+workspace_tall_linearsystem(x0, m::Integer, linsolver) = tall_linearsystem(x0, m, linsolver)
+workspace_tall_linearsystem(x0, J::Matrix{Float64}, linsolver) = DenseTallLinearSystem(copy(J))
 
 # The start of a run with a reused workspace. Every J the run uses (the main system's, and the
 # trial system's if the iterator has one) must start as the J a fresh run would: the prototype as
@@ -375,14 +378,14 @@ end
 
 # QR of J works with cond(J), not cond(JᵀJ) = cond(J)², so a damping down to about eps² times the
 # diagonal of JᵀJ still changes the solve
-dampingfloor(ls::DenseTallLinearSystem) = eps(Float64)^2
+dampingfloor(ls::AbstractTallLinearSystem) = eps(Float64)^2
 
 # Marquardt scaling (`:levenbergmarquardt_dtd`) from the diagonal of JᵀJ, the squared column norms
 # of J. The rule is the generic method's (in iterators.jl), which reads `A[i, i]`: a running
 # maximum of the diagonal, a non-finite entry counting as 1, then a floor of 1e-8 times the
 # largest scale (and at least 1e-12). The scale is in the units of diag(JᵀJ), as `solve!` expects:
 # it puts √(λ sᵢ) on the diagonal of the stacked matrix, adding λ sᵢ to JᵀJ.
-function updatescaling!(lmd::AnyMarquardtData, ls::DenseTallLinearSystem)
+function updatescaling!(lmd::AnyMarquardtData, ls::AbstractTallLinearSystem)
     if lmd.lambda == 0
         lmd.lambda = 1e-6
     end

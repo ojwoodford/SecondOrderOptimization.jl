@@ -58,7 +58,8 @@ HessianObjective(f, fdf!; H = nothing) = HessianObjective(f, fdf!, H)
 
 A least-squares objective given by its cost and by its residual and Jacobian, for
 [`optimize`](@ref) and [`optimize!`](@ref). The linear systems are solved by a QR factorization
-of the Jacobian, never by forming `JᵀJ`, which is more accurate when `J` is ill conditioned.
+of the Jacobian, never by forming `JᵀJ`, which is more accurate when `J` is ill conditioned: a
+dense Householder QR for a dense `J`, and SuiteSparse's sparse QR (SPQR) for a sparse one.
 
 - `f(x) -> cost` returns the true scalar cost at `x`. Trial points are scored with `f`: the
   optimizer never derives the cost from the residual, so the cost need not be `½‖r‖²` (with robust
@@ -74,8 +75,11 @@ of the Jacobian, never by forming `JᵀJ`, which is more accurate when `J` is il
   supplies a prototype with the rest already set (normally `zeros(m, n)`, for structural zeros).
   With an integer `m` the optimizer allocates `J` itself, as zeros. An entry written at some `x`
   and skipped at another keeps its old value, which is a bug in `resjac!`.
-- `J` is required: a `Matrix{Float64}` prototype (`m × nvars(x0)`), or an integer `m`, the number
-  of residuals, for a system with its own matrix. A prototype is the matrix `resjac!` writes
+- `J` is required: a `Matrix{Float64}` or `SparseMatrixCSC{Float64, Int}` prototype
+  (`m × nvars(x0)`), or an integer `m`, the number of residuals, for a dense system with its own
+  matrix. A sparse prototype's stored entries are its pattern: `resjac!` must write only stored
+  entries (through `nonzeros(J)`, or `J[i, j]` for a stored `(i, j)`). Writing any other entry
+  inserts it, which changes the pattern, and the run throws an `ArgumentError`. A prototype is the matrix `resjac!` writes
   into, with its values (a trial system, for `callbackchangesstate = false`, works on a copy
   made at the start of the run), except with an [`OptimizationWorkspace`](@ref): a workspace owns
   its Jacobian storage, set from the prototype handed in at the start of each run, and the
@@ -89,7 +93,7 @@ that this holds.
 # Supported so far
 | Accepted | Rejected (`ArgumentError`, before `f` or `resjac!` is called) |
 |:---|:---|
-| `J` a `Matrix{Float64}` prototype, or an integer `m ≥ 1` | a sparse or any other prototype; another element type |
+| `J` a `Matrix{Float64}` or `SparseMatrixCSC{Float64, Int}` prototype, or an integer `m ≥ 1` | any other prototype, including other sparse types; another element or index type |
 | `iterator = :levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg` or `:newton` | `:gradientdescent`, which uses only the gradient `Jᵀr` and so gains nothing from the Jacobian form |
 | `linsolver = :auto` or `:qr` (the same QR solve) | every other linear solver |
 
@@ -97,6 +101,11 @@ The model Hessian is `JᵀJ`, so `iterator = :newton` is Gauss-Newton: each step
 `JᵀJ dx = -Jᵀr` by QR of `J`, with Newton's diagonal shift if `J` is numerically rank deficient.
 `:levenbergmarquardt_dtd` scales the damping by the running maximum of the squared column norms
 of `J` (the diagonal of `JᵀJ`).
+
+With a sparse `J`, each solve (each damping value tried) is a numeric SPQR factorization of
+`[J; √λ D^½]`, whose ordering and symbolic analysis are done once, when the system is built. SPQR
+allocates its working memory inside each factorization and frees it again; nothing else allocates
+in the loop.
 
 A prototype whose column count is not `nvars(x0)` is a `DimensionMismatch`.
 
@@ -128,7 +137,7 @@ end
 # The iterators accepted with a JacobianObjective
 const JACOBIAN_ITERATORS = (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton)
 
-const JACOBIAN_SUPPORT = "JacobianObjective supports a Matrix{Float64} Jacobian prototype or an integer number of residuals m, with iterator = " *
+const JACOBIAN_SUPPORT = "JacobianObjective supports a Matrix{Float64} or SparseMatrixCSC{Float64, Int} Jacobian prototype or an integer number of residuals m, with iterator = " *
     join((":$s" for s in JACOBIAN_ITERATORS), ", ", " or ") * " and linsolver = :auto or :qr"
 
 # The Jacobian prototype: a Matrix{Float64} with at least one row, or an integer m >= 1
@@ -137,8 +146,10 @@ function checkjacobian(J)
         J >= 1 || throw(ArgumentError("The number of residuals m must be at least 1; got $J. $JACOBIAN_SUPPORT."))
     elseif J isa Matrix{Float64}
         size(J, 1) >= 1 || throw(ArgumentError("The Jacobian prototype has no rows (size $(size(J))): it needs one row per residual. $JACOBIAN_SUPPORT."))
+    elseif J isa SparseMatrixCSC{Float64, Int}
+        size(J, 1) >= 1 || throw(ArgumentError("The Jacobian prototype has no rows (size $(size(J))): it needs one row per residual. $JACOBIAN_SUPPORT."))
     elseif J isa AbstractSparseMatrix
-        throw(ArgumentError("A sparse Jacobian prototype ($(typeof(J))) is not supported yet. $JACOBIAN_SUPPORT."))
+        throw(ArgumentError("A sparse Jacobian prototype of type $(typeof(J)) is not supported. $JACOBIAN_SUPPORT."))
     elseif J isa AbstractMatrix && eltype(J) !== Float64
         throw(ArgumentError("The Jacobian must be Float64; got a prototype with element type $(eltype(J)). $JACOBIAN_SUPPORT."))
     else
@@ -147,7 +158,8 @@ function checkjacobian(J)
     return nothing
 end
 
-nresiduals(obj::JacobianObjective) = obj.J isa Integer ? Int(obj.J) : size(obj.J, 1)
+nresiduals(obj::JacobianObjective) = nresiduals_of(obj.J)
+nresiduals_of(J) = J isa Integer ? Int(J) : size(J, 1)
 
 # Everything checked before anything is allocated or any user function called
 function checkobjective(x0, obj::JacobianObjective, options::OptimizationOptions)

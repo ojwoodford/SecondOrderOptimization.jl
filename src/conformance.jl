@@ -63,8 +63,9 @@ conformance_traits(A) = (exact = true, maxrank = typemax(Int), indefinite = true
 # first row of J, so the corresponding diagonal of JᵀJ is non-finite too. Filling writes J and r
 # as resjac! does, and like resjac! it does not mark the factorization stale: the checker fills
 # only fresh systems, or after zero!, so a zero! that left the old factorization in place is caught.
-function conformance_matrix(A::TallHessian)
-    J = A.J
+conformance_matrix(A::TallHessian) = conformance_gram(A.J)
+# JᵀJ, summed in row order (as `sqcolnorm` sums), so its diagonal equals the column norms exactly
+function conformance_gram(J::AbstractMatrix)
     n = size(J, 2)
     M = Matrix{Float64}(undef, n, n)
     @inbounds for j in 1:n, i in 1:n
@@ -76,21 +77,25 @@ function conformance_matrix(A::TallHessian)
     end
     return M
 end
-function conformance_fill!(A::TallHessian, M::AbstractMatrix)
-    m, n = size(A.J)
+# A dense m × n factor J with JᵀJ = M (its largest min(m, n) eigenpairs)
+function conformance_factor(M::AbstractMatrix, m::Integer, n::Integer)
     k = min(m, n)
     Mf = [isfinite(M[i, j]) ? Float64(M[i, j]) : 0.0 for i in 1:n, j in 1:n]
     E = eigen(Symmetric((Mf + Mf') / 2))
     idx = n-k+1:n
     W = Matrix(qr([sin(0.9 * i + 1.1 * j + 0.2 * i * j) for i in 1:m, j in 1:k]).Q)[:, 1:k]
-    A.J .= W * Diagonal(sqrt.(max.(E.values[idx], 0.0))) * E.vectors[:, idx]'
+    J = W * Diagonal(sqrt.(max.(E.values[idx], 0.0))) * E.vectors[:, idx]'
     for i in 1:n
-        isfinite(M[i, i]) || (A.J[1, i] = M[i, i])
+        isfinite(M[i, i]) || (J[1, i] = M[i, i])
     end
+    return J
+end
+function conformance_fill!(A::TallHessian, M::AbstractMatrix)
+    A.J .= conformance_factor(M, size(A.J)...)
     return A
 end
-function conformance_fillb!(ls::DenseTallLinearSystem, b::AbstractVector)
-    J = ls.A.J
+function conformance_fillb!(ls::AbstractTallLinearSystem, b::AbstractVector)
+    J = Matrix(ls.A.J)
     ls.b .= b
     if all(isfinite, J)
         ls.A.r .= transpose(J) \ b    # Jᵀr = b: minimum norm for m ≥ n, b in the range of Jᵀ otherwise
@@ -100,6 +105,15 @@ function conformance_fillb!(ls::DenseTallLinearSystem, b::AbstractVector)
     return ls
 end
 conformance_traits(A::TallHessian) = (exact = false, maxrank = min(size(A.J)...), indefinite = false, accumulates = false)
+
+# The sparse tall storage: the same dense factor, written into J's stored entries, so a J that
+# stores every entry holds it exactly
+conformance_matrix(A::SparseTallHessian) = conformance_gram(Matrix(A.J))
+function conformance_fill!(A::SparseTallHessian, M::AbstractMatrix)
+    conformance_fill!(A.J, conformance_factor(M, size(A.J)...))
+    return A
+end
+conformance_traits(A::SparseTallHessian) = (exact = false, maxrank = min(size(A.J)...), indefinite = false, accumulates = false)
 
 # Deterministic test data, so the checker needs no random number generator
 conformance_symmetric(n) = [sin(1.7 * (i + j) + 0.3 * i * j) for i in 1:n, j in 1:n]

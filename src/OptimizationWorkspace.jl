@@ -56,6 +56,16 @@ function hkeyvalid(key::SparseStructureKey{M}, H::M) where M <: SparseMatrixCSC
     return key.hcolptr == hash(H.colptr) && key.hrowval == hash(H.rowval)
 end
 
+# The structure of a sparse Jacobian prototype: its residual count and its pattern. The
+# JacobianStructureKey keeps a sparse Jacobian's key distinct from a sparse Hessian's of the same
+# pattern, and from a dense Jacobian's.
+struct SparseJacobianPattern{M <: SparseMatrixCSC}
+    J::M
+end
+h_structure_key(p::SparseJacobianPattern) = (JacobianStructureKey(size(p.J, 1)), h_structure_key(p.J))
+hkeyvalid(key::Tuple{JacobianStructureKey, SparseStructureKey}, p::SparseJacobianPattern) =
+    key[1] == JacobianStructureKey(size(p.J, 1)) && hkeyvalid(key[2], p.J)
+
 # A `Vector` of variable blocks of one type and total dimension can still differ in the number
 # and sizes of its blocks (e.g. two 3-vectors versus three 2-vectors), so key on those too.
 blocklayout_key(x0) = nothing

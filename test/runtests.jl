@@ -12,6 +12,7 @@ using Test
     include("jacobianiterators.jl")
     include("conformance.jl")
     include("tallsystem.jl")
+    include("sparsetallsystem.jl")
     include("staticrule.jl")
     include("functional.jl")
     include("convergence.jl")

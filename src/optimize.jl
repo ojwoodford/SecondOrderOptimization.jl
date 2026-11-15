@@ -34,7 +34,9 @@ checkbuild(x, obj::JacobianObjective) = nothing
 objective_linearsystem(x, obj::HessianObjective, linsolver) = makelinearsystem(x, obj.H, linsolver)
 objective_linearsystem(x, obj::JacobianObjective, linsolver) = makelinearsystem(x, obj, linsolver)
 objective_structure(obj::HessianObjective) = obj.H
-objective_structure(obj::JacobianObjective) = JacobianStructureKey(nresiduals(obj))
+objective_structure(obj::JacobianObjective) = jacobian_structure(obj.J)
+jacobian_structure(J) = JacobianStructureKey(nresiduals_of(J))
+jacobian_structure(J::SparseMatrixCSC) = SparseJacobianPattern(J)
 linearizer(obj::HessianObjective) = obj.fdf!
 linearizer(obj::JacobianObjective) = TallLinearize(obj.resjac!)
 # What a run with a reused workspace must set up before it starts: for a JacobianObjective, the
