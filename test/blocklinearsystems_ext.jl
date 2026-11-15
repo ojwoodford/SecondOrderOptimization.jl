@@ -425,7 +425,7 @@ end
     sq(x) = sum(abs2, x)
     sq_fdf!(g, H, x) = sq(x)
     for H in (Hd, Hs)
-        for s in (:qr, :pardiso, :cg, :minres, :krylov, static(:qr), SecondOrderOptimization.qr_solver)
+        for s in (:qr, :pardiso, :cg, :minres, static(:qr), SecondOrderOptimization.qr_solver)
             err = try mk(H, s); nothing catch e; e end
             @test err isa ArgumentError
             @test occursin("reduced system", sprint(showerror, err))

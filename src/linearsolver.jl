@@ -40,7 +40,7 @@ function checklinsolver(s::Symbol)
     validatelinsolver(s) && return true
     if s === :pardiso
         throw(ArgumentError("Linear solver :pardiso requires Pardiso.jl. Please run `using Pardiso` first."))
-    elseif s in (:cg, :minres, :krylov, :lsmr)
+    elseif s in (:cg, :minres, :lsmr)
         throw(ArgumentError("Linear solver :$s requires Krylov.jl. Please run `using Krylov` first."))
     end
     throw(ArgumentError("Unknown linear solver: $s"))

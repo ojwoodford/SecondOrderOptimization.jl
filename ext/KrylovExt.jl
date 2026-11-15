@@ -16,7 +16,6 @@ import SecondOrderOptimization: LSMR_ETOL, LSMR_AXTOL, LSMR_BTOL, LSMR_CONLIM
 # Validation of Krylov solver symbols
 validatelinsolver(::StaticSymbol{:cg}) = true
 validatelinsolver(::StaticSymbol{:minres}) = true
-validatelinsolver(::StaticSymbol{:krylov}) = true
 validatelinsolver(::StaticSymbol{:lsmr}) = true   # for a JacobianObjective only; a HessianObjective rejects it
 
 # A Krylov workspace plus storage for a Jacobi (diagonal) preconditioner
@@ -41,14 +40,12 @@ end
 # Preallocated workspace creation for SparseLinearSystem
 makesparsews(A, ::StaticSymbol{:cg}) = JacobiWorkspace(Krylov.CgWorkspace(A, zeros(eltype(A), size(A, 1))), size(A, 1))
 makesparsews(A, ::StaticSymbol{:minres}) = JacobiWorkspace(Krylov.MinresWorkspace(A, zeros(eltype(A), size(A, 1))), size(A, 1))
-makesparsews(A, ::StaticSymbol{:krylov}) = makesparsews(A, static(:cg))
 
 # Preallocated workspace creation for DenseLinearSystem
 makedensews(n, ::StaticSymbol{:cg}) = Krylov.CgWorkspace(n, n, Vector{Float64})
 makedensews(n, ::StaticSymbol{:minres}) = Krylov.MinresWorkspace(n, n, Vector{Float64})
-makedensews(n, ::StaticSymbol{:krylov}) = makedensews(n, static(:cg))
 
-builtfor(::JacobiWorkspace{<:Krylov.CgWorkspace}) = ":cg or :krylov"
+builtfor(::JacobiWorkspace{<:Krylov.CgWorkspace}) = ":cg"
 builtfor(::JacobiWorkspace{<:Krylov.MinresWorkspace}) = ":minres"
 
 # The sparse workspace is built once, by `makesparsews`, and `solver_ws` is a `const` field,
@@ -116,8 +113,6 @@ function solve!(ls::SparseLinearSystem, ::StaticSymbol{:minres})
     return ws.stats.solved ? Success : NotPositiveDefinite
 end
 
-solve!(ls::SparseLinearSystem, ::StaticSymbol{:krylov}) = solve!(ls, static(:cg))
-
 # DenseLinearSystem execution
 function solve!(ls::DenseLinearSystem, ::StaticSymbol{:cg})
     copyto!(ls.A_scratch, ls.A)
@@ -159,8 +154,6 @@ function solve!(ls::DenseLinearSystem, ::StaticSymbol{:minres})
     copyto!(ls.x, x)
     return stats.solved ? Success : NotPositiveDefinite
 end
-
-solve!(ls::DenseLinearSystem, ::StaticSymbol{:krylov}) = solve!(ls, static(:cg))
 
 # ------------------------------------------------------------------------------------------------
 # LSMR on the Jacobian of a tall system (TP2)

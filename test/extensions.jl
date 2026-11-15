@@ -38,7 +38,11 @@ end
     # M10: LSMR on the Hessian works with H'H, squaring its condition number again, so only a
     # JacobianObjective accepts it (TP2, test/lsmr.jl)
     @test SecondOrderOptimization.validatelinsolver(:lsmr)
-    @test SecondOrderOptimization.validatelinsolver(:krylov)
+    # X2: :krylov was an alias of :cg and is gone; it fails validation like any unknown solver
+    @test !SecondOrderOptimization.validatelinsolver(:krylov)
+    err = try OptimizationOptions(linsolver=:krylov); nothing catch e; e end
+    @test err isa ArgumentError
+    @test occursin("Unknown linear solver", sprint(showerror, err))
 
     # Quadratic test problem: f(x) = 0.5 * x' A x - b' x
     A_spd = sparse([5.0 1.0 0.0; 1.0 6.0 1.0; 0.0 1.0 7.0])
@@ -53,7 +57,7 @@ end
     end
 
     # Test Krylov solvers on SparseLinearSystem
-    for solver in (:cg, :minres, :krylov)
+    for solver in (:cg, :minres)
         # Newton iterator
         opts_newton = OptimizationOptions(iterator=:newton, linsolver=solver, maxiters=10, gtol=1e-6)
         x_newton, res_newton = optimize([0.0, 0.0, 0.0], HessianObjective(quad_cost, quad_fdf!; H = copy(A_spd)), opts_newton)
@@ -80,7 +84,7 @@ end
         @test isapprox(ls_right.x, x_exact; rtol=1e-5)
     end
     # P2b: each workspace type names the solver it was built for
-    for (built, asked, text) in ((:cg, :minres, ":cg or :krylov"), (:minres, :cg, ":minres"),
+    for (built, asked, text) in ((:cg, :minres, ":cg"), (:minres, :cg, ":minres"),
                                  (:cholesky, :cg, ":cholesky"), (:qr, :minres, ":qr"))
         ls_other = SecondOrderOptimization.makelinearsystem(zeros(3), copy(A_spd), static(built))
         mismatch_message(ls_other, asked, text)

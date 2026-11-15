@@ -66,11 +66,10 @@ or `:qr`, and those the extensions below add.
 
 `SecondOrderOptimization.jl` integrates with optional linear solver packages via Julia 1.10+ package extensions:
 
-- **`Krylov.jl` (via `KrylovExt`)**: Provides iterative Krylov subspace linear solvers.
+- **`Krylov.jl` (via `KrylovExt`)**: Provides iterative Krylov subspace linear solvers. `:cg` is the Krylov solver for a Hessian.
   - `:cg`: Conjugate Gradients for symmetric positive-definite systems. Reports the system as indefinite on nonpositive curvature.
   - `:minres`: MINRES for symmetric indefinite systems.
   - On sparse systems, `:cg` and `:minres` are Jacobi (diagonal) preconditioned whenever the damped diagonal is positive.
-  - `:krylov`: Alias for `:cg`.
   - `:lsmr`: LSMR on the Jacobian of a [`JacobianObjective`](@ref) (dense or sparse), with the damping as its regularization parameter. Rejected for a `HessianObjective`, where it would square the condition number of the normal equations again.
   To enable: `using Krylov`.
 - **`Pardiso.jl` (via `PardisoExt`)**: Provides multithreaded direct sparse factorization using Intel MKL PARDISO or Panua Pardiso.

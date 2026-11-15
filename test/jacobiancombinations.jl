@@ -14,7 +14,7 @@ const TP5_TABLE = Dict(
     :schur_sparse => (:auto, :cholesky, :ldl, :lsmr),
 )
 # Every solver symbol any extension accepts in OptimizationOptions, and every iterator
-const TP5_ALL_SOLVERS = (:auto, :cholesky, :ldl, :qr, :cg, :minres, :krylov, :lsmr, :pardiso)
+const TP5_ALL_SOLVERS = (:auto, :cholesky, :ldl, :qr, :cg, :minres, :lsmr, :pardiso)
 const TP5_ALL_ITERATORS = (TP5_ITERATORS..., :gradientdescent)
 
 # One small linear least-squares problem, min ½‖V x − y‖², n = 4 (a retained block of 2 and two eliminated
