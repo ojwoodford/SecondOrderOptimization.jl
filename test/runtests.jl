@@ -13,6 +13,7 @@ using Test
     include("conformance.jl")
     include("tallsystem.jl")
     include("sparsetallsystem.jl")
+    include("statictallsystem.jl")
     include("staticrule.jl")
     include("functional.jl")
     include("convergence.jl")

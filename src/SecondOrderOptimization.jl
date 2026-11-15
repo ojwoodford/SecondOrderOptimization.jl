@@ -49,6 +49,7 @@ include("iterators.jl")
 # Marquardt scaling method)
 include("tallsystem.jl")
 include("sparsetallsystem.jl")
+include("statictallsystem.jl")
 
 # Optimization driver and loop
 include("optimize.jl")

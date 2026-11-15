@@ -124,6 +124,13 @@ at most `m + n` iterations), starting values that have not been measured. LSMR d
 numerically rank-deficient `J`, except `m < n` undamped, which is reported as the QR solve reports
 it.
 
+For a small problem with a static number of variables (`x0` a `Number`, a `StaticVector` or a tuple of
+them, with at most `MAX_STATIC_SYSTEM` variables) and a dense `J` with `m·n ≤ 48`, the optimizer uses a
+static system: `J` is an `MMatrix` and `r` an `MVector`, and the QR solves are StaticArrays'. So `J`
+may be any `AbstractMatrix` the optimizer allocates: write it by `J[i, j]`, not by assuming a `Matrix`.
+With a `Matrix` prototype the static system works on a copy, and the prototype itself is not
+written. The cap is a starting value, measured to be where the static system is faster.
+
 A prototype whose column count is not `nvars(x0)` is a `DimensionMismatch`.
 
 # Example

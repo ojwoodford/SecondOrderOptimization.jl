@@ -131,6 +131,15 @@ $J$ whose QR factorization is too expensive; it does not detect a numerically ra
 A `HessianObjective` rejects `:lsmr`: on the normal equations it would square their condition
 number again.
 
+## Small problems
+
+With a static number of variables (`x0` a `Number`, a `StaticVector`, or a tuple of them) and a dense
+$J$ with $m n \le 48$, the optimizer uses a static system: $J$ is an `MMatrix`, $r$ an `MVector`, and
+the QR solves are StaticArrays'. Measured, this is faster than the dense system for those sizes (by
+up to 30× for one variable) and slower above them. Nothing changes for the caller, except that
+`resjac!` must write `J` by index, as any `AbstractMatrix`, and with a `Matrix` prototype the
+static system works on its own copy of it.
+
 ## Eliminating variables: QR elimination
 
 When the variables split into retained ones and many small, mutually independent eliminated

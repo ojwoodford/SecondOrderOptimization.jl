@@ -255,8 +255,17 @@ function solve_reduced! end
 # resjac! never writes keep the caller's values. With an integer m the matrix starts as zeros.
 # The prototype's type selects the system (a sparse one in sparsetallsystem.jl).
 makelinearsystem(x0, obj::JacobianObjective, linsolver) = tall_linearsystem(x0, obj.J, linsolver)
-tall_linearsystem(x0, m::Integer, linsolver) = DenseTallLinearSystem(m, dynamic(nvars(x0)); linsolver)
-tall_linearsystem(x0, J::Matrix{Float64}, linsolver) = DenseTallLinearSystem(J; linsolver)
+# A small problem with a static number of variables gets the static system (statictallsystem.jl). The choice
+# depends on m, known only at run time, so it is made here, once, when the system is built.
+function tall_linearsystem(x0, m::Integer, linsolver)
+    n = dynamic(nvars(x0))
+    usesstatictall(x0, m, linsolver) && return StaticTallLinearSystem(zeros(MMatrix{Int(m), n, Float64}))
+    return DenseTallLinearSystem(m, n; linsolver)
+end
+function tall_linearsystem(x0, J::Matrix{Float64}, linsolver)
+    usesstatictall(x0, size(J, 1), linsolver) && return StaticTallLinearSystem(J)
+    return DenseTallLinearSystem(J; linsolver)
+end
 
 # resjac! sets every entry of r and every entry of J that can be non-zero, so a fresh
 # linearization needs no zeroing: only the cached factorization and column norms are invalidated.
@@ -273,7 +282,7 @@ end
 # handed this prototype again would start from the other's.
 workspace_linearsystem(x0, obj::JacobianObjective, linsolver) = workspace_tall_linearsystem(x0, obj.J, linsolver)
 workspace_tall_linearsystem(x0, m::Integer, linsolver) = tall_linearsystem(x0, m, linsolver)
-workspace_tall_linearsystem(x0, J::Matrix{Float64}, linsolver) = DenseTallLinearSystem(copy(J); linsolver)
+workspace_tall_linearsystem(x0, J::Matrix{Float64}, linsolver) = tall_linearsystem(x0, copy(J), linsolver)
 
 # The start of a run with a reused workspace. Every J the run uses (the main system's, and the
 # trial system's if the iterator has one) must start as the J a fresh run would: the prototype as
