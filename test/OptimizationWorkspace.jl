@@ -24,26 +24,30 @@ end
     opts = OptimizationOptions(iterator=:dogleg)
 
     # 1. Eagerly constructed workspace
-    ws = OptimizationWorkspace(quad_cost, quad_fdf!, x0_static, opts)
+    ws = OptimizationWorkspace(x0_static, HessianObjective(quad_cost, quad_fdf!), opts)
     @test !isempty(ws)
-    x_opt, res = optimize(quad_cost, quad_fdf!, x0_static, opts; workspace=ws)
+    x_opt, res = optimize(x0_static, HessianObjective(quad_cost, quad_fdf!), opts; workspace=ws)
     @test isapprox(x_opt, [0.0, 0.0]; atol=1e-8)
 
     # Re-running with same workspace achieves 0 allocations
-    allocs = @allocated optimize(quad_cost, quad_fdf!, x0_static, opts; workspace=ws)
+    # Measured inside a function: at testset top level Julia 1.10 boxes the captured variables
+    static_allocs(x, obj, o, w) = @allocated optimize(x, obj, o; workspace=w)
+    static_allocs(x0_static, HessianObjective(quad_cost, quad_fdf!), opts, ws)
+    allocs = static_allocs(x0_static, HessianObjective(quad_cost, quad_fdf!), opts, ws)
     @test allocs == 0
 
     # 2. Key invalidation when options change (and safe fallback on concretely-typed workspace)
     opts_new = OptimizationOptions(iterator=:levenbergmarquardt)
     @test !SecondOrderOptimization.workspacevalid(ws, x0_static, opts_new, nothing)
-    x_opt_new, _ = optimize(quad_cost, quad_fdf!, x0_static, opts_new; workspace=ws)
+    # M6: a concretely typed workspace that can't hold the new data warns (once) when emptied
+    x_opt_new, _ = @test_logs (:warn, r"emptied") optimize(x0_static, HessianObjective(quad_cost, quad_fdf!), opts_new; workspace=ws)
     @test isapprox(x_opt_new, [0.0, 0.0]; atol=1e-8)
     @test isempty(ws)
 
     # 3. Dynamic workspace
     ws_dyn = OptimizationWorkspace()
     @test isempty(ws_dyn)
-    x_opt, res = optimize(quad_cost, quad_fdf!, x0_static, opts; workspace=ws_dyn)
+    x_opt, res = optimize(x0_static, HessianObjective(quad_cost, quad_fdf!), opts; workspace=ws_dyn)
     @test !isempty(ws_dyn)
     @test isapprox(x_opt, [0.0, 0.0]; atol=1e-8)
 
@@ -56,18 +60,90 @@ end
     H_sparse = spdiagm(0 => ones(n))
     x0_vec = fill(1.5, n)
     opts_sparse = OptimizationOptions(iterator=:levenbergmarquardt, maxiters=10)
-    ws_sp = OptimizationWorkspace(quad_cost, quad_fdf!, x0_vec, opts_sparse; H=H_sparse)
+    ws_sp = OptimizationWorkspace(x0_vec, HessianObjective(quad_cost, quad_fdf!; H = H_sparse), opts_sparse)
     @test !isempty(ws_sp)
 
-    x_opt_sp, res_sp = optimize(quad_cost, quad_fdf!, copy(x0_vec), opts_sparse; H=H_sparse, workspace=ws_sp)
+    x_opt_sp, res_sp = optimize(copy(x0_vec), HessianObjective(quad_cost, quad_fdf!; H = H_sparse), opts_sparse; workspace=ws_sp)
     @test isapprox(x_opt_sp, zeros(n); atol=1e-8)
 
-    # Warmup and test allocations with sparse workspace
+    # Warmup and test allocations with sparse workspace (in-place optimize! achieves 0 allocations)
     x_buf = copy(x0_vec)
-    optimize(quad_cost, quad_fdf!, x_buf, opts_sparse; H=H_sparse, workspace=ws_sp)
+    optimize!(x_buf, HessianObjective(quad_cost, quad_fdf!; H = H_sparse), opts_sparse; workspace=ws_sp)
     @test ws_sp.data[1].variables !== ws_sp.data[1].varnext
+    sparse_allocs(x, obj, o, w) = @allocated optimize!(x, obj, o; workspace=w)
+    sparse_allocs(x_buf, HessianObjective(quad_cost, quad_fdf!; H = H_sparse), opts_sparse, ws_sp)
     x_buf .= x0_vec
-    allocs_sp = @allocated optimize(quad_cost, quad_fdf!, x_buf, opts_sparse; H=H_sparse, workspace=ws_sp)
+    allocs_sp = sparse_allocs(x_buf, HessianObjective(quad_cost, quad_fdf!; H = H_sparse), opts_sparse, ws_sp)
     @test ws_sp.data[1].variables !== ws_sp.data[1].varnext
     @test allocs_sp == 0
+
+    # B7: block vectors with the same type and total dimension but different block layouts
+    # must not share a cached workspace
+    BlockT = Union{SVector{2, Float64}, SVector{3, Float64}}
+    blk_cost(x) = 0.5 * sum(sum(abs2, xi) for xi in x)
+    function blk_fdf!(g, H, x)
+        k = 0
+        for xi in x, v in xi
+            k += 1
+            g[k] = v
+        end
+        fill!(H, 0.0)
+        for i in axes(H, 1)
+            H[i, i] = 1.0
+        end
+        return blk_cost(x)
+    end
+    xa = BlockT[SVector(1.0, 2.0, 3.0), SVector(4.0, 5.0, 6.0)]
+    xb = BlockT[SVector(1.0, 2.0), SVector(3.0, 4.0), SVector(5.0, 6.0)]
+    xc = BlockT[SVector(1.0, 2.0, 3.0), SVector(4.0, 5.0), SVector(6.0, 7.0)]
+    xd = BlockT[SVector(1.0, 2.0), SVector(3.0, 4.0, 5.0), SVector(6.0, 7.0)]
+    opts_blk = OptimizationOptions(iterator=:levenbergmarquardt)
+    ws_blk = OptimizationWorkspace()
+    for x0 in (xa, xb, xa, xc, xd)
+        x_blk, res_blk = optimize(x0, HessianObjective(blk_cost, blk_fdf!), opts_blk; workspace=ws_blk)
+        @test length(x_blk) == length(x0)
+        @test all(length(x_blk[i]) == length(x0[i]) for i in eachindex(x0))
+        @test isapprox(blk_cost(x_blk), 0.0; atol=1e-12)
+    end
+    @test SecondOrderOptimization.cachekey(xa, opts_blk, nothing) != SecondOrderOptimization.cachekey(xb, opts_blk, nothing)
+    @test SecondOrderOptimization.cachekey(xc, opts_blk, nothing) != SecondOrderOptimization.cachekey(xd, opts_blk, nothing)
+    @test SecondOrderOptimization.cachekey(xa, opts_blk, nothing) == SecondOrderOptimization.cachekey(copy(xa), opts_blk, nothing)
+
+    # M8: a reused workspace keeps the Hessian matrix of the call that built it
+    H1 = zeros(3, 3)
+    H2 = zeros(3, 3)
+    ws_h = OptimizationWorkspace()
+    optimize(ones(3), HessianObjective(quad_cost, quad_fdf!; H = H1), OptimizationOptions(); workspace=ws_h)
+    @test H1 == I
+    optimize(ones(3), HessianObjective(quad_cost, quad_fdf!; H = H2), OptimizationOptions(); workspace=ws_h)
+    @test all(iszero, H2)
+
+    # M12: a sparse H's structure is matched by identity first, then by hashes
+    n_k = 50
+    H_k = spdiagm(-1 => ones(n_k - 1), 0 => fill(4.0, n_k), 1 => ones(n_k - 1))
+    opts_k = OptimizationOptions()
+    key_k = SecondOrderOptimization.cachekey(ones(n_k), opts_k, H_k)
+    @test SecondOrderOptimization.keyvalid(key_k, ones(n_k), opts_k, H_k)                 # same object
+    @test SecondOrderOptimization.keyvalid(key_k, ones(n_k), opts_k, copy(H_k))           # same pattern
+    @test SecondOrderOptimization.keyvalid(key_k, ones(n_k), opts_k, 2 .* H_k)            # values differ
+    @test !SecondOrderOptimization.keyvalid(key_k, ones(n_k), opts_k, spdiagm(0 => ones(n_k)))
+    @test !SecondOrderOptimization.keyvalid(key_k, ones(n_k), opts_k, sparse(Matrix(H_k)'[:, end:-1:1]))
+    @test !SecondOrderOptimization.keyvalid(key_k, ones(n_k), opts_k, Matrix(H_k))
+    @test !SecondOrderOptimization.keyvalid(key_k, ones(n_k + 1), opts_k, H_k)
+    @test key_k == SecondOrderOptimization.cachekey(ones(n_k), opts_k, copy(H_k))
+    keyvalid_allocs(k, x, o, H) = @allocated SecondOrderOptimization.keyvalid(k, x, o, H)
+    x_k = ones(n_k)
+    keyvalid_allocs(key_k, x_k, opts_k, H_k)
+    @test keyvalid_allocs(key_k, x_k, opts_k, H_k) == 0
+    # Same object: the pattern is not rehashed (shown by an in-place change that keeps the count)
+    H_mut = copy(H_k)
+    key_mut = SecondOrderOptimization.cachekey(ones(n_k), opts_k, H_mut)
+    H_mut.rowval[1], H_mut.rowval[2] = H_mut.rowval[2], H_mut.rowval[1]
+    @test SecondOrderOptimization.keyvalid(key_mut, ones(n_k), opts_k, H_mut)
+    @test !SecondOrderOptimization.keyvalid(key_mut, ones(n_k), opts_k, copy(H_mut))
+    # Inserting an entry in place changes the count, so the key no longer matches
+    H_ins = copy(H_k)
+    key_ins = SecondOrderOptimization.cachekey(ones(n_k), opts_k, H_ins)
+    H_ins[1, n_k] = 1.0
+    @test !SecondOrderOptimization.keyvalid(key_ins, ones(n_k), opts_k, H_ins)
 end

@@ -27,7 +27,7 @@ end
 struct CostTrajectory
     costs::Vector{Float64}
     times_ns::Vector{UInt64}
-    trajectory::Vector{Vector{Float64}}
+    steps::Vector{Vector{Float64}}   # the step vector of each iteration (not the iterate)
 
     function CostTrajectory()
         return new(sizehint!(Vector{Float64}(), 50), sizehint!(Vector{UInt64}(), 50), sizehint!(Vector{Vector{Float64}}(), 50))
@@ -37,7 +37,7 @@ end
 function Base.empty!(ct::CostTrajectory)
     empty!(ct.costs)
     empty!(ct.times_ns)
-    empty!(ct.trajectory)
+    empty!(ct.steps)
     return ct
 end
 
@@ -49,7 +49,7 @@ end
 function storecostscallback(store::CostTrajectory, cost, x_trial, data, unusedargs...)
     push!(store.costs, cost)
     push!(store.times_ns, Base.time_ns() - data.start.time_ns)
-    push!(store.trajectory, Vector{Float64}(getx(data.linsystem)))
+    push!(store.steps, Vector{Float64}(getx(data.linsystem)))
     return (cost, 0)
 end
 

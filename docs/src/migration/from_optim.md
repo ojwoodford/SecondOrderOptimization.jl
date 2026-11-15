@@ -9,7 +9,7 @@
 | **Primary Focus** | General first & second order, line search | High-performance second-order trust-region & LM |
 | **Combined Evaluation** | Separate `f`, `g!`, `h!` or `only_fgh!` | Combined `cost = fdf!(g, H, x)` single pass |
 | **Static Allocations** | Allocations on state/results | Zero heap allocations on `StaticArrays` with [`OptimizationWorkspace`](@ref) |
-| **Manifolds** | `Manifold` wrapper | Native `nvars`/`update` or `retract!(to, from, step)` |
+| **Manifolds** | `Manifold` wrapper | Native `nvars`/`update` |
 | **Iteration Algorithms** | `Newton()`, `NewtonTrustRegion()` | `:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg`, `:newton`, `:gradientdescent` |
 
 ## Code Translation Example
@@ -52,6 +52,6 @@ end
 
 x0 = @SVector [-1.2, 1.0]
 options = OptimizationOptions(iterator = :dogleg)
-x_opt, res = optimize(f, fdf!, x0, options)
+x_opt, res = optimize(x0, HessianObjective(f, fdf!), options)
 ```
 Notice how `fdf!` allows sharing intermediate terms between cost, gradient, and Hessian computation in a single pass.
