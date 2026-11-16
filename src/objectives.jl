@@ -103,7 +103,7 @@ that this holds.
 | integer `m ≥ 1`, or `Matrix{Float64}` (`m × n`) | dense QR of `J`; static QR when `x0` has a static size and `m·n ≤ 48` | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
 | `SparseMatrixCSC{Float64, Int}` | sparse QR of `J` (SPQR) | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
 | `SchurBlockJacobian{Float64, Matrix{Float64}}` (with BlockLinearSystems.jl) | QR elimination, dense reduced system | `:auto`, `:qr` (QR of the reduced Jacobian); `:cholesky`, `:ldl` (factor its normal equations); `:lsmr` (with Krylov.jl) |
-| `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}` (with BlockLinearSystems.jl) | QR elimination, sparse reduced system | `:auto`, `:cholesky` (sparse Cholesky of the reduced normal equations, falling back to LDLᵀ); `:ldl`; `:lsmr` (with Krylov.jl) |
+| `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}` (with BlockLinearSystems.jl) | QR elimination, sparse reduced system | `:auto`, `:qr` (sparse QR of the reduced Jacobian, SPQR); `:cholesky` (sparse Cholesky of the reduced normal equations, falling back to LDLᵀ), `:ldl`; `:lsmr` (with Krylov.jl) |
 
 Every row takes every iterator: `:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg`, `:newton`
 (Gauss-Newton) and `:gradientdescent`, which uses only the gradient `Jᵀr` and never solves the linear
@@ -118,7 +118,9 @@ of `J` (the diagonal of `JᵀJ`).
 With a sparse `J`, each solve (each damping value tried) is a numeric SPQR factorization of
 `[J; √λ D^½]`, whose ordering and symbolic analysis are done once, when the system is built. SPQR
 allocates its working memory inside each factorization and frees it again; nothing else allocates
-in the loop.
+in the loop. The same holds for `:auto` and `:qr` with a `SchurBlockJacobian{Float64,
+SparseMatrixCSC{Float64, Int}}`: the reduced Jacobian `J̃` has a fixed pattern, filled after each
+elimination, and `[J̃; √λ D_r^½]` is factored by SPQR in the same way.
 
 `linsolver = :lsmr` (with `using Krylov`) solves each damped step iteratively by LSMR on `J`,
 dense or sparse, with the damping as LSMR's regularization and the Marquardt scaling as its
@@ -163,8 +165,7 @@ struct JacobianObjective{F, RJ, JM}
 end
 
 const JACOBIAN_SUPPORT = "JacobianObjective supports every iterator, with a Matrix{Float64} or SparseMatrixCSC{Float64, Int} Jacobian prototype or an integer number of residuals m, and linsolver = :auto or :qr;" *
-    " or, with BlockLinearSystems.jl loaded, a SchurBlockJacobian{Float64, Matrix{Float64}}, linsolver = :auto, :qr, :cholesky or :ldl," *
-    " or a SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}, linsolver = :auto, :cholesky or :ldl." *
+    " or, with BlockLinearSystems.jl loaded, a SchurBlockJacobian{Float64, Matrix{Float64}} or SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}, linsolver = :auto, :qr, :cholesky or :ldl." *
     " Every prototype also takes linsolver = :lsmr, with Krylov.jl loaded"
 
 # The Jacobian prototype: a Matrix{Float64} with at least one row, or an integer m >= 1

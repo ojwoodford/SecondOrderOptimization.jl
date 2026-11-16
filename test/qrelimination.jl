@@ -9,7 +9,7 @@ const QREXT = Base.get_extension(SecondOrderOptimization, :BlockLinearSystemsExt
 # system and a dense least-squares solve of the same problem
 
 const TP3_SOLVERS = Dict(Matrix{Float64} => (:auto, :qr, :cholesky, :ldl, :lsmr),
-                         SparseMatrixCSC{Float64, Int} => (:auto, :cholesky, :ldl, :lsmr))
+                         SparseMatrixCSC{Float64, Int} => (:auto, :qr, :cholesky, :ldl, :lsmr))
 
 # Three retained blocks; six eliminated blocks, one above D_STATIC (9) and, with `under`, one with fewer rows
 # than dimensions; a free group of rows coupled to every retained block
@@ -142,6 +142,11 @@ tp3_threaded_run_ok(bytes) = bytes == 0 ||
 
 tp3_solve!(ls, s, lambda, scaling) = (dampen!(ls, lambda, scaling); solve!(ls, static(s)))
 tp3_run(x, obj, opts, ws) = (x .= 0.1; @allocated optimize!(x, obj, opts; workspace = ws))
+# Allocations of one warm :qr solve, behind a function barrier (as TP1's tp1_allocations)
+# (a literal static(:qr): `static(s)` of a Symbol variable is a dynamic call, which allocates once)
+tp6_solve!(ls, lambda, scaling) = (dampen!(ls, lambda, scaling); solve!(ls, static(:qr)))
+tp6_allocations(ls, lambda, scaling) = (tp6_solve!(ls, lambda, scaling); Base.@allocations tp6_solve!(ls, lambda, scaling))
+tp6_fill_bytes(red, ws) = (reduced_jacobian!(red.Jt, red.rt, ws); @allocated reduced_jacobian!(red.Jt, red.rt, ws))
 # Bytes allocated by a warm run with a workspace, behind a function barrier (Julia 1.10 boxes variables
 # captured at testset top level)
 function tp3_warm_bytes(p, ::Type{RT}, opts) where RT
@@ -182,6 +187,48 @@ end
         end
     end
 
+    @testset "TP6: :qr on a sparse reduced system equals the dense one's, under-determined block = $under" for under in (false, true)
+        p = TP3Problem(tp3_structure(; under))
+        x = 0.1 .* randn(Xoshiro(2), p.lay.n)
+        sc = 0.5 .+ rand(Xoshiro(3), p.lay.n)
+        lsD = tp3_system(p, Matrix{Float64}, :qr, x)
+        lsP = tp3_system(p, SparseMatrixCSC{Float64, Int}, :qr, x)
+        for (lambda, scaling) in ((0.0, nothing), (0.3, nothing), (0.3, sc), (1e-6, sc))
+            aD, aP = tp3_solve!(lsD, :qr, lambda, scaling), tp3_solve!(lsP, :qr, lambda, scaling)
+            @test aD == aP
+            aD == Success || continue
+            @test getx(lsP) ≈ getx(lsD) rtol = 1e-12
+        end
+        # The fill and the factorization: J̃ and r̃ are the dense path's, entry for entry
+        red = lsP.reduced
+        @test red isa QREXT.SparseQRReduced
+        tp3_solve!(lsP, :qr, 0.3, nothing); tp3_solve!(lsD, :qr, 0.3, nothing)
+        mt = size(red.Jt, 1)
+        Jd, rtd = zeros(mt, size(red.Jt, 2)), zeros(mt)
+        reduced_jacobian!(Jd, rtd, lsP.ws)
+        @test Matrix(red.Jt) == Jd && red.rt == rtd
+        # SPQR allocates the same per solve whatever the damping; nothing else does (rules.md 21's exception)
+        k = tp6_allocations(lsP, 0.3, sc)
+        @test k > 0
+        @test tp6_allocations(lsP, 1e-3, sc) == tp6_allocations(lsP, 3.0, nothing) == k
+        @test tp6_fill_bytes(red, lsP.ws) == 0
+        # a warm run with a workspace allocates exactly SPQR's allocations for each solve
+        for it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton), ccs in (false, true)
+            under && continue
+            opts = OptimizationOptions(; iterator = it, linsolver = :qr, callbackchangesstate = ccs)
+            obj = tp3_objective(p, SparseMatrixCSC{Float64, Int})
+            ws = OptimizationWorkspace(fill(0.1, p.lay.n), obj, opts)
+            xw = fill(0.1, p.lay.n)
+            optimize!(xw, obj, opts; workspace = ws)
+            GC.gc()
+            xw .= 0.1
+            res = optimize!(xw, obj, opts; workspace = ws)
+            lsw = ws.data[1].linsystem
+            @test isconverged(res) && res.linearsolves > 0
+            @test res.optimizeallocations == res.linearsolves * tp6_allocations(ws.data[1].linsystem, 0.3, nothing)
+        end
+    end
+
     @testset "Meets the linear-system interface: $RT" for RT in keys(TP3_SOLVERS)
         jst = tp3_structure()
         n = jst.schur.nr + sum(jst.schur.e_dims)
@@ -197,8 +244,8 @@ end
         @test isconverged(res)
         @test res.bestcost ≈ rd.bestcost rtol = 1e-8
         # a warm run with a workspace: no allocation, except CHOLMOD's working memory in the sparse Cholesky
-        # (the stated exception)
-        if RT <: SparseMatrixCSC && s in (:auto, :cholesky)
+        # and SPQR's in the sparse QR (the stated exception; TP6's testset counts SPQR's)
+        if RT <: SparseMatrixCSC && s in (:auto, :qr, :cholesky)
             @test tp3_warm_bytes(p, RT, opts) > 0
         else
             @test tp3_warm_bytes(p, RT, opts) == 0
@@ -219,7 +266,7 @@ end
                 ls = tp3_system(p, RT, s, x)
                 @test tp3_solve!(ls, s, 0.3, nothing) == Success == tp3_solve!(lsS, :cholesky, 0.3, nothing)
                 @test getx(ls) ≈ getx(lsS) rtol = s === :lsmr ? 1e-6 : 1e-10
-                RT <: SparseMatrixCSC && s in (:auto, :cholesky) && continue   # CHOLMOD's working memory
+                RT <: SparseMatrixCSC && s in (:auto, :qr, :cholesky) && continue   # CHOLMOD's or SPQR's working memory
                 for it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton)
                     @test tp3_threaded_run_ok(tp3_warm_bytes(p, RT, OptimizationOptions(; iterator = it, linsolver = s)))
                 end
@@ -235,7 +282,7 @@ end
         f(x) = (called[] = true; tp3_cost(p, x))
         rj!(r, J, x) = (called[] = true; tp3_tables!(p, J, x))
         x0 = fill(0.1, p.lay.n)
-        for (RT, s) in ((SparseMatrixCSC{Float64, Int}, :qr), (Matrix{Float64}, :cg), (Matrix{Float64}, :minres),
+        for (RT, s) in ((Matrix{Float64}, :cg), (Matrix{Float64}, :minres),
                         (SparseMatrixCSC{Float64, Int}, :cg))
             obj = JacobianObjective(f, rj!, SchurBlockJacobian{Float64, RT}(p.jst))
             err = try optimize(x0, obj, OptimizationOptions(linsolver = s)); nothing catch e; e end
@@ -248,8 +295,7 @@ end
         @test !called[]
         # The message shared by every Jacobian-path error names the solvers each SchurBlockJacobian takes
         msg = sprint(showerror, try JacobianObjective(f, rj!, SchurBlockJacobian{Float32, Matrix{Float32}}(p.jst)); nothing catch e; e end)
-        @test occursin("SchurBlockJacobian{Float64, Matrix{Float64}}, linsolver = :auto, :qr, :cholesky or :ldl", msg)
-        @test occursin("SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}, linsolver = :auto, :cholesky or :ldl", msg)
+        @test occursin("SchurBlockJacobian{Float64, Matrix{Float64}} or SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}, linsolver = :auto, :qr, :cholesky or :ldl", msg)
         @test !called[]
     end
 

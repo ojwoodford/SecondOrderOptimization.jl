@@ -11,7 +11,7 @@ const TP5_TABLE = Dict(
     :matrix => (:auto, :qr, :lsmr),
     :sparse => (:auto, :qr, :lsmr),
     :schur_dense => (:auto, :qr, :cholesky, :ldl, :lsmr),
-    :schur_sparse => (:auto, :cholesky, :ldl, :lsmr),
+    :schur_sparse => (:auto, :qr, :cholesky, :ldl, :lsmr),
 )
 # Every solver symbol any extension accepts in OptimizationOptions, and every iterator
 const TP5_ALL_SOLVERS = (:auto, :cholesky, :ldl, :qr, :cg, :minres, :lsmr, :pardiso)
