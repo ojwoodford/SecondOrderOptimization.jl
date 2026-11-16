@@ -157,7 +157,7 @@ The test matrices are built inside that pattern and made diagonally dominant, so
 positive definite. Reading and writing the storage uses [`conformance_matrix`](@ref),
 [`conformance_fill!`](@ref) and [`conformance_fillb!`](@ref), which have methods for `Matrix`,
 `MMatrix`, `SparseMatrixCSC`, the [`TallHessian`](@ref) of a `DenseTallLinearSystem` and (with
-BlockLinearSystems loaded) `SchurBlockMatrix`; [`conformance_traits`](@ref) says what the storage
+BlockLinearSystems loaded) `SchurBlockHessian`; [`conformance_traits`](@ref) says what the storage
 can represent. For the tall storage, `JᵀJ` is compared with the test matrix to a relative `1e-10`
 (then exactly with itself), the indefinite-`A` checks are skipped, and when `m < n` the test
 matrix has rank `m`, the undamped solve must not return `Success`, and the solves that are

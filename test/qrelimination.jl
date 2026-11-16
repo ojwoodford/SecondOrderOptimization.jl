@@ -125,7 +125,7 @@ function tp3_schur(p, x)
     Jd = zeros(p.lay.m, p.lay.n); rd = zeros(p.lay.m)
     tp3_dense!(p, rd, Jd, x)
     clen = st.coffsets[end] + Int(st.r_dims[st.entry_retained[end]]) * Int(st.e_dims[end]) - 1
-    H = SchurBlockMatrix(st, zeros(st.nr, st.nr), zeros(sum(abs2, st.e_dims)), zeros(clen))
+    H = SchurBlockHessian(st, zeros(st.nr, st.nr), zeros(sum(abs2, st.e_dims)), zeros(clen))
     SOO.conformance_fill!(H, Jd' * Jd)
     ls = SOO.makelinearsystem(x, H, static(:cholesky))
     getb(ls) .= Jd' * rd

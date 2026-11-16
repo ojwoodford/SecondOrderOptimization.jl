@@ -16,7 +16,7 @@ threaded_allocs_ok(bytes) = bytes == 0 || (VERSION < v"1.11" && Threads.nthreads
 
 A random, strictly diagonally dominant (hence positive definite) bipartite system with retained
 variables first and eliminated variables second, in full dense form plus everything needed to build
-`SchurBlockMatrix` objects from it.
+`SchurBlockHessian` objects from it.
 """
 struct SchurTestProblem
     H::Matrix{Float64}
@@ -89,7 +89,7 @@ function dense_schur_matrix(p::SchurTestProblem; nchunks=1)
     E_data = zeros(sum(abs2, p.e_dims))
     C_data = zeros(structure.coffsets[end] + Int(structure.r_dims[structure.entry_retained[end]]) * Int(structure.e_dims[end]) - 1)
     fill_ce!(p, structure, E_data, C_data)
-    return SchurBlockMatrix(structure, R, E_data, C_data)
+    return SchurBlockHessian(structure, R, E_data, C_data)
 end
 
 function sparse_schur_matrix(p::SchurTestProblem; nchunks=1)
@@ -111,7 +111,7 @@ function sparse_schur_matrix(p::SchurTestProblem; nchunks=1)
     E_data = zeros(sum(abs2, p.e_dims))
     C_data = zeros(structure.coffsets[end] + Int(structure.r_dims[structure.entry_retained[end]]) * Int(structure.e_dims[end]) - 1)
     fill_ce!(p, structure, E_data, C_data)
-    return SchurBlockMatrix(structure, R, E_data, C_data)
+    return SchurBlockHessian(structure, R, E_data, C_data)
 end
 
 function make_schur_ls(kind::Symbol, p::SchurTestProblem, scaling=ones(length(p.b)); nchunks=1)
@@ -173,8 +173,8 @@ end
     end
 end
 
-# Copy the numerical content of `src` (a SchurBlockMatrix) into `dst`
-function copy_content!(dst::SchurBlockMatrix, src::SchurBlockMatrix)
+# Copy the numerical content of `src` (a SchurBlockHessian) into `dst`
+function copy_content!(dst::SchurBlockHessian, src::SchurBlockHessian)
     dst.R isa Matrix ? copyto!(dst.R, src.R) : copyto!(dst.R.data, src.R.data)
     copyto!(dst.E_data, src.E_data)
     copyto!(dst.C_data, src.C_data)
@@ -333,13 +333,13 @@ end
 
 # Measured through a function barrier: at testset scope Julia 1.10 boxes the Float64 result
 schur_quadform_allocations(H, v) = @allocated SecondOrderOptimization.quadform(H, v)
-@testset "quadform of a SchurBlockMatrix is BlockLinearSystems' dot, through the fallback (D1)" begin
+@testset "quadform of a SchurBlockHessian is BlockLinearSystems' dot, through the fallback (D1)" begin
     p = standard_problem()
     n = length(p.b)
     v = randn(Random.Xoshiro(7), n)
     for kind in (:dense, :sparse)
         H = SecondOrderOptimization.getA(make_schur_ls(kind, p))
-        @test H isa SchurBlockMatrix
+        @test H isa SchurBlockHessian
         @test which(SecondOrderOptimization.quadform, (typeof(H), typeof(v))) == which(SecondOrderOptimization.quadform, (Any, Any))
         @test SecondOrderOptimization.quadform(H, v) ≈ dot(v, p.H * v) rtol = 1e-12
         @test SecondOrderOptimization.quadform(H, v) == dot(v, H, v)
@@ -493,14 +493,14 @@ end
     end
 end
 
-function to_float32(H::SchurBlockMatrix)
+function to_float32(H::SchurBlockHessian)
     R = if H.R isa Matrix
         Float32.(H.R)
     else
         S = H.R
         SparseBlockLinearSystem{Float32}(Float32.(S.data), S.indices, S.indicestransposed, S.rowblocksizes, S.columnblocksizes, S.m, S.n)
     end
-    return SchurBlockMatrix(H.structure, R, Float32.(H.E_data), Float32.(H.C_data))
+    return SchurBlockHessian(H.structure, R, Float32.(H.E_data), Float32.(H.C_data))
 end
 
 @testset "Schur solve in Float32 (M4)" begin
@@ -708,7 +708,7 @@ end
     n = length(p.b)
     H0 = sparse_schur_matrix(p)
     pre = build_schur_pattern(H0.structure; extra_blocks=retained_block_pairs(H0.R))
-    Hp = SchurBlockMatrix(H0.structure, H0.R, H0.E_data, H0.C_data; pattern=pre)
+    Hp = SchurBlockHessian(H0.structure, H0.R, H0.E_data, H0.C_data; pattern=pre)
     x_ref = reference_solve(p, 0.3, ones(n))
     mk(H) = SecondOrderOptimization.makelinearsystem(nothing, H, :auto)
 
@@ -743,7 +743,7 @@ end
 
     # An analysed factor carried by the pattern is reused
     fac = SparseArrays.CHOLMOD.analyze(SparseArrays.CHOLMOD.Sparse(Symmetric(copy(pre.S_sparse), :U)))
-    Hf = SchurBlockMatrix(H0.structure, H0.R, H0.E_data, H0.C_data; pattern=merge(pre, (S_factor = fac,)))
+    Hf = SchurBlockHessian(H0.structure, H0.R, H0.E_data, H0.C_data; pattern=merge(pre, (S_factor = fac,)))
     ls_f = mk(Hf)
     @test ls_f.S_factor === fac
     ls_f.b .= p.b
@@ -753,12 +753,12 @@ end
 
     # The dense system ignores a pattern
     Hd = dense_schur_matrix(p)
-    Hdp = SchurBlockMatrix(Hd.structure, Hd.R, Hd.E_data, Hd.C_data; pattern=build_schur_pattern(Hd.structure))
+    Hdp = SchurBlockHessian(Hd.structure, Hd.R, Hd.E_data, Hd.C_data; pattern=build_schur_pattern(Hd.structure))
     @test SecondOrderOptimization.makelinearsystem(nothing, Hdp, :auto) isa SOOExt.DenseSchurLinearSystem
 end
 
-# Add d to the diagonal of the full matrix a SchurBlockMatrix represents
-function add_schur_diag!(H::SchurBlockMatrix, d)
+# Add d to the diagonal of the full matrix a SchurBlockHessian represents
+function add_schur_diag!(H::SchurBlockHessian, d)
     st = H.structure
     for r in 1:st.nrblocks, i in 1:Int(st.r_dims[r])
         k = st.boffsets_r[r] + i - 1
@@ -778,7 +778,7 @@ function add_schur_diag!(H::SchurBlockMatrix, d)
 end
 
 # A quadratic plus a quartic term, so the Hessian H + diag(3x^2) changes every iteration. `kind` is
-# :dense or :sparse (a SchurBlockMatrix with that storage of R) or :full (a plain dense Hessian).
+# :dense or :sparse (a SchurBlockHessian with that storage of R) or :full (a plain dense Hessian).
 function quartic_run(p, kind, linsolver, iterator)
     cost(x) = 0.5 * dot(x, p.H * x) - dot(p.b, x) + 0.25 * sum(xi -> xi^4, x)
     if kind === :full
@@ -795,7 +795,7 @@ function quartic_run(p, kind, linsolver, iterator)
     return (; x, res, costs = copy(traj.costs), steps = deepcopy(traj.steps))
 end
 
-@testset "Full optimization with a SchurBlockMatrix Hessian: :auto, :cholesky and :ldl (A2)" begin
+@testset "Full optimization with a SchurBlockHessian Hessian: :auto, :cholesky and :ldl (A2)" begin
     p = standard_problem()
     for kind in (:dense, :sparse), it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :newton, :dogleg)
         @testset "$kind, $it" begin

@@ -16,7 +16,7 @@ High-performance, zero-allocation second-order nonlinear optimization in Julia.
 - **Linear Solvers**:
   - *Built-in*: Cholesky (`:cholesky`), LDL / Bunch-Kaufman (`:ldl`, using `LDLFactorizations.jl` for sparse matrices), and QR (`:qr`, SuiteSparse's SPQR for sparse matrices), with automatic dispatch (`:auto`).
   - *Extensions*: Iterative Krylov subspace solvers via `Krylov.jl` (`:cg` and `:minres` for a Hessian, `:lsmr` on a Jacobian) and multi-threaded sparse direct factorizations (`:pardiso` via `Pardiso.jl`).
-- **Elimination**: with [`BlockLinearSystems.jl`](https://github.com/ojwoodford/BlockLinearSystems.jl) loaded, a `SchurBlockMatrix` Hessian or a `SchurBlockJacobian` Jacobian eliminates a block of the variables (by Schur complement, or by QR of the Jacobian) and solves a reduced system in the rest. The type of the prototype selects it; there is no option for it.
+- **Elimination**: with [`BlockLinearSystems.jl`](https://github.com/ojwoodford/BlockLinearSystems.jl) loaded, a `SchurBlockHessian` Hessian or a `SchurBlockJacobian` Jacobian eliminates a block of the variables (by Schur complement, or by QR of the Jacobian) and solves a reduced system in the rest. The type of the prototype selects it; there is no option for it.
 - **Variable Types & Manifolds**: Supports scalars (`Float64`), static vectors (`SVector`), dense vectors (`Vector`), vectors of variables of different sizes, and non-Euclidean manifolds via `nvars` / `update` from [OptimizationVariableInterface.jl](https://ojwoodford.github.io/OptimizationVariableInterface.jl/dev/).
 - **Zero-Allocation Reuse**: Preallocate solver buffers and factorizations via `OptimizationWorkspace`.
 

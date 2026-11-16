@@ -8,8 +8,8 @@ An objective given by its cost and by its gradient and Hessian, for [`optimize`]
 - `fdf!(g, H, x) -> cost` writes the gradient into `g` and the Hessian into `H` (both arrive
   zeroed), and returns the cost at `x`.
 - `H` is the Hessian prototype: `nothing` (a static or dense system sized from `x0`), a `Matrix`,
-  an `MMatrix`, a `SparseMatrixCSC`, or, with BlockLinearSystems.jl loaded, a `SchurBlockMatrix`.
-  The type of `H` selects the linear system, including elimination for a `SchurBlockMatrix`; the
+  an `MMatrix`, a `SparseMatrixCSC`, or, with BlockLinearSystems.jl loaded, a `SchurBlockHessian`.
+  The type of `H` selects the linear system, including elimination for a `SchurBlockHessian`; the
   `linsolver` option then names the solver for that system.
 
 # The Hessian prototype

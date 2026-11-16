@@ -478,7 +478,7 @@ Which system `makelinearsystem` builds:
   system on a `Float64` copy.
 - `H::SparseMatrixCSC{Float64}`: a sparse system that writes into `H`, or into a copy with explicit
   zeros added if a diagonal entry is missing.
-- `H::SchurBlockMatrix` (BlockLinearSystems.jl): a Schur-complement system, dense or sparse
+- `H::SchurBlockHessian` (BlockLinearSystems.jl): a Schur-complement system, dense or sparse
   according to the storage of `H.R`; `linsolver` (`:auto`, `:cholesky` or `:ldl`) names the solver
   for the reduced system.
 """
