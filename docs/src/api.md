@@ -32,7 +32,8 @@ the run converged:
 | `TERMINATION_MAX_ITERS`, `TERMINATION_MAX_TIME` | `maxiters` or `maxtime` was reached |
 | `TERMINATION_COST_INF`, `TERMINATION_COST_NAN` | the cost was not finite |
 | `TERMINATION_STEP_INF`, `TERMINATION_STEP_NAN` | the step was not finite |
-| `TERMINATION_GRAD_NOT_FINITE`, `TERMINATION_START_NOT_FINITE` | the gradient, or the cost or gradient at the start, was not finite |
+| `TERMINATION_GRAD_INF`, `TERMINATION_GRAD_NAN` | the gradient held an infinite value, or a `NaN` |
+| `TERMINATION_START_NOT_FINITE` | the cost or the gradient at the start was not finite |
 | `TERMINATION_LINSOLVER_FAILED` | the linear solver failed |
 
 A callback's own flags are in `result.termination >> 16`.
@@ -50,7 +51,8 @@ TERMINATION_COST_INF
 TERMINATION_COST_NAN
 TERMINATION_STEP_INF
 TERMINATION_STEP_NAN
-TERMINATION_GRAD_NOT_FINITE
+TERMINATION_GRAD_INF
+TERMINATION_GRAD_NAN
 TERMINATION_START_NOT_FINITE
 TERMINATION_LINSOLVER_FAILED
 ```

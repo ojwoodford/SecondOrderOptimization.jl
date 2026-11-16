@@ -583,12 +583,20 @@ Test it with `result.termination & TERMINATION_STEP_NAN != 0`; see [`isconverged
 TERMINATION_STEP_NAN
 
 """
-    TERMINATION_GRAD_NOT_FINITE
+    TERMINATION_GRAD_INF
 
-Bit mask of [`OptimizationResult`](@ref)`.termination`, set when the gradient was not finite. A failure.
-Test it with `result.termination & TERMINATION_GRAD_NOT_FINITE != 0`; see [`isconverged`](@ref).
+Bit mask of [`OptimizationResult`](@ref)`.termination`, set when the gradient contained an infinite value
+(and no `NaN`). A failure. Test it with `result.termination & TERMINATION_GRAD_INF != 0`; see [`isconverged`](@ref).
 """
-TERMINATION_GRAD_NOT_FINITE
+TERMINATION_GRAD_INF
+
+"""
+    TERMINATION_GRAD_NAN
+
+Bit mask of [`OptimizationResult`](@ref)`.termination`, set when the gradient contained a `NaN`. A failure.
+Test it with `result.termination & TERMINATION_GRAD_NAN != 0`; see [`isconverged`](@ref).
+"""
+TERMINATION_GRAD_NAN
 
 """
     TERMINATION_START_NOT_FINITE

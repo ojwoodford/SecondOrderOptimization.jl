@@ -33,22 +33,22 @@ const TERMINATION_STEP_SIZE         = 1 << 6
 const TERMINATION_MAX_FAILS         = 1 << 7
 const TERMINATION_MAX_ITERS         = 1 << 8
 const TERMINATION_MAX_TIME          = 1 << 9
-# 1 << 10 is free
-const TERMINATION_START_NOT_FINITE  = 1 << 11
-const TERMINATION_GRAD_NOT_FINITE   = 1 << 12
+const TERMINATION_START_NOT_FINITE  = 1 << 10
+const TERMINATION_GRAD_INF          = 1 << 11
+const TERMINATION_GRAD_NAN          = 1 << 12
 const TERMINATION_GRAD_TOL          = 1 << 13
 const TERMINATION_LINSOLVER_FAILED  = 1 << 14
 const TERMINATION_STALLED           = 1 << 15   # the last bit below the callback's flags (16 and up)
 
 const SUCCESS_CONVERGENCE_MASK = TERMINATION_REL_DCOST | TERMINATION_ABS_DCOST | TERMINATION_STEP_SIZE | TERMINATION_GRAD_TOL | TERMINATION_STALLED
 # Something non-finite: a failure whatever else is set
-const NONFINITE_TERMINATION_MASK = TERMINATION_COST_INF | TERMINATION_COST_NAN | TERMINATION_STEP_INF | TERMINATION_STEP_NAN | TERMINATION_GRAD_NOT_FINITE | TERMINATION_START_NOT_FINITE
+const NONFINITE_TERMINATION_MASK = TERMINATION_COST_INF | TERMINATION_COST_NAN | TERMINATION_STEP_INF | TERMINATION_STEP_NAN | TERMINATION_GRAD_INF | TERMINATION_GRAD_NAN | TERMINATION_START_NOT_FINITE
 # The bits that make a run a failure even with a convergence bit set (see `isconverged`)
 const FAILED_CONVERGENCE_MASK = NONFINITE_TERMINATION_MASK | TERMINATION_LINSOLVER_FAILED
 # Every bit that is not a convergence criterion. No longer used by `isconverged` (a limit alongside
 # a convergence bit is converged); kept for SmoothOptimizerBenchmark, which reads it until it moves
 # to `isconverged`.
-const FAILURE_TERMINATION_MASK = TERMINATION_COST_INF | TERMINATION_COST_NAN | TERMINATION_STEP_INF | TERMINATION_STEP_NAN | TERMINATION_MAX_FAILS | TERMINATION_MAX_ITERS | TERMINATION_MAX_TIME | TERMINATION_START_NOT_FINITE | TERMINATION_GRAD_NOT_FINITE | TERMINATION_LINSOLVER_FAILED
+const FAILURE_TERMINATION_MASK = FAILED_CONVERGENCE_MASK | TERMINATION_MAX_FAILS | TERMINATION_MAX_ITERS | TERMINATION_MAX_TIME
 
 # Each termination bit and the message `show` prints for it
 const TERMINATION_REASONS = (
@@ -63,7 +63,8 @@ const TERMINATION_REASONS = (
     (TERMINATION_MAX_ITERS,        "Maximum number of outer iterations reached."),
     (TERMINATION_MAX_TIME,         "Maximum allowed computation time exceeded."),
     (TERMINATION_START_NOT_FINITE, "Cost or gradient not finite at the start point."),
-    (TERMINATION_GRAD_NOT_FINITE,  "Gradient not finite."),
+    (TERMINATION_GRAD_INF,         "Gradient contains an infinite value."),
+    (TERMINATION_GRAD_NAN,         "Gradient contains a NaN."),
     (TERMINATION_GRAD_TOL,         "Gradient norm below threshold."),
     (TERMINATION_LINSOLVER_FAILED, "Linear solver failed to solve the linear system."),
     (TERMINATION_STALLED,          "The best cost improved by less than the stall tolerance over the last iterations."),
@@ -185,7 +186,7 @@ went wrong that makes the point it returned untrustworthy.
   found; that is not proof of a minimum (see [`OptimizationOptions`](@ref)).
 - **Failures, whatever else is set:** anything non-finite (`TERMINATION_COST_INF`,
   `TERMINATION_COST_NAN`, `TERMINATION_STEP_INF`, `TERMINATION_STEP_NAN`,
-  `TERMINATION_GRAD_NOT_FINITE`, `TERMINATION_START_NOT_FINITE`), and
+  `TERMINATION_GRAD_INF`, `TERMINATION_GRAD_NAN`, `TERMINATION_START_NOT_FINITE`), and
   `TERMINATION_LINSOLVER_FAILED`. So a small step to a point whose cost is not finite is not
   converged, nor is a small gradient at a start point whose cost is not finite.
 - **Neither:** a limit (`TERMINATION_MAX_FAILS`, `TERMINATION_MAX_ITERS`, `TERMINATION_MAX_TIME`).

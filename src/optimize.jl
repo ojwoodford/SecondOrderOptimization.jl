@@ -124,8 +124,9 @@ end
     converged |= isinf(cost)                                         << 0
     converged |= isnan(cost)                                         << 1
     maxgrad = maximum(abs, getgrad(data.linsystem))::Float64
-    converged |= !isfinite(maxgrad)                                  << 12
-    converged |= (converged != 0)                                    << 11
+    converged |= isinf(maxgrad)                                      << 11
+    converged |= isnan(maxgrad)                                      << 12
+    converged |= (converged != 0)                                    << 10
     converged |= (data.iternum >= options.maxiters)                  << 8
     converged |= (maxgrad < options.gtol)                            << 13
 
@@ -190,7 +191,7 @@ end
             # width is not classified by its last bounce; the highest keeps a run whose cost jumps
             # (divergence after one insignificant improvement) from being called converged. With
             # stalltol = 0 every iteration counted is a rise, so this is max_fails, as before.
-            settled = lowsince <= refcost + options.stalltol * abs(refcost) && highsince <= refcost + options.stallrise * abs(refcost)
+            settled = lowsince <= (refcost + options.stalltol * abs(refcost)) && highsince <= (refcost + options.stallrise * abs(refcost))
             converged |= settled ? TERMINATION_STALLED : TERMINATION_MAX_FAILS
         end
         converged |= (data.iternum >= options.maxiters)                  << 8
@@ -202,7 +203,8 @@ end
 
         linearize!(iteratedata, data, fdf!)
         maxgrad = maximum(abs, getgrad(data.linsystem))::Float64
-        converged |= !isfinite(maxgrad)                                  << 12
+        converged |= isinf(maxgrad)                                      << 11
+        converged |= isnan(maxgrad)                                      << 12
         converged |= (maxgrad < options.gtol)                            << 13
     end
 

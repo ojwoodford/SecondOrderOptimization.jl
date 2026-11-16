@@ -105,8 +105,8 @@ end
     x_bad = @SVector [1.0] # In NaN wall region
     opts = OptimizationOptions()
     x_opt, res = optimize(x_bad, HessianObjective(nanwall_cost, nanwall_fdf!), opts)
-    @test (res.termination & (1 << 11)) != 0
-    @test (res.termination & (1 << 1)) != 0
+    @test (res.termination & TERMINATION_START_NOT_FINITE) != 0
+    @test (res.termination & TERMINATION_COST_NAN) != 0
 
     # Test non-finite linearization at an accepted point (e.g. acos(min(x, 1)) where gradient becomes NaN for x >= 1)
     nanlinearization_cost(x) = 0.5 * (acos(min(x[1], 1.0))^2 + (x[1] - 2.0)^2)
@@ -122,7 +122,7 @@ end
     for iterator in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton, :gradientdescent)
         opts = OptimizationOptions(iterator=iterator, maxtime=2.0)
         x_opt, res = optimize([0.0], HessianObjective(nanlinearization_cost, nanlinearization_fdf!), opts)
-        @test (res.termination & (TERMINATION_STEP_NAN | TERMINATION_COST_NAN | TERMINATION_GRAD_NOT_FINITE)) != 0
+        @test (res.termination & (TERMINATION_STEP_NAN | TERMINATION_COST_NAN | TERMINATION_GRAD_NAN)) != 0
         @test isfinite(res.bestcost) && res.bestcost < nanlinearization_cost([0.0])
         @test res.bestcost == nanlinearization_cost(x_opt)
     end
@@ -150,5 +150,25 @@ end
             @test res.termination == TERMINATION_LINSOLVER_FAILED
             @test x == x0
         end
+    end
+end
+
+# An infinite gradient and a NaN gradient set different bits, at the start and after a step
+@testset "TERMINATION_GRAD_INF and TERMINATION_GRAD_NAN" begin
+    for (bad, bit, other) in ((Inf, TERMINATION_GRAD_INF, TERMINATION_GRAD_NAN), (NaN, TERMINATION_GRAD_NAN, TERMINATION_GRAD_INF))
+        cost(x) = 0.5 * sum(abs2, x .- 1)
+        # at the start
+        fdf0!(g, H, x) = (g .= x .- 1; g[1] = bad; H .= 0; H[1, 1] = H[2, 2] = 1.0; cost(x))
+        _, res = optimize([0.0, 0.0], HessianObjective(cost, fdf0!; H = zeros(2, 2)), OptimizationOptions())
+        @test res.niterations == 0
+        @test res.termination & bit != 0 && res.termination & TERMINATION_START_NOT_FINITE != 0
+        @test res.termination & other == 0
+        # after the first step, which lands at x[1] = 1
+        fdf1!(g, H, x) = (g .= x .- 1; x[1] > 0.5 && (g[2] = bad); H .= 0; H[1, 1] = H[2, 2] = 1.0; cost(x))
+        _, res = optimize([0.0, 0.0], HessianObjective(cost, fdf1!; H = zeros(2, 2)), OptimizationOptions(; iterator = :newton))
+        @test res.niterations >= 1
+        @test res.termination & bit != 0 && res.termination & TERMINATION_START_NOT_FINITE == 0
+        @test res.termination & other == 0
+        @test !isconverged(res)
     end
 end

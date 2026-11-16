@@ -325,13 +325,14 @@ SOO.update(x::Rot3, dx, start=1) = Rot3(x.R * expso3(SVector(dx[start], dx[start
         # at the start
         objnan = JacobianObjective(x -> 1.0, (r, J, x) -> (r .= 1.0; J .= NaN; 1.0), 2)
         _, res = optimize([0.0, 0.0], objnan, OptimizationOptions())
-        @test hasbits(res, TERMINATION_GRAD_NOT_FINITE) && hasbits(res, TERMINATION_START_NOT_FINITE)
+        @test hasbits(res, TERMINATION_GRAD_NAN) && hasbits(res, TERMINATION_START_NOT_FINITE)
         @test res.niterations == 0
         # after the first accepted step: J holds an Inf once x[1] > 0.5
         f(x) = 0.5 * sum(abs2, x .- 1)
         objlate = JacobianObjective(f, (r, J, x) -> (r .= x .- 1; J .= I(2); x[1] > 0.5 && (J[1, 1] = Inf); f(x)), 2)
         _, res = optimize([0.0, 0.0], objlate, OptimizationOptions())
-        @test hasbits(res, TERMINATION_GRAD_NOT_FINITE)
+        # Inf times the residual: an infinite gradient, or NaN where that residual is exactly zero
+        @test hasbits(res, TERMINATION_GRAD_INF | TERMINATION_GRAD_NAN)
         @test res.niterations >= 1 && !isconverged(res)
     end
 
