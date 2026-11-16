@@ -575,7 +575,7 @@ reset!(gdd::GradientDescentData) = (gdd.stepsize = 1.0)
     if !all(isfinite, gradient)
         return NaN
     end
-    getx(data.linsystem) .= -gradient .* gddata.stepsize
+    getx(data.linsystem) .= .-gradient .* gddata.stepsize
     data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
     data.costs += @elapsed_ns costc = f(data.varnext)
     inner_iters = 0
@@ -597,7 +597,7 @@ reset!(gdd::GradientDescentData) = (gdd.stepsize = 1.0)
         else
             gddata.stepsize *= 0.5
         end
-        getx(data.linsystem) .= -gradient .* gddata.stepsize
+        getx(data.linsystem) .= .-gradient .* gddata.stepsize
         data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
         data.costs += @elapsed_ns costc = f(data.varnext)
     end

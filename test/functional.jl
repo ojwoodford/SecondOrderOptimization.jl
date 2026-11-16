@@ -98,6 +98,20 @@ end
     allocs = rosen_allocs(x0_static, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), opts_alloc, ws)
     @test allocs == 0
 
+    # ...and with a dense Vector, for every iterator (gradient descent once negated its gradient
+    # outside the broadcast, allocating a vector per step and per line-search trial)
+    dense_allocs(x, obj, o, w) = @allocated optimize!(x, obj, o; workspace=w)
+    for it in (:newton, :levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :gradientdescent)
+        obj_d = HessianObjective(rosenbrock_cost, rosenbrock_fdf!)
+        opts_d = OptimizationOptions(iterator=it, maxiters=30)
+        ws_d = OptimizationWorkspace(copy(x0_dense), obj_d, opts_d)
+        x_d = copy(x0_dense)
+        dense_allocs(x_d, obj_d, opts_d, ws_d)
+        x_d .= x0_dense
+        GC.gc()
+        @test dense_allocs(x_d, obj_d, opts_d, ws_d) == 0
+    end
+
     # Test printoutcallback and OptimizationResult show
     io = IOBuffer()
     show(io, res)
