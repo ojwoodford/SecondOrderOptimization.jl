@@ -215,6 +215,8 @@ function SecondOrderOptimization.max_diag(H::SchurBlockHessian{T}) where T
 end
 
 SecondOrderOptimization.max_diag(ls::Union{DenseSchurLinearSystem, SparseSchurLinearSystem}) = SecondOrderOptimization.max_diag(ls.H)
+SecondOrderOptimization.isfinitesystem(ls::Union{DenseSchurLinearSystem, SparseSchurLinearSystem}) =
+    all(isfinite, ls.H.R isa Matrix ? ls.H.R : ls.H.R.data) && all(isfinite, ls.H.E_data) && all(isfinite, ls.H.C_data)
 
 # Marquardt scaling: the running maximum of |diag(H)|, with a non-finite entry counted as one, as the
 # other systems do. Only the retained diagonal is read differently for dense and sparse R.
@@ -313,7 +315,8 @@ function SecondOrderOptimization.solve!(ls::DenseSchurLinearSystem, solver_opt::
     status == Success || return status
 
     backsubstitute!(ls.x_e, ls.x_r, ls.H.structure, ls.H.C_data, ls.workspace)
-    return Success
+    # A non-finite R or C can pass the factorization; a non-finite solution does not
+    return all(isfinite, ls.x) ? Success : NotPositiveDefinite
 end
 SecondOrderOptimization.solve!(ls::DenseSchurLinearSystem, s::Symbol) = SecondOrderOptimization.solve!(ls, static(s))
 SecondOrderOptimization.solve!(ls::DenseSchurLinearSystem, s::OptimizationLinearSolver) = SecondOrderOptimization.solve!(ls, static(SecondOrderOptimization.linsolver_symbol(s)))
@@ -379,7 +382,8 @@ function SecondOrderOptimization.solve!(ls::SparseSchurLinearSystem, solver_opt:
     end
 
     backsubstitute!(ls.x_e, ls.x_r, ls.H.structure, ls.H.C_data, ls.workspace)
-    return Success
+    # A non-finite R or C can pass the factorization; a non-finite solution does not
+    return all(isfinite, ls.x) ? Success : NotPositiveDefinite
 end
 SecondOrderOptimization.solve!(ls::SparseSchurLinearSystem, s::Symbol) = SecondOrderOptimization.solve!(ls, static(s))
 SecondOrderOptimization.solve!(ls::SparseSchurLinearSystem, s::OptimizationLinearSolver) = SecondOrderOptimization.solve!(ls, static(SecondOrderOptimization.linsolver_symbol(s)))

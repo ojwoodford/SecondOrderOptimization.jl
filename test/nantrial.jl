@@ -1,4 +1,4 @@
-using SecondOrderOptimization, StaticArrays, Test, Static
+using SecondOrderOptimization, StaticArrays, SparseArrays, LinearAlgebra, Test, Static
 
 function nanwall_cost(x)
     val = x[1]
@@ -125,5 +125,30 @@ end
         @test (res.termination & (TERMINATION_STEP_NAN | TERMINATION_COST_NAN | TERMINATION_GRAD_NOT_FINITE)) != 0
         @test isfinite(res.bestcost) && res.bestcost < nanlinearization_cost([0.0])
         @test res.bestcost == nanlinearization_cost(x_opt)
+    end
+end
+
+# AS4: a Hessian that damping cannot repair (a NaN at every evaluation) ends the run at its first failed solve,
+# for every iterator and storage, with x0 returned and the linear solver's failure reported
+@testset "A non-finite Hessian stops the solve retries at once (AS4)" begin
+    base = [4.0 1 0 0; 1 3 1 0; 0 1 2 0.5; 0 0 0.5 1]
+    bv = [1.0, 2, 3, 4]
+    cost(x) = 0.5 * dot(x, base, x) - dot(bv, x)
+    function fdf!(g, H, x)
+        g .= base * x .- bv
+        H isa SparseMatrixCSC ? (H.nzval .= vec(base)) : (H .= base)
+        H[2, 2] = NaN
+        return cost(x)
+    end
+    for (storage, H, x0, solvers) in (("static", nothing, @SVector(zeros(4)), (:auto, :qr)),
+                                      ("dense", zeros(4, 4), zeros(4), (:auto, :cholesky, :ldl, :qr)),
+                                      ("sparse", sparse(ones(4, 4)), zeros(4), (:auto, :cholesky, :ldl, :qr))),
+        s in solvers, it in (:newton, :levenbergmarquardt, :levenbergmarquardt_dtd)
+        @testset "$storage, $s, $it" begin
+            x, res = optimize(x0, HessianObjective(cost, fdf!; H), OptimizationOptions(; iterator = it, linsolver = s))
+            @test res.niterations == 1
+            @test res.termination == TERMINATION_LINSOLVER_FAILED
+            @test x == x0
+        end
     end
 end

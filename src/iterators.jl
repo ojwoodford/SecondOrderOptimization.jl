@@ -53,7 +53,7 @@ reset!(::NewtonData) = nothing
         if status == Success
         else
             mu = initial_shift(data.linsystem)
-            shift_iters = 30
+            shift_iters = isfinitesystem(data.linsystem) ? 30 : 0   # damping cannot repair a non-finite matrix
             while status != Success && shift_iters > 0
                 shift_iters -= 1
                 dampen!(data.linsystem, mu)
@@ -88,7 +88,7 @@ reset!(::NewtonDataRelinearize) = nothing
         if status == Success
         else
             mu = initial_shift(data.linsystem)
-            shift_iters = 30
+            shift_iters = isfinitesystem(data.linsystem) ? 30 : 0   # damping cannot repair a non-finite matrix
             while status != Success && shift_iters > 0
                 shift_iters -= 1
                 dampen!(data.linsystem, mu)
@@ -207,7 +207,7 @@ end
         status = solve!(data.linsystem, options.linsolver)
         if status != Success
             mu = initial_shift(data.linsystem)
-            shifts = 20
+            shifts = isfinitesystem(data.linsystem) ? 20 : 0
             while status != Success && shifts > 0
                 shifts -= 1
                 dampen!(data.linsystem, mu)
@@ -467,7 +467,8 @@ end
                 end
                 levmardata.lambda *= mu
                 mu *= 2.0
-                if levmardata.lambda > 1e16
+                # Damping cannot repair a non-finite matrix: give up at once
+                if levmardata.lambda > 1e16 || !isfinitesystem(data.linsystem)
                     dampen!(data.linsystem, 0.0)
                     break
                 end
@@ -518,7 +519,8 @@ end
                 levmardata.trialready = false
                 levmardata.lambda *= mu
                 mu *= 2.0
-                if levmardata.lambda > 1e16
+                # Damping cannot repair a non-finite matrix: give up at once
+                if levmardata.lambda > 1e16 || !isfinitesystem(data.linsystem)
                     dampen!(data.linsystem, 0.0)
                     break
                 end

@@ -65,6 +65,8 @@ end
 function solve!(ls::SparseLinearSystem, ::StaticSymbol{:cg})
     jws = check_krylov_ws(ls, JacobiWorkspace{<:Krylov.CgWorkspace}, :cg)
     ws = jws.ws
+    # Krylov's CG throws, rather than reporting, on a non-finite operator
+    SecondOrderOptimization.isfinitesystem(ls) || return NotPositiveDefinite
     if ls.lambda > 0
         if isnothing(ls.scaling)
             uniformscaling!(ls, ls.lambda)
@@ -115,6 +117,7 @@ end
 
 # DenseLinearSystem execution
 function solve!(ls::DenseLinearSystem, ::StaticSymbol{:cg})
+    SecondOrderOptimization.isfinitesystem(ls) || return NotPositiveDefinite   # Krylov's CG would throw
     copyto!(ls.A_scratch, ls.A)
     if ls.lambda > 0
         if isnothing(ls.scaling)

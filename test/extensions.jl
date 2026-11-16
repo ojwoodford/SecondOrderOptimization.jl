@@ -221,3 +221,30 @@ end
     @test L == tril(A_full)
     @test L.nzval == A_full.nzval[lmap]
 end
+
+# AS4: the Krylov solves neither throw nor report Success with a non-finite step on a non-finite matrix
+@testset "Krylov solves on a non-finite or singular matrix (AS4)" begin
+    using Krylov
+    base = [4.0 1 0 0; 1 3 1 0; 0 1 2 0.5; 0 0 0.5 1]
+    variants = (nan_diag = (A -> A[2, 2] = NaN), nan_off = (A -> A[1, 2] = A[2, 1] = NaN), inf_diag = (A -> A[2, 2] = Inf),
+                singular = (A -> A .= [1.0 1 0 0; 1 1 0 0; 0 0 2 0; 0 0 0 1]))
+    for storage in (:dense, :sparse), s in (:cg, :minres), (kind, f!) in pairs(variants), lambda in (0.0, 1e-3)
+        @testset "$storage, $s, $kind, λ = $lambda" begin
+        A = copy(base)
+        f!(A)
+        ls = storage === :dense ? SecondOrderOptimization.makelinearsystem(zeros(4), zeros(4, 4), s) :
+                                  SecondOrderOptimization.makelinearsystem(zeros(4), sparse(ones(4, 4)), s)
+        if storage === :sparse
+            ls.A.nzval .= vec(A)
+            ls.diag_cache .= diag(A)
+        else
+            ls.A .= A
+        end
+        ls.b .= [1.0, 2, 3, 4]
+        dampen!(ls, lambda)
+        st = SecondOrderOptimization.solve!(ls, static(s))   # does not throw
+        @test st != Success || all(isfinite, ls.x)
+        @test SecondOrderOptimization.isfinitesystem(ls) == (kind === :singular)
+      end
+    end
+end

@@ -226,6 +226,7 @@ end
 
 tall_linearsystem(x0, J::SparseMatrixCSC{Float64, Int}, linsolver) = SparseTallLinearSystem(J; linsolver)
 workspace_tall_linearsystem(x0, J::SparseMatrixCSC{Float64, Int}, linsolver) = SparseTallLinearSystem(copy(J); linsolver)
+isfinitesystem(ls::SparseTallLinearSystem) = all(isfinite, nonzeros(ls.A.J)) && all(isfinite, ls.A.r)
 
 zero!(ls::SparseTallLinearSystem) = (fill!(ls.b, 0.0); markstale!(ls.A); ls)
 

@@ -994,3 +994,22 @@ as3_allocs(x, obj, o, w) = (x .= 0.1; @allocated optimize!(x, obj, o; workspace 
         end
     end
 end
+
+@testset "No Schur solve reports Success with a non-finite step (AS4)" begin
+    p = standard_problem()
+    setR!(H, i, j, v) = H.R isa Matrix ? (H.R[i, j] = H.R[j, i] = v) : (B = block(H.R, 1, 1); B[i, j] = B[j, i] = v)
+    variants = (("NaN on R's diagonal", H -> setR!(H, 1, 1, NaN)), ("NaN off R's diagonal", H -> setR!(H, 1, 2, NaN)),
+                ("NaN on E's diagonal", H -> (H.E_data[1] = NaN)), ("NaN in C", H -> (H.C_data[1] = NaN)),
+                ("Inf on R's diagonal", H -> setR!(H, 1, 1, Inf)))
+    for kind in (:dense, :sparse), s in (:auto, :cholesky, :ldl), (name, f!) in variants, lambda in (0.0, 1e-3)
+        @testset "$kind, $s, $name, λ = $lambda" begin
+            ls = make_schur_ls(kind, p)
+            @test SecondOrderOptimization.isfinitesystem(ls)
+            f!(ls.H)
+            @test !SecondOrderOptimization.isfinitesystem(ls)
+            SecondOrderOptimization.dampen!(ls, lambda)
+            st = SecondOrderOptimization.solve!(ls, static(s))
+            @test st != SecondOrderOptimization.Success || all(isfinite, ls.x)
+        end
+    end
+end

@@ -116,6 +116,7 @@ function StaticTallLinearSystem(J::MMatrix{M, N}) where {M, N}
     return StaticTallLinearSystem{M, N, M * N, K, K * N}(StaticTallHessian(J), zeros(MVector{N, Float64}), zeros(MVector{N, Float64}),
                                                         zeros(MMatrix{K, N, Float64, K * N}), zeros(MVector{K, Float64}), false, 0.0, nothing)
 end
+isfinitesystem(ls::StaticTallLinearSystem) = all(isfinite, ls.A.J) && all(isfinite, ls.A.r)
 StaticTallLinearSystem(J::Matrix{Float64}) = StaticTallLinearSystem(MMatrix{size(J, 1), size(J, 2), Float64}(J))
 
 zero!(ls::StaticTallLinearSystem) = (fill!(ls.b, 0.0); markstale!(ls.A); ls)

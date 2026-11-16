@@ -230,6 +230,7 @@ function DenseTallLinearSystem(J::Matrix{Float64}; linsolver = :auto)
     return DenseTallLinearSystem(A, zeros(n), zeros(n), maketallws(m, n, linsolver), 0.0, nothing)
 end
 DenseTallLinearSystem(m::Integer, n::Integer; linsolver = :auto) = DenseTallLinearSystem(zeros(Float64, m, n); linsolver)
+isfinitesystem(ls::DenseTallLinearSystem) = all(isfinite, ls.A.J) && all(isfinite, ls.A.r)
 
 # The solvers of the tall systems: QR (`:auto`, `:qr`) in this package, and those an extension
 # adds through `maketallws` (LSMR, in KrylovExt), which builds the solver's workspace

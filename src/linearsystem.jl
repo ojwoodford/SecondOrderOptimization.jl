@@ -213,6 +213,12 @@ getb(ls::AbstractLinearSystem) = ls.b
 getx(ls::AbstractLinearSystem) = ls.x
 
 getgrad(ls::AbstractLinearSystem) = getb(ls)
+
+# Whether every stored value of the system's matrix is finite. The iterators ask after a failed solve:
+# damping cannot repair a non-finite matrix, so they stop retrying (each system type has a method).
+isfinitesystem(ls::Union{StaticLinearSystem, DenseLinearSystem}) = all(isfinite, ls.A)
+isfinitesystem(ls::SparseLinearSystem) = all(isfinite, nonzeros(ls.A))
+
 gethessian(ls::AbstractLinearSystem) = getA(ls)
 gethessgrad(ls::AbstractLinearSystem) = gethessian(ls), getgrad(ls)
 

@@ -274,3 +274,47 @@ using SecondOrderOptimization: quadratic_model_change   # internal names
     dx_q = randn(5)
     @test quadratic_model_change(ls_q, dx_q) ≈ 0.5 * dot(dx_q, A_spd * dx_q) + dot(b_vec, dx_q)
 end
+
+# AS4: no solve reports Success with a non-finite step, and none throws, on a non-finite or singular matrix
+const AS4_BASE = [4.0 1 0 0; 1 3 1 0; 0 1 2 0.5; 0 0 0.5 1]
+function as4_matrix(kind)
+    A = copy(AS4_BASE)
+    kind === :nan_diag && (A[2, 2] = NaN)
+    kind === :nan_off && (A[1, 2] = A[2, 1] = NaN)
+    kind === :inf_diag && (A[2, 2] = Inf)
+    kind === :singular && (A = [1.0 1 0 0; 1 1 0 0; 0 0 2 0; 0 0 0 1])
+    return A
+end
+function as4_system(storage, A, s)
+    b = [1.0, 2, 3, 4]
+    if storage === :static
+        ls = SecondOrderOptimization.makelinearsystem(@SVector(zeros(4)), nothing, s)
+    elseif storage === :dense
+        ls = SecondOrderOptimization.makelinearsystem(zeros(4), zeros(4, 4), s)
+    else
+        ls = SecondOrderOptimization.makelinearsystem(zeros(4), sparse(ones(4, 4)), s)
+    end
+    if storage === :sparse
+        ls.A.nzval .= vec(A)
+        ls.diag_cache .= diag(A)
+    else
+        ls.A .= A
+    end
+    ls.b .= b
+    return ls
+end
+as4_ok(st, x) = st != SecondOrderOptimization.Success || all(isfinite, x)
+
+@testset "No solve reports Success with a non-finite step (AS4)" begin
+    for storage in (:static, :dense, :sparse), s in (:auto, :cholesky, :ldl, :qr), kind in (:nan_diag, :nan_off, :inf_diag, :singular), lambda in (0.0, 1e-3)
+        @testset "$storage, $s, $kind, λ = $lambda" begin
+            ls = as4_system(storage, as4_matrix(kind), s)
+            SecondOrderOptimization.dampen!(ls, lambda)
+            st = SecondOrderOptimization.solve!(ls, static(s))   # does not throw
+            @test as4_ok(st, SecondOrderOptimization.getx(ls))
+            @test SecondOrderOptimization.isfinitesystem(ls) == !(kind in (:nan_diag, :nan_off, :inf_diag))
+            # A finite, positive definite matrix still solves
+            kind === :singular && lambda > 0 && @test st == SecondOrderOptimization.Success
+        end
+    end
+end

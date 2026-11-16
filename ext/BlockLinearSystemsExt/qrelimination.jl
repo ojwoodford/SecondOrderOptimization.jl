@@ -163,6 +163,7 @@ function QRSchurLinearSystem(J::SchurBlockJacobian{Float64}, linsolver)
     return QRSchurLinearSystem(SchurJacobianHessian(J), zeros(n), zeros(n), QRReductionWorkspace(J), make_reduced(J, linsolver),
                                ones(n), zeros(nr), zeros(n - nr), 0.0, nothing)
 end
+SecondOrderOptimization.isfinitesystem(ls::QRSchurLinearSystem) = all(isfinite, ls.A.J.data)   # the tables hold J and r
 
 SecondOrderOptimization.tall_linearsystem(x0, J::SchurBlockJacobian{Float64}, linsolver) = QRSchurLinearSystem(J, linsolver)
 SecondOrderOptimization.workspace_tall_linearsystem(x0, J::SchurBlockJacobian{Float64, RType}, linsolver) where RType =
