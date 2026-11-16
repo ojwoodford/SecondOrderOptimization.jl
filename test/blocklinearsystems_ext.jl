@@ -939,3 +939,58 @@ end
         end
     end
 end
+
+# AS3: the dense Schur system's Bunch-Kaufman solve, for :ldl and as :auto's fallback. The reference is
+# the solve as it was written before: Cholesky (for :auto), then LinearAlgebra's bunchkaufman
+function as3_reference(ls, solver)
+    SOOExt.build_reduced!(ls) || return (SecondOrderOptimization.NotPositiveDefinite, nothing)
+    S, g = copy(ls.S), copy(ls.g_S)
+    if solver === :auto
+        F = cholesky(Symmetric(copy(S), :U); check = false)
+        issuccess(F) && return (SecondOrderOptimization.Success, F \ g)
+    end
+    bk = bunchkaufman(Symmetric(S, :U); check = false)
+    issuccess(bk) || return (SecondOrderOptimization.NotPositiveDefinite, nothing)
+    xr = bk \ g
+    return (SecondOrderOptimization.is_indefinite(bk) ? SecondOrderOptimization.Indefinite : SecondOrderOptimization.Success, xr)
+end
+as3_solve_allocs(ls, s) = @allocated SecondOrderOptimization.solve!(ls, s)
+as3_allocs(x, obj, o, w) = (x .= 0.1; @allocated optimize!(x, obj, o; workspace = w))
+
+@testset "The dense Schur system's Bunch-Kaufman solve allocates nothing (AS3)" begin
+    p = standard_problem()
+    n = length(p.b)
+    q = standard_problem()
+    q.H[1, 1] = -50.0                        # S indefinite, so Cholesky fails (B5)
+    zeroS(ls) = (ls.H.R .= 0; ls.H.C_data .= 0; ls)   # S = 0: Bunch-Kaufman finds an exactly zero pivot
+    for (name, mk, expected) in (("positive definite", () -> make_schur_ls(:dense, p), Dict(:auto => :Success, :ldl => :Success)),
+                                 ("indefinite", () -> make_schur_ls(:dense, q), Dict(:auto => :Indefinite, :ldl => :Indefinite)),
+                                 ("singular", () -> zeroS(make_schur_ls(:dense, p)), Dict(:auto => :NotPositiveDefinite, :ldl => :NotPositiveDefinite)))
+        for s in (:auto, :ldl)
+            @testset "$name, $s" begin
+                ls = mk()
+                SecondOrderOptimization.dampen!(ls, 0.0)
+                st_ref, xr_ref = as3_reference(ls, s)
+                @test Symbol(st_ref) === expected[s]
+                st = SecondOrderOptimization.solve!(ls, static(s))
+                @test st == st_ref
+                isnothing(xr_ref) || @test norm(ls.x_r - xr_ref) <= 1e-12 * norm(xr_ref)
+                # Warm: a solve allocates nothing (the system is serial here: one chunk)
+                as3_solve_allocs(ls, static(s))
+                @test as3_solve_allocs(ls, static(s)) == 0
+            end
+        end
+    end
+    # A whole Newton or dogleg run on an indefinite Schur problem allocates nothing (typed workspace)
+    for it in (:newton, :dogleg), s in (:auto, :ldl)
+        @testset "$it, $s run" begin
+            cost, fdf! = as1_objective(q, dense_schur_matrix(q))
+            obj = HessianObjective(cost, fdf!; H = dense_schur_matrix(q))
+            opts = OptimizationOptions(; iterator = it, linsolver = s, maxiters = 30)
+            ws = OptimizationWorkspace(fill(0.1, n), obj, opts)
+            x = fill(0.1, n)
+            as3_allocs(x, obj, opts, ws)
+            @test as3_allocs(x, obj, opts, ws) == 0
+        end
+    end
+end

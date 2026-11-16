@@ -38,6 +38,7 @@ mutable struct DenseSchurLinearSystem{T} <: AbstractLinearSystem
     x_e::SubArray{T, 1, Vector{T}, Tuple{UnitRange{Int}}, true}
     g_S::Vector{T}
     S::Matrix{T}
+    ldl::DenseLDLWorkspace            # Bunch-Kaufman of S, for :ldl and when Cholesky fails (Float64: checkhessian)
     lambda::T
     scaling::Vector{T}
     scaling_r::SubArray{T, 1, Vector{T}, Tuple{UnitRange{Int}}, true}
@@ -69,7 +70,7 @@ function DenseSchurLinearSystem(
     ws = SchurReductionWorkspace{T}(H.structure, K; is_dense=true)
 
     return DenseSchurLinearSystem{T}(
-        H, b, x, b_r, b_e, x_r, x_e, g_S, S, zero(T), scaling, scaling_r, scaling_e, ws
+        H, b, x, b_r, b_e, x_r, x_e, g_S, S, DenseLDLWorkspace(nr), zero(T), scaling, scaling_r, scaling_e, ws
     )
 end
 
@@ -282,12 +283,12 @@ function build_reduced!(ls::DenseSchurLinearSystem)
     )
 end
 
+# Bunch-Kaufman of the upper triangle of S in place, in the system's preallocated workspace
 function solve_bunchkaufman!(ls::DenseSchurLinearSystem)
-    bk = bunchkaufman!(Symmetric(ls.S, :U); check=false)
-    issuccess(bk) || return NotPositiveDefinite
-    ldiv!(ls.x_r, bk, ls.g_S)
-    is_indefinite(bk) && return Indefinite
-    return Success
+    SecondOrderOptimization.sytrf_ws!(ls.S, ls.ldl) == 0 || return NotPositiveDefinite
+    copyto!(ls.x_r, ls.g_S)
+    LinearAlgebra.LAPACK.sytrs!('U', ls.S, ls.ldl.ipiv, ls.x_r)
+    return is_indefinite_packed(ls.S, ls.ldl.ipiv, 'U') ? Indefinite : Success
 end
 
 SecondOrderOptimization.solve!(ls::DenseSchurLinearSystem) = SecondOrderOptimization.solve!(ls, static(:auto))
@@ -400,7 +401,7 @@ function SecondOrderOptimization.copy_structure(ls::DenseSchurLinearSystem{T}) w
         BlockLinearSystems.copy_structure(ls.H), b, x,
         view(b, 1:nr), view(b, nr+1:length(b)),
         view(x, 1:nr), view(x, nr+1:length(x)),
-        similar(ls.g_S), similar(ls.S), ls.lambda, scaling,
+        similar(ls.g_S), similar(ls.S), DenseLDLWorkspace(nr), ls.lambda, scaling,
         view(scaling, 1:nr), view(scaling, nr+1:length(scaling)),
         ws_trial
     )
@@ -438,7 +439,7 @@ function SecondOrderOptimization.sharex(ls::DenseSchurLinearSystem{T}, from) whe
         ls.H, ls.b, x,
         ls.b_r, ls.b_e,
         view(x, 1:nr), view(x, nr+1:length(x)),
-        ls.g_S, ls.S, ls.lambda, ls.scaling,
+        ls.g_S, ls.S, ls.ldl, ls.lambda, ls.scaling,
         ls.scaling_r, ls.scaling_e,
         ls.workspace
     )
