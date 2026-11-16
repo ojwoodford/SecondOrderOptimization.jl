@@ -105,10 +105,10 @@ that this holds.
 | `SchurBlockJacobian{Float64, Matrix{Float64}}` (with BlockLinearSystems.jl) | QR elimination, dense reduced system | `:auto`, `:qr` (QR of the reduced Jacobian); `:cholesky`, `:ldl` (factor its normal equations); `:lsmr` (with Krylov.jl) |
 | `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}` (with BlockLinearSystems.jl) | QR elimination, sparse reduced system | `:auto`, `:cholesky` (sparse Cholesky of the reduced normal equations, falling back to LDLᵀ); `:ldl`; `:lsmr` (with Krylov.jl) |
 
-Every row takes `iterator = :levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg` or `:newton`
-(Gauss-Newton). Everything else is rejected with an `ArgumentError` before `f` or `resjac!` is
-called: any other prototype type, element type or index type; `iterator = :gradientdescent`, which
-uses only the gradient `Jᵀr` and gains nothing from the Jacobian form; and any other `linsolver`.
+Every row takes every iterator: `:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg`, `:newton`
+(Gauss-Newton) and `:gradientdescent`, which uses only the gradient `Jᵀr` and never solves the linear
+system. Everything else is rejected with an `ArgumentError` before `f` or `resjac!` is called: any
+other prototype type, element type or index type, and any other `linsolver`.
 
 The model Hessian is `JᵀJ`, so `iterator = :newton` is Gauss-Newton: each step solves
 `JᵀJ dx = -Jᵀr` by QR of `J`, with Newton's diagonal shift if `J` is numerically rank deficient.
@@ -162,11 +162,7 @@ struct JacobianObjective{F, RJ, JM}
     end
 end
 
-# The iterators accepted with a JacobianObjective
-const JACOBIAN_ITERATORS = (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton)
-
-const JACOBIAN_SUPPORT = "JacobianObjective supports iterator = " * join((":$s" for s in JACOBIAN_ITERATORS), ", ", " or ") *
-    " with a Matrix{Float64} or SparseMatrixCSC{Float64, Int} Jacobian prototype or an integer number of residuals m, and linsolver = :auto or :qr;" *
+const JACOBIAN_SUPPORT = "JacobianObjective supports every iterator, with a Matrix{Float64} or SparseMatrixCSC{Float64, Int} Jacobian prototype or an integer number of residuals m, and linsolver = :auto or :qr;" *
     " or, with BlockLinearSystems.jl loaded, a SchurBlockJacobian{Float64, Matrix{Float64}}, linsolver = :auto, :qr, :cholesky or :ldl," *
     " or a SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}, linsolver = :auto, :cholesky or :ldl." *
     " Every prototype also takes linsolver = :lsmr, with Krylov.jl loaded"
@@ -200,9 +196,6 @@ function checkobjective(x0, obj::JacobianObjective, options::OptimizationOptions
     if !isnothing(nc) && nc != n
         throw(DimensionMismatch("Jacobian prototype J has $nc columns, but the variables have $n degrees of freedom, so J must have $n columns."))
     end
-    iter = dynamic(options.iterator)
-    iter === :gradientdescent && throw(ArgumentError("iterator = :gradientdescent is not supported with a JacobianObjective: gradient descent uses only the gradient Jᵀr, so it gains nothing from the residual-and-Jacobian form; use a HessianObjective. $JACOBIAN_SUPPORT."))
-    iter in JACOBIAN_ITERATORS || throw(ArgumentError("iterator = :$iter is not supported with a JacobianObjective. $JACOBIAN_SUPPORT."))
     check_jacobian_linsolver(obj.J, linsolver_symbol(options.linsolver))
     return nothing
 end

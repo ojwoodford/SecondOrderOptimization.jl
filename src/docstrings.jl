@@ -298,9 +298,9 @@ For a `Number`, an `SVector` or any other immutable variable it throws an `Argum
 - `x0`: Starting point, overwritten with the solution.
 - `obj`: The objective. A [`HessianObjective`](@ref) gives the cost, its gradient and Hessian, and
   the Hessian prototype. A [`JacobianObjective`](@ref) gives the cost, the residual and its
-  Jacobian, and the Jacobian prototype or number of residuals; it supports every iterator but
-  `:gradientdescent` (`:newton` is then Gauss-Newton) and `linsolver = :auto` or `:qr` so far,
-  and anything else is an `ArgumentError` before `f` or `resjac!` is called.
+  Jacobian, and the Jacobian prototype or number of residuals; it supports every iterator
+  (`:newton` is then Gauss-Newton) and the `linsolver` values its docstring lists for each
+  prototype, and anything else is an `ArgumentError` before `f` or `resjac!` is called.
 - `options::OptimizationOptions`: Optimization settings and stopping criteria.
 
 # Keyword Arguments

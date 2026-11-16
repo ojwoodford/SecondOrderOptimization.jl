@@ -188,7 +188,7 @@ end
         @test isnothing(check_linear_system(s -> QREXT.QRSchurLinearSystem(SchurBlockJacobian{Float64, RT}(jst), s); n, linsolvers = TP3_SOLVERS[RT], rtol = 1e-6))
     end
 
-    @testset "Every Jacobian iterator: $RT, :$s, :$it, callbackchangesstate = $ccs" for RT in keys(TP3_SOLVERS), s in TP3_SOLVERS[RT], it in SOO.JACOBIAN_ITERATORS, ccs in (false, true)
+    @testset "Every Jacobian iterator: $RT, :$s, :$it, callbackchangesstate = $ccs" for RT in keys(TP3_SOLVERS), s in TP3_SOLVERS[RT], it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton), ccs in (false, true)
         p = TP3Problem(tp3_structure())
         opts = OptimizationOptions(; iterator = it, linsolver = s, callbackchangesstate = ccs, maxiters = 200)
         _, rd = optimize(fill(0.1, p.lay.n), tp3_dense_objective(p), OptimizationOptions(; iterator = it, callbackchangesstate = ccs, maxiters = 200))
@@ -220,7 +220,7 @@ end
                 @test tp3_solve!(ls, s, 0.3, nothing) == Success == tp3_solve!(lsS, :cholesky, 0.3, nothing)
                 @test getx(ls) ≈ getx(lsS) rtol = s === :lsmr ? 1e-6 : 1e-10
                 RT <: SparseMatrixCSC && s in (:auto, :cholesky) && continue   # CHOLMOD's working memory
-                for it in SOO.JACOBIAN_ITERATORS
+                for it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton)
                     @test tp3_threaded_run_ok(tp3_warm_bytes(p, RT, OptimizationOptions(; iterator = it, linsolver = s)))
                 end
             end
@@ -246,10 +246,8 @@ end
         @test_throws ArgumentError JacobianObjective(f, rj!, SchurBlockJacobian{Float32, Matrix{Float32}}(p.jst))
         @test_throws DimensionMismatch optimize(zeros(3), JacobianObjective(f, rj!, SchurBlockJacobian{Float64, Matrix{Float64}}(p.jst)))
         @test !called[]
-        # iterator = :gradientdescent stays rejected
-        @test_throws ArgumentError optimize(x0, JacobianObjective(f, rj!, SchurBlockJacobian{Float64, Matrix{Float64}}(p.jst)), OptimizationOptions(iterator = :gradientdescent))
-        # ...and its message, shared by every Jacobian-path error, names the solvers each SchurBlockJacobian takes
-        msg = sprint(showerror, try optimize(x0, JacobianObjective(f, rj!, SchurBlockJacobian{Float64, Matrix{Float64}}(p.jst)), OptimizationOptions(iterator = :gradientdescent)); nothing catch e; e end)
+        # The message shared by every Jacobian-path error names the solvers each SchurBlockJacobian takes
+        msg = sprint(showerror, try JacobianObjective(f, rj!, SchurBlockJacobian{Float32, Matrix{Float32}}(p.jst)); nothing catch e; e end)
         @test occursin("SchurBlockJacobian{Float64, Matrix{Float64}}, linsolver = :auto, :qr, :cholesky or :ldl", msg)
         @test occursin("SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}, linsolver = :auto, :cholesky or :ldl", msg)
         @test !called[]

@@ -68,8 +68,8 @@ linear system:
 
 `linsolver = :auto` or `:qr` factorizes; with Krylov.jl loaded, `:lsmr` solves each damped step by
 LSMR on `J` instead, without factorizing. The reduced system of a `SchurBlockJacobian` also accepts
-`:cholesky` and `:ldl`. Every iterator but `:gradientdescent` is supported (`:newton` is
-Gauss-Newton here). An unsupported combination is an `ArgumentError` before your code is called.
+`:cholesky` and `:ldl`. Every iterator is supported (`:newton` is Gauss-Newton here, and
+`:gradientdescent` uses only the gradient `Jᵀr`). An unsupported combination is an `ArgumentError` before your code is called.
 The full table of supported combinations is in the
 [`JacobianObjective` docstring](https://ojwoodford.github.io/SecondOrderOptimization.jl/stable/api.html#SecondOrderOptimization.JacobianObjective).
 

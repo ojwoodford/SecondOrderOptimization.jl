@@ -40,17 +40,14 @@ end
             err = try JacobianObjective(jrosen_cost, jrosen_resjac!, J); nothing catch e; e end
             @test err isa ArgumentError
             @test occursin(needle, err.msg)
-            @test occursin("Matrix{Float64}", err.msg) && occursin(":levenbergmarquardt", err.msg)
+            @test occursin("Matrix{Float64}", err.msg) && occursin("every iterator", err.msg)
         end
     end
 
     @testset "Validation at entry: iterator, linsolver and the prototype's columns" begin
         obj = JacobianObjective(jrosen_cost, jrosen_resjac!, 2)
-        err = try SOO.checkobjective([0.0, 0.0], obj, OptimizationOptions(iterator=:gradientdescent)); nothing catch e; e end
-        @test err isa ArgumentError && occursin(":gradientdescent", err.msg) && occursin("gains nothing", err.msg)
-        @test occursin(":levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg or :newton", err.msg)
-        # the other iterators are accepted
-        for it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton)
+        # every iterator is accepted (IT2: :gradientdescent too)
+        for it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton, :gradientdescent)
             @test SOO.checkobjective([0.0, 0.0], obj, OptimizationOptions(iterator=it)) === nothing
         end
         for s in (:cholesky, :ldl)
@@ -70,7 +67,7 @@ end
 
     @testset "Every rejection throws before f or resjac! is called" begin
         obj = JacobianObjective(jrosen_cost, jrosen_resjac!, 2)
-        bad = Any[(obj, OptimizationOptions(iterator=it), ArgumentError) for it in (:gradientdescent,)]
+        bad = Any[]
         append!(bad, [(obj, OptimizationOptions(linsolver=s), ArgumentError) for s in (:cholesky, :ldl, cholesky_solver, ldl_solver)])
         push!(bad, (JacobianObjective(jrosen_cost, jrosen_resjac!, zeros(2, 3)), OptimizationOptions(), DimensionMismatch))
         for (o, opts, E) in bad

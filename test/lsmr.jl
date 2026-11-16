@@ -79,7 +79,7 @@ tp2_run(x, obj, opts, ws) = (x .= (1.0, 0.0); @allocated optimize!(x, obj, opts;
         @test isnothing(check_linear_system(make; n, linsolvers = (:lsmr,), rtol = 1e-6))
     end
 
-    @testset "Every Jacobian iterator with :lsmr: :$it, callbackchangesstate = $ccs" for it in SOO.JACOBIAN_ITERATORS, ccs in (false, true)
+    @testset "Every Jacobian iterator with :lsmr: :$it, callbackchangesstate = $ccs" for it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton), ccs in (false, true)
         opts = OptimizationOptions(; iterator = it, linsolver = :lsmr, callbackchangesstate = ccs)
         qopts = OptimizationOptions(; iterator = it, callbackchangesstate = ccs)
         _, rq = optimize([1.0, 0.0], JacobianObjective(tp2_cost, tp2_resjac!, 20), qopts)

@@ -464,16 +464,6 @@ end
             @test resJ.niterations < resH.niterations
         end
     end
-
-    @testset ":gradientdescent is rejected before f or resjac! is called" begin
-        obj = JacobianObjective(wrosen_cost, wrosen_resjac!, 2)
-        WCALLS[] = 0
-        opts = OptimizationOptions(iterator=:gradientdescent)
-        @test_throws ArgumentError optimize([-1.2, 1.0], obj, opts)
-        @test_throws ArgumentError optimize!([-1.2, 1.0], obj, opts)
-        @test_throws ArgumentError OptimizationWorkspace([-1.2, 1.0], obj, opts)
-        @test WCALLS[] == 0
-    end
 end
 
 # Z1: the optimizer does not zero r and J before each resjac! call; resjac! sets them

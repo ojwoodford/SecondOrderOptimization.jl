@@ -94,7 +94,7 @@ tp1_run(x, obj, opts, ws) = (x .= (1.0, 0.0); optimize!(x, obj, opts; workspace 
         @test isnothing(check_linear_system(s -> SOO.SparseTallLinearSystem(sparse(ones(m, n))); n, linsolvers = (:auto, :qr)))
     end
 
-    @testset "Every Jacobian iterator: :$it, callbackchangesstate = $ccs" for it in SOO.JACOBIAN_ITERATORS, ccs in (false, true)
+    @testset "Every Jacobian iterator: :$it, callbackchangesstate = $ccs" for it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton), ccs in (false, true)
         opts = OptimizationOptions(; iterator = it, callbackchangesstate = ccs)
         xs, rs = optimize([1.0, 0.0], JacobianObjective(tp1_cost, tp1_resjac!, sparse(ones(20, 2))), opts)
         xd, rd = optimize([1.0, 0.0], JacobianObjective(tp1_cost, tp1_resjac!, ones(20, 2)), opts)
@@ -116,7 +116,7 @@ tp1_run(x, obj, opts, ws) = (x .= (1.0, 0.0); optimize!(x, obj, opts; workspace 
         @test tp1_bytes(SOO.max_diag, getA(ls)) == 0
         @test tp1_bytes(SOO.TallLinearize(tp1_resjac!), zeros(2), getA(SOO.SparseTallLinearSystem(sparse(ones(20, 2)))), [1.0, 0.0]) == 0
         # a warm run with a workspace allocates exactly SPQR's allocations for each solve
-        @testset "run with :$it, callbackchangesstate = $ccs" for it in SOO.JACOBIAN_ITERATORS, ccs in (false, true)
+        @testset "run with :$it, callbackchangesstate = $ccs" for it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton), ccs in (false, true)
             opts = OptimizationOptions(; iterator = it, callbackchangesstate = ccs)
             obj = JacobianObjective(tp1_cost, tp1_resjac!, sparse(ones(20, 2)))
             ws = OptimizationWorkspace([1.0, 0.0], obj, opts)
