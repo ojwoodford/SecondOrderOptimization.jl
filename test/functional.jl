@@ -173,3 +173,15 @@ end
     as6_allocs(x, opts, ws)
     @test as6_allocs(x, opts, ws) == 0
 end
+
+@testset "show(::OptimizationResult) with zero times prints no NaN (AS7)" begin
+    _, r = optimize([-1.2, 1.0], HessianObjective(rosenbrock_cost, rosenbrock_fdf!), OptimizationOptions(; maxiters = 3))
+    zerotimes(r) = OptimizationResult((startswith(String(f), "time") ? zero(fieldtype(OptimizationResult, f)) : getfield(r, f) for f in fieldnames(OptimizationResult))...)
+    r0 = zerotimes(r)
+    @test r0.timetotal == 0 && r0.timesolver == 0
+    s = sprint(show, r0)
+    @test !occursin("NaN", s)
+    @test occursin("0.00% of total time", s)
+    @test occursin("accounted for 0.00%", s)
+    @test !occursin("NaN", sprint(show, r))
+end

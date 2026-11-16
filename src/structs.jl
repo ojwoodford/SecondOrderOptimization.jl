@@ -200,6 +200,9 @@ in `result.termination >> 16`. `show(result)` prints a message for every bit set
 isconverged(x::OptimizationResult) = isconverged_bits(x.termination)
 isconverged_bits(t::Integer) = (t & SUCCESS_CONVERGENCE_MASK) != 0 && (t & FAILED_CONVERGENCE_MASK) == 0
 
+# A percentage of a time, 0 when the total is 0 (a run too short to time)
+percentof(part, total) = total == 0 ? 0.0 : 100.0 * part / total
+
 function Base.show(io::IO, x::OptimizationResult)
     optimtime = x.timetotal - x.timeinit
     timedoptim = max(x.timecost + x.timegradient + x.timesolver, optimtime)
@@ -209,15 +212,15 @@ function Base.show(io::IO, x::OptimizationResult)
         iteratorname(x.iterator),
         timestring(x.timetotal), x.niterations, x.startcost, x.bestcost, cost_change_pct)
     @printf(io, "   %s for initialization (%.2f%% of total time, with %d allocations totalling %s), and\n",
-        timestring(x.timeinit), 100.0 * x.timeinit / x.timetotal, x.initallocations, bytesstring(x.initallocated))
+        timestring(x.timeinit), percentof(x.timeinit, x.timetotal), x.initallocations, bytesstring(x.initallocated))
     @printf(io, "   %s for optimization (%.2f%% of total time, with %d allocations totalling %s), of which:\n",
-        timestring(optimtime), 100.0 * optimtime / x.timetotal, x.optimizeallocations, bytesstring(x.optimizeallocated))
+        timestring(optimtime), percentof(optimtime, x.timetotal), x.optimizeallocations, bytesstring(x.optimizeallocated))
     @printf(io, "        %d cost computations accounted for %.2f%% of the time,\n",
-        x.costcomputations, 100.0 * x.timecost / timedoptim)
+        x.costcomputations, percentof(x.timecost, timedoptim))
     @printf(io, "        %d gradient computations accounted for %.2f%%, and\n",
-        x.gradientcomputations, 100.0 * x.timegradient / timedoptim)
+        x.gradientcomputations, percentof(x.timegradient, timedoptim))
     @printf(io, "        %d linear solver computations accounted for %.2f%%.\n",
-        x.linearsolves, 100.0 * x.timesolver / timedoptim)
+        x.linearsolves, percentof(x.timesolver, timedoptim))
     if 0 != x.termination;            println(io, "Reason(s) for termination:"); end
     for (bit, message) in TERMINATION_REASONS
         0 != x.termination & bit && println(io, "   ", message)
