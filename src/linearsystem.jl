@@ -1,5 +1,3 @@
-using StaticArrays, Static, SparseArrays, LinearAlgebra
-
 @enum SolveStatus Success NotPositiveDefinite Indefinite
 @enum OptimizationLinearSolver auto_solver cholesky_solver ldl_solver qr_solver
 

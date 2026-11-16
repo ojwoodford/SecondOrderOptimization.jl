@@ -1,5 +1,3 @@
-using SparseArrays, Static, LinearAlgebra
-
 negate!(x) = @.(x = -x)
 
 # An iterator exists if it has a display name: each iterator defines `iteratorname` beside its

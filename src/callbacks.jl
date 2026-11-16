@@ -1,5 +1,3 @@
-import Printf.@printf
-
 nullcallback(cost, unusedargs...) = (cost, 0)
 
 function printoutcallback(cost, x_trial, data, trailingargs...)

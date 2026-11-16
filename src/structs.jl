@@ -1,6 +1,3 @@
-using SparseArrays, Static
-import Printf.@printf
-
 struct OptimizationOptions{S, L, B <: StaticBool}
     reldcost::Float64           # Minimum relative change in cost (either direction) required to avoid termination
     absdcost::Float64           # Minimum absolute change in cost (either direction) required to avoid termination

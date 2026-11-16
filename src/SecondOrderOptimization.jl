@@ -9,6 +9,7 @@ by [`OptimizationOptions`](@ref).
 module SecondOrderOptimization
 
 using FastNorm
+using LinearAlgebra, SparseArrays, StaticArrays, Static, LDLFactorizations
 using Printf: @printf, @sprintf
 using OptimizationVariableInterface
 import OptimizationVariableInterface: nvars, update, update!, copyvars, syncvars!, ismutablevar

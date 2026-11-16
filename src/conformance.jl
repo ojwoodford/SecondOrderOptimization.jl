@@ -1,5 +1,3 @@
-using LinearAlgebra, SparseArrays
-
 # Reading and writing the Hessian storage of a linear system as a dense matrix, for
 # `check_linear_system`. A new kind of Hessian storage needs a method of each.
 

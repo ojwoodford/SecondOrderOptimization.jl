@@ -1,5 +1,3 @@
-using LDLFactorizations, LinearAlgebra, StaticArrays, SparseArrays, Static
-
 # The linsolver a sparse system's solver workspace was built for by `makesparsews`, as text, for
 # the error raised when `solve!` is asked for another solver. Extensions add methods for their
 # workspace types.

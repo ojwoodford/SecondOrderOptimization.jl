@@ -1,5 +1,3 @@
-using LinearAlgebra
-
 # The residual-and-Jacobian linear system: A = JᵀJ held implicitly, b = Jᵀr. Solved by a
 # Householder QR of [J r] once per linearization, then, per damping value, a QR of the small
 # stacked matrix [R q; √λ D^½ 0]. JᵀJ is never formed.
