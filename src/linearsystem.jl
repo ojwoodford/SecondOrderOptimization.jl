@@ -191,6 +191,10 @@ static linear system: when `nvars(x0)` is a static size (as for a `Number`, a `S
 tuple of them) of at most [`MAX_STATIC_SYSTEM`](@ref). Otherwise the system is dense, of size
 `nvars(x0)`. The rule does not depend on `linsolver`.
 """
+# NLLSModel has its own rule for when to build a static single-variable Hessian. It is deliberately
+# not shared: neither package depends on the other except weakly (decided 2026-11-16). The two rules
+# may differ; when they do, the Hessian is converted to the system's storage, which costs a copy, not
+# correctness.
 usesstaticsystem(x0) = isstaticsize(nvars(x0))
 
 # For a static `nv` this is resolved at compile time, so `makelinearsystem` is type stable
