@@ -108,7 +108,6 @@ end
     stoptime = typemax(UInt64) - options.maxtime <= Base.time_ns() ? typemax(UInt64) : Base.time_ns() + options.maxtime
     stalls = 0       # consecutive iterations without a significant improvement of the best cost
     rose = false    # whether the previous iteration raised the cost (for the best-point bookkeeping)
-    converged = 0
 
     cost = computelinearization!(data, fdf!, data.variables)
     data.startcost = cost
@@ -117,11 +116,13 @@ end
     lowsince = Inf  # the lowest cost of the iterations since then (excluding the one that reset it)
     highsince = -Inf # and the highest
 
+    converged = 0
     converged |= isinf(cost)                                         << 0
     converged |= isnan(cost)                                         << 1
     maxgrad = maximum(abs, getgrad(data.linsystem))::Float64
     converged |= !isfinite(maxgrad)                                  << 12
     converged |= (converged != 0)                                    << 11
+    converged |= (data.iternum >= options.maxiters)                  << 8
     converged |= (maxgrad < options.gtol)                            << 13
 
     while converged == 0
