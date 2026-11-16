@@ -913,3 +913,28 @@ as1_valid_allocs(w, x, o, H) = @allocated SecondOrderOptimization.workspacevalid
         @test occursin("$(n + 1) degrees of freedom", sprint(showerror, err))
     end
 end
+
+@testset "updatescaling! guards a non-finite diagonal entry, as the other systems do (AS2)" begin
+    p = standard_problem()
+    n = length(p.b)
+    for kind in (:dense, :sparse), bad in (NaN, Inf, -Inf), k in (1, nr(p) + 1)   # one retained, one eliminated entry
+        @testset "$kind, $bad at $(k == 1 ? "retained" : "eliminated") entry" begin
+            ls = make_schur_ls(kind, p)
+            d = zeros(n)
+            d[k] = bad
+            add_schur_diag!(ls.H, d)
+            M = SecondOrderOptimization.conformance_matrix(ls.H)
+            @test !isfinite(M[k, k])
+            ref = SecondOrderOptimization.DenseLinearSystem{Float64}(M, copy(p.b), zeros(n))
+            for mk in (() -> SecondOrderOptimization.MarquardtData(0.0, zeros(n)),
+                       () -> SecondOrderOptimization.MarquardtDataTrial(0.0, zeros(n), nothing, NaN, false))
+                lmd, lmd_ref = mk(), mk()
+                SecondOrderOptimization.updatescaling!(lmd, ls)
+                SecondOrderOptimization.updatescaling!(lmd_ref, ref)
+                @test all(isfinite, lmd.scaling)
+                @test lmd.scaling == lmd_ref.scaling
+                @test lmd.lambda == lmd_ref.lambda
+            end
+        end
+    end
+end

@@ -215,66 +215,49 @@ end
 
 SecondOrderOptimization.max_diag(ls::Union{DenseSchurLinearSystem, SparseSchurLinearSystem}) = SecondOrderOptimization.max_diag(ls.H)
 
-function SecondOrderOptimization.updatescaling!(lmd::AnyMarquardtData, ls::DenseSchurLinearSystem{T}) where T
+# Marquardt scaling: the running maximum of |diag(H)|, with a non-finite entry counted as one, as the
+# other systems do. Only the retained diagonal is read differently for dense and sparse R.
+function SecondOrderOptimization.updatescaling!(lmd::AnyMarquardtData, ls::Union{DenseSchurLinearSystem{T}, SparseSchurLinearSystem{T}}) where T
     if lmd.lambda == 0
         lmd.lambda = 1e-6
     end
-    R = ls.H.R
-    E_data = ls.H.E_data
-    struct_info = ls.H.structure
-    nr = struct_info.nr
-    m = zero(T)
-
-    for i in 1:nr
-        @inbounds d = lmd.scaling[i] = max(lmd.scaling[i], abs(R[i, i]))
-        m = max(m, d)
-    end
-    for e in 1:struct_info.neblocks
-        eo = struct_info.eoffsets[e]
-        e_off = struct_info.boffsets_e[e]
-        de = Int(struct_info.e_dims[e])
+    st = ls.H.structure
+    m = scale_retained!(lmd.scaling, ls.H.R, st, zero(T))
+    for e in 1:st.neblocks
+        eo = st.eoffsets[e]
+        o = st.nr + st.boffsets_e[e] - 1
+        de = Int(st.e_dims[e])
         for i in 1:de
-            c_ii = E_data[eo + (i - 1)*(de + 1)]
-            @inbounds d = lmd.scaling[nr + e_off + i - 1] = max(lmd.scaling[nr + e_off + i - 1], abs(c_ii))
-            m = max(m, d)
+            m = scale_entry!(lmd.scaling, o + i, ls.H.E_data[eo + (i - 1) * (de + 1)], m)
         end
     end
     lmd.scaling .= max.(lmd.scaling, max(m * 1e-8, 1e-12))
 end
 
-function SecondOrderOptimization.updatescaling!(lmd::AnyMarquardtData, ls::SparseSchurLinearSystem{T}) where T
-    if lmd.lambda == 0
-        lmd.lambda = 1e-6
-    end
-    R_sys = ls.H.R
-    E_data = ls.H.E_data
-    struct_info = ls.H.structure
-    nr = struct_info.nr
-    m = zero(T)
+@inline function scale_entry!(scaling, k, h_kk::T, m) where T
+    val = abs(h_kk)
+    @inbounds d = scaling[k] = max(scaling[k], isfinite(val) ? val : one(T))
+    return max(m, d)
+end
 
-    for b in 1:struct_info.nrblocks
-        ptr = R_sys.indices[b, b]
-        db = Int(struct_info.r_dims[b])
-        bo = struct_info.boffsets_r[b]
-        if ptr > 0
-            for i in 1:db
-                b_ii = R_sys.data[ptr + (i - 1)*(db + 1)]
-                @inbounds d = lmd.scaling[bo + i - 1] = max(lmd.scaling[bo + i - 1], abs(b_ii))
-                m = max(m, d)
-            end
+function scale_retained!(scaling, R::Matrix, st, m)
+    for i in 1:st.nr
+        m = scale_entry!(scaling, i, R[i, i], m)
+    end
+    return m
+end
+
+function scale_retained!(scaling, R::SparseBlockLinearSystem, st, m)
+    for b in 1:st.nrblocks
+        ptr = R.indices[b, b]
+        ptr > 0 || continue
+        db = Int(st.r_dims[b])
+        bo = st.boffsets_r[b] - 1
+        for i in 1:db
+            m = scale_entry!(scaling, bo + i, R.data[ptr + (i - 1) * (db + 1)], m)
         end
     end
-    for e in 1:struct_info.neblocks
-        eo = struct_info.eoffsets[e]
-        e_off = struct_info.boffsets_e[e]
-        de = Int(struct_info.e_dims[e])
-        for i in 1:de
-            c_ii = E_data[eo + (i - 1)*(de + 1)]
-            @inbounds d = lmd.scaling[nr + e_off + i - 1] = max(lmd.scaling[nr + e_off + i - 1], abs(c_ii))
-            m = max(m, d)
-        end
-    end
-    lmd.scaling .= max.(lmd.scaling, max(m * 1e-8, 1e-12))
+    return m
 end
 
 function SecondOrderOptimization.zero!(ls::DenseSchurLinearSystem)
