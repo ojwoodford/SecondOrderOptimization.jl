@@ -504,19 +504,20 @@ function to_float32(H::SchurBlockHessian)
     return SchurBlockHessian(H.structure, R, Float32.(H.E_data), Float32.(H.C_data))
 end
 
-@testset "Schur solve in Float32 (M4)" begin
+@testset "A SchurBlockHessian must be Float64; Float32 is rejected up front" begin
     p = standard_problem()
     n = length(p.b)
-    x_ref = reference_solve(p, 0.3, ones(n))
-    for kind in (:dense, :sparse)
+    for kind in (:dense, :sparse), x0 in (zeros(Float32, n), zeros(n))
         H = to_float32(kind === :dense ? dense_schur_matrix(p) : sparse_schur_matrix(p))
-        ls = kind === :dense ? SOOExt.DenseSchurLinearSystem(H, Float32.(p.b), zeros(Float32, n)) :
-                               SOOExt.SparseSchurLinearSystem(H, Float32.(p.b), zeros(Float32, n))
-        @test eltype(ls.S) == Float32
-        @test eltype(ls.x) == Float32
-        SecondOrderOptimization.dampen!(ls, 0.3)
-        @test SecondOrderOptimization.solve!(ls) == SecondOrderOptimization.Success
-        @test norm(Float64.(ls.x) - x_ref) <= 1e-3 * norm(x_ref)
+        calls = Ref(0)
+        obj = HessianObjective(x -> (calls[] += 1; 0.0), (g, Hs, x) -> (calls[] += 1; 0.0); H)
+        for s in (:auto, :ldl)
+            @test_throws ArgumentError optimize(x0, obj, OptimizationOptions(; linsolver = s))
+            @test_throws ArgumentError OptimizationWorkspace(x0, obj, OptimizationOptions(; linsolver = s))
+        end
+        @test calls[] == 0
+        err = try optimize(x0, obj, OptimizationOptions()) catch e; e end
+        @test occursin("SchurBlockHessian{Float32", sprint(showerror, err))
     end
     # The sparse system's factor type is concrete
     ls = SOOExt.SparseSchurLinearSystem(sparse_schur_matrix(p), copy(p.b), zeros(n))

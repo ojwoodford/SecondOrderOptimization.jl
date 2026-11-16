@@ -513,8 +513,14 @@ function SecondOrderOptimization.makelinearsystem(x0, H::SchurBlockHessian{T}, l
     return H.R isa SparseBlockLinearSystem ? SparseSchurLinearSystem(H, b, x; pattern) : DenseSchurLinearSystem(H, b, x)
 end
 
-# The prototype's size check and workspace key. As on the Jacobian path, a workspace is reused for an
-# H of the same type (which carries the reduced system's storage) and the same (identical) structure.
+# The prototype's checks and workspace key. The optimizer works in Float64 (as the Jacobian path's
+# `checkjacobian` requires of a SchurBlockJacobian), so another element type is rejected before any work.
+function SecondOrderOptimization.checkhessian(x0, H::SchurBlockHessian{T}) where T
+    T === Float64 || throw(ArgumentError("The Hessian prototype must be Float64; got a $(typeof(H))."))
+    return SecondOrderOptimization.checkhessiansize(x0, H)
+end
+# As on the Jacobian path, a workspace is reused for an H of the same type (which carries the reduced
+# system's storage) and the same (identical) structure.
 function SecondOrderOptimization.checkhessiansize(x0, H::SchurBlockHessian)
     n = dynamic(SecondOrderOptimization.nvars(x0))
     m = H.structure.nr + sum(Int, H.structure.e_dims; init=0)
