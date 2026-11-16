@@ -833,3 +833,83 @@ end
         @test SecondOrderOptimization.conformance_matrix(H) ≈ p.H
     end
 end
+
+# AS1: a workspace for a SchurBlockHessian. The quartic of `quartic_run`, evaluated without allocating
+function as1_objective(p, Href)
+    d = similar(p.b)
+    cost(x) = 0.5 * dot(x, p.H, x) - dot(p.b, x) + 0.25 * sum(xi -> xi^4, x)
+    function fdf!(g, H, x)
+        mul!(g, p.H, x)
+        g .+= x .^ 3 .- p.b
+        copy_content!(H, Href)
+        d .= 3 .* x .^ 2
+        add_schur_diag!(H, d)
+        return cost(x)
+    end
+    return cost, fdf!
+end
+as1_allocs(x, obj, o, w) = (x .= 3.0; @allocated optimize!(x, obj, o; workspace = w))
+as1_valid_allocs(w, x, o, H) = @allocated SecondOrderOptimization.workspacevalid(w, x, o, H)
+
+@testset "OptimizationWorkspace with a SchurBlockHessian (AS1)" begin
+    p = standard_problem()
+    n = length(p.b)
+    opts = OptimizationOptions(; iterator = :levenbergmarquardt, gtol = 1e-10)
+    for kind in (:dense, :sparse)
+        schur(q) = kind === :dense ? dense_schur_matrix(q) : sparse_schur_matrix(q)
+        H = schur(p)
+        cost, fdf! = as1_objective(p, schur(p))
+        obj = HessianObjective(cost, fdf!; H)
+        x_ref, res_ref = optimize(fill(3.0, n), obj, opts)
+        @test isconverged(res_ref)
+        for typed in (true, false)
+            @testset "$kind, $(typed ? "typed" : "untyped") workspace" begin
+                ws = typed ? OptimizationWorkspace(fill(3.0, n), obj, opts) : OptimizationWorkspace()
+                # The first solve with a workspace gives the result of a solve without one
+                x1 = fill(3.0, n)
+                res1 = optimize!(x1, obj, opts; workspace = ws)
+                @test x1 == x_ref && res1.niterations == res_ref.niterations
+                @test !isempty(ws)
+                built = ws.data
+                # A second solve with the same H reuses it. With a typed workspace, matching the key allocates
+                # nothing, and the whole dense run allocates nothing, as for a dense Hessian (the sparse run's
+                # CHOLMOD allocates, rules.md 21; an untyped workspace dispatches dynamically)
+                x2 = fill(3.0, n)
+                optimize!(x2, obj, opts; workspace = ws)
+                @test ws.data === built && x2 == x_ref
+                if typed
+                    as1_valid_allocs(ws, x2, opts, H)
+                    @test as1_valid_allocs(ws, x2, opts, H) == 0
+                end
+                if typed && kind === :dense
+                    as1_allocs(x2, obj, opts, ws)
+                    @test as1_allocs(x2, obj, opts, ws) == 0
+                end
+                # An H with another structure object rebuilds it, and still gives the right result
+                H_other = schur(p)
+                @test H_other.structure !== H.structure
+                obj_other = HessianObjective(cost, fdf!; H = H_other)
+                @test !SecondOrderOptimization.workspacevalid(ws, x2, opts, H_other)
+                x3 = fill(3.0, n)
+                optimize!(x3, obj_other, opts; workspace = ws)
+                @test ws.data !== built
+                @test x3 == x_ref
+            end
+        end
+        # A workspace for a Schur H is not accepted for a dense H of the same size, nor the reverse
+        Hd = zeros(n, n)
+        ws_s = OptimizationWorkspace(fill(3.0, n), obj, opts)
+        ws_d = OptimizationWorkspace(fill(3.0, n), HessianObjective(cost, (g, Hm, x) -> 0.0; H = Hd), opts)
+        @test !SecondOrderOptimization.workspacevalid(ws_s, fill(3.0, n), opts, Hd)
+        @test !SecondOrderOptimization.workspacevalid(ws_d, fill(3.0, n), opts, H)
+        @test SecondOrderOptimization.workspacevalid(ws_s, fill(3.0, n), opts, H)
+        # An x0 of the wrong size is a DimensionMismatch up front, before the objective is evaluated
+        calls = Ref(0)
+        obj_count = HessianObjective(cost, (g, Hm, x) -> (calls[] += 1; 0.0); H)
+        @test_throws DimensionMismatch optimize!(fill(3.0, n + 1), obj_count, opts)
+        @test_throws DimensionMismatch OptimizationWorkspace(fill(3.0, n - 1), obj_count, opts)
+        @test calls[] == 0
+        err = try optimize!(fill(3.0, n + 1), obj_count, opts) catch e; e end
+        @test occursin("$(n + 1) degrees of freedom", sprint(showerror, err))
+    end
+end

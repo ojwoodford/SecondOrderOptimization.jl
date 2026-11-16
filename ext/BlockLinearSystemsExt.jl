@@ -530,6 +530,16 @@ function SecondOrderOptimization.makelinearsystem(x0, H::SchurBlockHessian{T}, l
     return H.R isa SparseBlockLinearSystem ? SparseSchurLinearSystem(H, b, x; pattern) : DenseSchurLinearSystem(H, b, x)
 end
 
+# The prototype's size check and workspace key. As on the Jacobian path, a workspace is reused for an
+# H of the same type (which carries the reduced system's storage) and the same (identical) structure.
+function SecondOrderOptimization.checkhessiansize(x0, H::SchurBlockHessian)
+    n = dynamic(SecondOrderOptimization.nvars(x0))
+    m = H.structure.nr + sum(Int, H.structure.e_dims; init=0)
+    n == m || throw(DimensionMismatch("Hessian prototype H is a SchurBlockHessian of $m variables, but the variables have $n degrees of freedom."))
+    return nothing
+end
+SecondOrderOptimization.h_structure_key(H::SchurBlockHessian) = (:schurhessian, typeof(H), H.structure)
+
 # QR elimination on the Jacobian path
 include("BlockLinearSystemsExt/qrelimination.jl")
 
