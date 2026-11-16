@@ -795,7 +795,7 @@ function quartic_run(p, kind, linsolver, iterator)
     return (; x, res, costs = copy(traj.costs), steps = deepcopy(traj.steps))
 end
 
-@testset "Full optimization with a SchurBlockHessian Hessian: :auto, :cholesky and :ldl (A2)" begin
+@testset "Full optimization with a SchurBlockHessian: :auto, :cholesky and :ldl (A2)" begin
     p = standard_problem()
     for kind in (:dense, :sparse), it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :newton, :dogleg)
         @testset "$kind, $it" begin
