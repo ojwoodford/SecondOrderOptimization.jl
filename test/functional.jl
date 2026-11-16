@@ -144,3 +144,32 @@ end
     x_stat_opt, _ = optimize(x0_static, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), opts_test)
     @test isapprox(x_stat_opt, [1.0, 1.0]; atol=1e-4)
 end
+
+# AS6: a caller's input is rejected with DimensionMismatch or ArgumentError, not AssertionError
+@testset "Input errors are DimensionMismatch or ArgumentError, not AssertionError (AS6)" begin
+    obj_sq(H) = HessianObjective(rosenbrock_cost, (g, Hm, x) -> rosenbrock_fdf!(g, zeros(2, 2), x); H)
+    # A non-square sparse Hessian
+    for f in (() -> optimize([-1.2, 1.0], obj_sq(sparse(ones(2, 3))), OptimizationOptions()),
+              () -> OptimizationWorkspace([-1.2, 1.0], obj_sq(sparse(ones(2, 3))), OptimizationOptions()))
+        @test_throws DimensionMismatch f()
+    end
+    # A callback that changes the cost when callbackchangesstate is false: an ArgumentError naming the option
+    changecost(c, args...) = (c + 1.0, 0)
+    for x0 in ([-1.2, 1.0], @SVector([-1.2, 1.0]))
+        @test_throws ArgumentError optimize(x0, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), OptimizationOptions(); callback = changecost)
+        err = try optimize(x0, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), OptimizationOptions(); callback = changecost) catch e; e end
+        @test occursin("callbackchangesstate", sprint(showerror, err))
+        # ...and is accepted when it is true
+        _, res = optimize(x0, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), OptimizationOptions(; callbackchangesstate = true, maxiters = 3); callback = changecost)
+        @test res.niterations == 3
+    end
+    # The loop still allocates nothing: a callback that keeps the cost, on a dense Vector
+    keepcost(c, args...) = (c, 0)
+    obj = HessianObjective(rosenbrock_cost, rosenbrock_fdf!)
+    opts = OptimizationOptions(; iterator = :levenbergmarquardt, maxiters = 30)
+    ws = OptimizationWorkspace([-1.2, 1.0], obj, opts)
+    as6_allocs(x, o, w) = (x .= [-1.2, 1.0]; @allocated optimize!(x, obj, o; workspace = w, callback = keepcost))
+    x = [-1.2, 1.0]
+    as6_allocs(x, opts, ws)
+    @test as6_allocs(x, opts, ws) == 0
+end

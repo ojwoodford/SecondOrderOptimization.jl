@@ -104,6 +104,10 @@ function run_optimize!(data::D, iteratedata::ID, x, f::F, fdf!::FDF, options::Op
     return x, OptimizationResult(data, converged, dynamic(options.iterator))
 end
 
+# A callback returned a cost other than the one it was given, which only a callback that changes the
+# state may do. (Out of line, so that the loop does not build the message.)
+@noinline callbackchangedcost(given, returned) = throw(ArgumentError("The callback changed the cost (from $given to $returned), but callbackchangesstate is false. A callback that changes the variables or the cost needs OptimizationOptions(callbackchangesstate = true)."))
+
 @inline function optimizeloop!(data::D, iteratedata::ID, f::F, fdf!::FDF, options::OptimizationOptions, callback::CB) where {D, ID, F, FDF, CB}
     stoptime = typemax(UInt64) - options.maxtime <= Base.time_ns() ? typemax(UInt64) : Base.time_ns() + options.maxtime
     stalls = 0       # consecutive iterations without a significant improvement of the best cost
@@ -133,7 +137,7 @@ end
             break
         end
         cost, terminate = callback(cost_, data.varnext, data, iteratedata)
-        @assert(dynamic(options.callbackchangesstate) || isequal(cost, cost_), "callback expected to not change the cost")
+        dynamic(options.callbackchangesstate) || isequal(cost, cost_) || callbackchangedcost(cost_, cost)
 
         dcost = data.bestcost - cost
         if dcost >= 0
