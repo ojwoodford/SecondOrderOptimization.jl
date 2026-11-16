@@ -105,8 +105,8 @@ end
     @test occursin("SecondOrderOptimization", str)
     @test occursin("termination", str)
 
-    # Test enum options (OptimizationIterator & OptimizationLinearSolver)
-    opts_enum = OptimizationOptions(iterator=SecondOrderOptimization.dogleg, linsolver=SecondOrderOptimization.cholesky_solver, maxiters=50)
+    # Test enum options (OptimizationLinearSolver)
+    opts_enum = OptimizationOptions(iterator=:dogleg, linsolver=SecondOrderOptimization.cholesky_solver, maxiters=50)
     x_enum, _ = optimize(x0_static, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), opts_enum)
     @test isapprox(x_enum, [1.0, 1.0]; atol=1e-4)
 

@@ -1,5 +1,5 @@
 using SecondOrderOptimization, StaticArrays, SparseArrays, LinearAlgebra, Static, Random, Test
-using SecondOrderOptimization: LevenbergDataTrial, newton, levenbergmarquardt, levenbergmarquardt_dtd, dogleg, gradientdescent, auto_solver, cholesky_solver, ldl_solver, qr_solver, dampen!, zero!, Success, NotPositiveDefinite   # internal names
+using SecondOrderOptimization: LevenbergDataTrial, auto_solver, cholesky_solver, ldl_solver, qr_solver, dampen!, zero!, Success, NotPositiveDefinite   # internal names
 include("termbits.jl")
 const SOO = SecondOrderOptimization
 using SecondOrderOptimization: getA, getb, getx, solve!   # explicit: Krylov, loaded by other test files, also exports solve!
@@ -49,10 +49,8 @@ end
         err = try SOO.checkobjective([0.0, 0.0], obj, OptimizationOptions(iterator=:gradientdescent)); nothing catch e; e end
         @test err isa ArgumentError && occursin(":gradientdescent", err.msg) && occursin("gains nothing", err.msg)
         @test occursin(":levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg or :newton", err.msg)
-        err = try SOO.checkobjective([0.0, 0.0], obj, OptimizationOptions(iterator=gradientdescent)); nothing catch e; e end
-        @test err isa ArgumentError && occursin(":gradientdescent", err.msg)
-        # the other iterators are accepted, as symbols and as OptimizationIterator values
-        for it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton, levenbergmarquardt, levenbergmarquardt_dtd, dogleg, newton)
+        # the other iterators are accepted
+        for it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton)
             @test SOO.checkobjective([0.0, 0.0], obj, OptimizationOptions(iterator=it)) === nothing
         end
         for s in (:cholesky, :ldl)
@@ -72,7 +70,7 @@ end
 
     @testset "Every rejection throws before f or resjac! is called" begin
         obj = JacobianObjective(jrosen_cost, jrosen_resjac!, 2)
-        bad = Any[(obj, OptimizationOptions(iterator=it), ArgumentError) for it in (:gradientdescent, gradientdescent)]
+        bad = Any[(obj, OptimizationOptions(iterator=it), ArgumentError) for it in (:gradientdescent,)]
         append!(bad, [(obj, OptimizationOptions(linsolver=s), ArgumentError) for s in (:cholesky, :ldl, cholesky_solver, ldl_solver)])
         push!(bad, (JacobianObjective(jrosen_cost, jrosen_resjac!, zeros(2, 3)), OptimizationOptions(), DimensionMismatch))
         for (o, opts, E) in bad

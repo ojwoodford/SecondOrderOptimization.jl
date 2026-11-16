@@ -2,20 +2,23 @@ using SparseArrays, Static, LinearAlgebra
 
 negate!(x) = @.(x = -x)
 
-function Base.String(iterator::OptimizationIterator)
-    if iterator == newton
-        return "Newton"
-    elseif iterator == levenbergmarquardt
-        return "Levenberg-Marquardt"
-    elseif iterator == levenbergmarquardt_dtd
-        return "Levenberg-Marquardt (D'D scaling)"
-    elseif iterator == dogleg
-        return "Dogleg"
-    elseif iterator == gradientdescent
-        return "gradient descent"
-    else
-        return "unknown iterator"
+# An iterator exists if it has a display name: each iterator defines `iteratorname` beside its
+# `construct`, `reset!` and `iterate!`. The names accepted are found from those methods.
+iteratorname(::StaticSymbol) = nothing
+iteratorname(s::Symbol) = iteratorname(static(s))
+
+function knowniterators()
+    syms = Symbol[]
+    for m in methods(iteratorname)
+        T = Base.unwrap_unionall(m.sig).parameters[2]
+        T isa DataType && T <: StaticSymbol && T.parameters[1] isa Symbol && push!(syms, T.parameters[1])
     end
+    return sort!(syms)
+end
+
+function checkiterator(s::Symbol)
+    isnothing(iteratorname(s)) || return nothing
+    throw(ArgumentError("Unknown iterator: :$s. The iterators are " * join((":$x" for x in knowniterators()), ", ", " and ") * "."))
 end
 
 function computelinearization!(data, fdf!, x)
@@ -39,6 +42,7 @@ end
 # Newton optimization
 struct NewtonData
 end
+iteratorname(::StaticSymbol{:newton}) = "Newton"
 construct(::StaticSymbol{:newton}, ls, ::True) = NewtonData()
 reset!(::NewtonData) = nothing
 
@@ -130,6 +134,7 @@ function DoglegData(ls, maxtrustradius::Float64=1e10; trial=nothing)
     return DoglegData(0.0, maxtrustradius, similar(x), similar(x), trial, NaN, false)
 end
 
+iteratorname(::StaticSymbol{:dogleg}) = "Dogleg"
 construct(::StaticSymbol{:dogleg}, ls, ::True) = DoglegData(ls)
 construct(::StaticSymbol{:dogleg}, ls, ::False) = DoglegData(ls; trial=copy_structure(ls))
 reset!(dd::DoglegData) = (dd.trustradius = 0.0; dd.trialready = false; dd.trialcost = NaN)
@@ -324,6 +329,7 @@ abstract type LevMarDataTrial <: LevMarData end
 mutable struct LevenbergData <: LevMarData
     lambda::Float64
 end
+iteratorname(::StaticSymbol{:levenbergmarquardt}) = "Levenberg-Marquardt"
 construct(::StaticSymbol{:levenbergmarquardt}, ls, ::True) = LevenbergData(0.0)
 reset!(lmd::LevenbergData) = (lmd.lambda = 0.0)
 
@@ -363,6 +369,7 @@ mutable struct MarquardtData{T} <: LevMarData
     lambda::Float64
     scaling::T
 end
+iteratorname(::StaticSymbol{:levenbergmarquardt_dtd}) = "Levenberg-Marquardt (D'D scaling)"
 construct(::StaticSymbol{:levenbergmarquardt_dtd}, ls, ::True) = MarquardtData(0.0, zero(getx(ls)))
 reset!(lmd::MarquardtData) = (fill!(lmd.scaling, 0.0); lmd.lambda = 0.0)
 
@@ -558,6 +565,7 @@ printoutcallback(cost, x_trial, data, iteratedata::LevMarData) = printoutcallbac
 mutable struct GradientDescentData
     stepsize::Float64
 end
+iteratorname(::StaticSymbol{:gradientdescent}) = "gradient descent"
 construct(::StaticSymbol{:gradientdescent}, ls, ::Any) = GradientDescentData(1.0)
 construct(s::StaticSymbol, ls) = construct(s, ls, False())
 reset!(gdd::GradientDescentData) = (gdd.stepsize = 1.0)

@@ -1,8 +1,6 @@
 using SparseArrays, Static
 import Printf.@printf
 
-@enum OptimizationIterator newton levenbergmarquardt dogleg gradientdescent levenbergmarquardt_dtd
-
 struct OptimizationOptions{S, L, B <: StaticBool}
     reldcost::Float64           # Minimum relative change in cost (either direction) required to avoid termination
     absdcost::Float64           # Minimum absolute change in cost (either direction) required to avoid termination
@@ -94,7 +92,7 @@ function OptimizationOptions(;
     isnothing(callback) || throw(ArgumentError("Callbacks should be passed directly to optimize, not to the options struct."))
     isnothing(iteratordata) || throw(ArgumentError("Iteratordata should not be passed to the options struct."))
     iter_sym = Symbol(iterator)
-    getiterator(iter_sym) # validates iterator symbol
+    checkiterator(iter_sym) # validates iterator symbol
     linsolv_sym = linsolver_symbol(linsolver)
     checklinsolver(linsolv_sym) # validates linear solver symbol
     # Saturate: anything at or beyond the UInt64 nanosecond range means no time limit
@@ -106,17 +104,6 @@ function OptimizationOptions(;
         static(iter_sym), static(linsolv_sym),
         makestaticbool(callbackchangesstate)
     )
-end
-
-getiterator(options::OptimizationOptions) = getiterator(options.iterator)
-getiterator(s::StaticSymbol) = getiterator(dynamic(s))
-function getiterator(s::Symbol)::OptimizationIterator
-    s === :newton && return newton
-    s === :levenbergmarquardt && return levenbergmarquardt
-    s === :levenbergmarquardt_dtd && return levenbergmarquardt_dtd
-    s === :dogleg && return dogleg
-    s === :gradientdescent && return gradientdescent
-    throw(ArgumentError("Unknown iterator: $s"))
 end
 
 struct OptimizationResult
@@ -222,7 +209,7 @@ function Base.show(io::IO, x::OptimizationResult)
     cost_change_pct = (x.startcost != 0.0 && isfinite(x.startcost) && isfinite(x.bestcost)) ?
         100.0 * (x.startcost - x.bestcost) / abs(x.startcost) : 0.0
     @printf(io, "SecondOrderOptimization optimization using %s took %s and %d iterations to change the cost from %e to %e (%.2f%% change), requiring:\n",
-        String(getiterator(x.iterator)),
+        iteratorname(x.iterator),
         timestring(x.timetotal), x.niterations, x.startcost, x.bestcost, cost_change_pct)
     @printf(io, "   %s for initialization (%.2f%% of total time, with %d allocations totalling %s), and\n",
         timestring(x.timeinit), 100.0 * x.timeinit / x.timetotal, x.initallocations, bytesstring(x.initallocated))
