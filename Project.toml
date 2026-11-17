@@ -1,6 +1,6 @@
 name = "SecondOrderOptimization"
 uuid = "a3f5c71e-3b2d-4d9a-9e20-7f8e3c4b1a50"
-version = "0.2.0"
+version = "0.1.0"
 authors = ["Oliver Woodford"]
 
 [deps]
@@ -12,9 +12,6 @@ Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 Static = "aedffcd0-7271-4cad-89d0-dc628f76c6d3"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
-
-[extras]
-BlockLinearSystems = "a7d4e89f-9c3b-4d0e-8f5a-5b8c7d1e4f28"
 
 [compat]
 DampedLinearSolve = "0.1"
