@@ -416,9 +416,11 @@ end
     p = standard_problem()
     Hd, Hs = dense_schur_matrix(p), sparse_schur_matrix(p)
     mk(H, s) = SecondOrderOptimization.makelinearsystem(H, s)
+    # The enum spellings of a solver reach the systems as the options hold them, as a StaticSymbol
+    opt(s) = OptimizationOptions(linsolver = s).linsolver
     # The storage of R picks the dense or sparse system, whatever the reduced-system solver
-    for s in (:auto, :cholesky, :ldl, static(:auto), static(:ldl), SecondOrderOptimization.auto_solver,
-              SecondOrderOptimization.cholesky_solver, SecondOrderOptimization.ldl_solver)
+    for s in (:auto, :cholesky, :ldl, static(:auto), static(:ldl), opt(SecondOrderOptimization.auto_solver),
+              opt(SecondOrderOptimization.cholesky_solver), opt(SecondOrderOptimization.ldl_solver))
         @test mk(Hd, s) isa SOOExt.DenseSchurLinearSystem
         @test mk(Hs, s) isa SOOExt.SparseSchurLinearSystem
     end
@@ -426,7 +428,7 @@ end
     sq(x) = sum(abs2, x)
     sq_fdf!(g, H, x) = sq(x)
     for H in (Hd, Hs)
-        for s in (:qr, :pardiso, :cg, :minres, static(:qr), SecondOrderOptimization.qr_solver)
+        for s in (:qr, :pardiso, :cg, :minres, static(:qr), opt(SecondOrderOptimization.qr_solver))
             err = try mk(H, s); nothing catch e; e end
             @test err isa ArgumentError
             @test occursin("reduced system", sprint(showerror, err))
@@ -450,11 +452,11 @@ end
         @test isconverged(res) && norm(x) < 1e-8
     end
 
-    # solve! accepts Symbols, static symbols and the OptimizationLinearSolver enum without ambiguity
+    # solve! accepts Symbols and static symbols (the enum spellings as the options hold them) without ambiguity
     n = length(p.b)
     x_ref = reference_solve(p, 0.3, ones(n))
     for kind in (:dense, :sparse), s in (:auto, :cholesky, :ldl, static(:auto), static(:ldl),
-                                        SecondOrderOptimization.auto_solver, SecondOrderOptimization.cholesky_solver, SecondOrderOptimization.ldl_solver)
+                                        opt(SecondOrderOptimization.auto_solver), opt(SecondOrderOptimization.cholesky_solver), opt(SecondOrderOptimization.ldl_solver))
         ls = make_schur_ls(kind, p)
         SecondOrderOptimization.dampen!(ls, 0.3)
         @test SecondOrderOptimization.solve!(ls, s) == SecondOrderOptimization.Success

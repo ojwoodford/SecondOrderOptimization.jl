@@ -4,7 +4,6 @@ module BlockLinearSystemsExt
 # block data structures and reduction kernels of BlockLinearSystems.jl. Loaded when both packages are.
 
 using SecondOrderOptimization
-import SecondOrderOptimization: OptimizationLinearSolver
 import SecondOrderOptimization: AbstractLinearSystem, solve!, dampen!, sharex, getA, getb, getx, SolveStatus, Success, NotPositiveDefinite, Indefinite, makelinearsystem, max_diag, is_indefinite
 import SecondOrderOptimization: AbstractTallLinearSystem, DenseLDLWorkspace, is_indefinite_packed, solvermismatch, make_reduced, solve_reduced!, SPQRWorkspace, spqr_solve!
 import SecondOrderOptimization.LDLFactorizations: ldl_analyze, ldl_factorize!, factorized
@@ -309,7 +308,6 @@ function SecondOrderOptimization.solve!(ls::DenseSchurLinearSystem, solver_opt::
     return all(isfinite, ls.x) ? Success : NotPositiveDefinite
 end
 SecondOrderOptimization.solve!(ls::DenseSchurLinearSystem, s::Symbol) = SecondOrderOptimization.solve!(ls, static(s))
-SecondOrderOptimization.solve!(ls::DenseSchurLinearSystem, s::OptimizationLinearSolver) = SecondOrderOptimization.solve!(ls, static(SecondOrderOptimization.linsolver_symbol(s)))
 
 # Copy the values of S into the persistent CHOLMOD.Sparse in place. Its pattern (upper triangle of S, same
 # order as S.nzval) never changes, so this avoids rebuilding a CHOLMOD.Sparse (pattern and values) per solve.
@@ -376,7 +374,6 @@ function SecondOrderOptimization.solve!(ls::SparseSchurLinearSystem, solver_opt:
     return all(isfinite, ls.x) ? Success : NotPositiveDefinite
 end
 SecondOrderOptimization.solve!(ls::SparseSchurLinearSystem, s::Symbol) = SecondOrderOptimization.solve!(ls, static(s))
-SecondOrderOptimization.solve!(ls::SparseSchurLinearSystem, s::OptimizationLinearSolver) = SecondOrderOptimization.solve!(ls, static(SecondOrderOptimization.linsolver_symbol(s)))
 
 # `quadratic_model_change` is intentionally not specialised: SecondOrderOptimization's generic method
 # (0.5 * quadform(getA(ls), dx) + fast_dot(getb(ls), dx)) is the undamped model change. Its quadratic
@@ -518,7 +515,7 @@ function SecondOrderOptimization.checkhessian(H::SchurBlockHessian{T}, n::Intege
 end
 # As on the Jacobian path, a workspace is reused for an H of the same type (which carries the reduced
 # system's storage) and the same (identical) structure.
-SecondOrderOptimization.h_structure_key(H::SchurBlockHessian) = (:schurhessian, typeof(H), H.structure)
+SecondOrderOptimization.structurekey(H::SchurBlockHessian) = (typeof(H), H.structure)
 
 # QR elimination on the Jacobian path
 include("BlockLinearSystemsExt/qrelimination.jl")

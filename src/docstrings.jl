@@ -371,12 +371,11 @@ zero!
 
 """
     solve!(ls, solver=static(:auto)) -> SolveStatus
-    solve!(x, A, b) -> SolveStatus
 
-Solves the linear system `A * x = b` in-place using the specified `solver` and returns the [`SolveStatus`](@ref) enum (`Success`, `NotPositiveDefinite`, `Indefinite`).
+Solves the linear system `A * x = b` in-place using the specified `solver` (a `Symbol` or a `StaticSymbol`) and returns the [`SolveStatus`](@ref) enum (`Success`, `NotPositiveDefinite`, `Indefinite`).
 
 # Supported Solver Identifiers
-- Core solvers: `:auto`, `:cholesky`, `:ldl`, `:qr` (or enum constants [`auto_solver`](@ref), [`cholesky_solver`](@ref), [`ldl_solver`](@ref), [`qr_solver`](@ref)).
+- Core solvers: `:auto`, `:cholesky`, `:ldl`, `:qr`. (`OptimizationOptions` also accepts the enum constants [`auto_solver`](@ref), [`cholesky_solver`](@ref), [`ldl_solver`](@ref), [`qr_solver`](@ref), and holds the solver as a `StaticSymbol`.)
 - Extension solvers (when package is loaded):
   - `using Krylov`: `:cg` (Conjugate Gradient), `:minres` (MINRES). On sparse systems, `:cg` and `:minres` are Jacobi (diagonal) preconditioned whenever the damped diagonal is positive.
   - `using Pardiso`: `:pardiso` (Intel MKL PARDISO or Panua Pardiso multi-threaded direct sparse solver).
@@ -385,10 +384,9 @@ Note: On `StaticLinearSystem`, `:qr` executes static LU decomposition via `\`, a
 
 # Example
 ```julia
-x = zeros(2)
-A = [2.0 0.0; 0.0 4.0]
-b = [4.0, 8.0]
-solve!(x, A, b)
+ls = SecondOrderOptimization.makelinearsystem([2.0 0.0; 0.0 4.0], :auto)
+ls.b .= [4.0, 8.0]
+solve!(ls, :cholesky)   # Success; ls.x == [2.0, 2.0]
 ```
 """
 solve!
@@ -459,13 +457,12 @@ below (those not exported are extended as `SecondOrderOptimization.name`), and s
 | `getA(ls)`, `getb(ls)`, `getx(ls)` | `A` is the Hessian storage and `b` the gradient vector that `fdf!(b, A, x)` fills; `x` is the vector `solve!` writes. `b` and `x` have length `n`. The iterators read and negate `x`, and dogleg writes its own step into it. `A` must support `dot(v, A, v)` (`LinearAlgebra`'s three-argument `dot`), or have a method of the internal `quadform(A, v)`, for `v` of the type of `b`. |
 | `zero!(ls)` | Prepares the system for a fresh linearization, keeping its structure (pattern, workspaces): storage that `fdf!` accumulates into (`A`, `b`) is zeroed. A tall system only invalidates its factorization and column norms (and zeroes `b`), since `resjac!` overwrites `J` and `r`. |
 | `dampen!(ls, λ)`, `dampen!(ls, λ, s)` | Records damping without changing `A`: `solve!` then solves with `A + λI`, or `A + λ Diagonal(s)` (`s` in the units of `diag(A)`, not squared). Each call replaces the damping set before, including the scaling; `dampen!(ls, λ, nothing)` is `dampen!(ls, λ)`, and `λ = 0` is undamped. |
-| `solve!(ls, linsolver) -> SolveStatus` | Solves the damped system `A x = b` into `getx(ls)` (the step is `-x`; the iterators negate it). Returns `Success` when `x` solves it; `NotPositiveDefinite` when the factorization failed (`x` is then unspecified); `Indefinite` when it solved but found `A` indefinite (from `:ldl`, and CG's nonpositive curvature). The iterators treat anything but `Success` as failure: Newton shifts the diagonal, Levenberg-Marquardt raises `λ`, and dogleg shifts the diagonal as Newton does, taking the Cauchy step only if every shift fails. Leaves `A` and `b` exactly as written, damped or not, whether the solve succeeds or fails. `linsolver` may be a `Symbol`, a `StaticSymbol` or an `OptimizationLinearSolver`. |
+| `solve!(ls, linsolver) -> SolveStatus` | Solves the damped system `A x = b` into `getx(ls)` (the step is `-x`; the iterators negate it). Returns `Success` when `x` solves it; `NotPositiveDefinite` when the factorization failed (`x` is then unspecified); `Indefinite` when it solved but found `A` indefinite (from `:ldl`, and CG's nonpositive curvature). The iterators treat anything but `Success` as failure: Newton shifts the diagonal, Levenberg-Marquardt raises `λ`, and dogleg shifts the diagonal as Newton does, taking the Cauchy step only if every shift fails. Leaves `A` and `b` exactly as written, damped or not, whether the solve succeeds or fails. `linsolver` may be a `Symbol` or a `StaticSymbol`. |
 | `copy_structure(ls)` | A new system with the same structure and its own `A` and `b` (contents unspecified). It may share `x` and factorization workspaces with `ls`, provided each `solve!` is self-contained, so that solving one never changes the other's next solution. |
 | `sharex(ls, from)` | `ls`, or a copy of it sharing its `A` and `b`, whose `getx` is `getx(from)`. |
 | `SecondOrderOptimization.max_diag(ls)` | The largest absolute diagonal entry of `A`; `NaN` if a diagonal entry is `NaN` (as `max` propagates it). |
 | `SecondOrderOptimization.dampingfloor(ls)` | The smallest damping the solver resolves, relative to the diagonal: `eps(Float64)` by default (Cholesky of `A + λD`), `eps(Float64)^2` for the tall system (QR of `J`). Levenberg-Marquardt floors its damping at `min(dampingfloor(ls) * max_diag(ls), 1e-12)` for `:levenbergmarquardt` (1e-12 if `max_diag` is not finite or is zero), and at `min(dampingfloor(ls), 1e-12)` for `:levenbergmarquardt_dtd`, whose `λ` multiplies the scaled diagonal: the floor can be lower than the former constant 1e-12, never higher. |
 | `SecondOrderOptimization.getdiag!(d, ls)` | Writes the diagonal of the undamped `A` into `d` and returns it (for a tall system, the squared column norms of `J`). `:levenbergmarquardt_dtd` builds its scaling from it: the running maximum of its absolute values, with a relative floor. The generic method reads `A[i, i]`; a system whose `A` can't be indexed needs its own method (the sparse, Schur and tall systems have one). |
-| `SecondOrderOptimization.refresh_diag_cache!(ls)` | Called by the iterators after `fdf!` writes `A`. A no-op by default; no built-in system needs it for correctness. |
 | `quadratic_model_change(ls, dx)` | `dx' A dx / 2 + b' dx`, undamped. The generic method uses `quadform(getA(ls), dx)` and `fast_dot(getb(ls), dx)`. |
 
 Which system `makelinearsystem` builds:

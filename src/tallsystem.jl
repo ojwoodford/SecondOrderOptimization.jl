@@ -394,3 +394,38 @@ dampingfloor(ls::AbstractTallLinearSystem) = eps(Float64)^2
 
 # The diagonal of JᵀJ, the squared column norms of J (computed once per linearization)
 getdiag!(d::AbstractVector, ls::AbstractTallLinearSystem) = copyto!(d, colnorms2!(ls.A))
+
+# The Jacobian prototypes the tall systems are built from: their checks, size and solvers
+const JACOBIAN_SUPPORT = "JacobianObjective supports every iterator, with a Matrix{Float64} or SparseMatrixCSC{Float64, Int} Jacobian prototype or an integer number of residuals m, and linsolver = :auto or :qr;" *
+    " or, with BlockLinearSystems.jl loaded, a SchurBlockJacobian{Float64, Matrix{Float64}} or SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}, linsolver = :auto, :qr, :cholesky or :ldl." *
+    " Every prototype also takes linsolver = :lsmr, with Krylov.jl loaded"
+
+# The Jacobian prototype: a Matrix{Float64} with at least one row, or an integer m >= 1
+function checkjacobian(J)
+    if J isa Integer && !(J isa Bool)
+        J >= 1 || throw(ArgumentError("The number of residuals m must be at least 1; got $J. $JACOBIAN_SUPPORT."))
+    elseif J isa Matrix{Float64}
+        size(J, 1) >= 1 || throw(ArgumentError("The Jacobian prototype has no rows (size $(size(J))): it needs one row per residual. $JACOBIAN_SUPPORT."))
+    elseif J isa SparseMatrixCSC{Float64, Int}
+        size(J, 1) >= 1 || throw(ArgumentError("The Jacobian prototype has no rows (size $(size(J))): it needs one row per residual. $JACOBIAN_SUPPORT."))
+    elseif J isa AbstractSparseMatrix
+        throw(ArgumentError("A sparse Jacobian prototype of type $(typeof(J)) is not supported. $JACOBIAN_SUPPORT."))
+    elseif J isa AbstractMatrix && eltype(J) !== Float64
+        throw(ArgumentError("The Jacobian must be Float64; got a prototype with element type $(eltype(J)). $JACOBIAN_SUPPORT."))
+    else
+        throw(ArgumentError("A Jacobian prototype of type $(typeof(J)) is not supported. $JACOBIAN_SUPPORT."))
+    end
+    return nothing
+end
+
+# The number of residuals a Jacobian prototype stands for
+nresiduals_of(J) = J isa Integer ? Int(J) : size(J, 1)
+
+# The prototype's column count (nothing for an integer m, whose J is sized from x0), and the solvers it
+# accepts. An extension adds methods for its prototype types.
+jacobian_ncols(J::AbstractMatrix) = size(J, 2)
+jacobian_ncols(J) = nothing
+function check_jacobian_linsolver(J, s::Symbol)
+    s in (:auto, :qr, :lsmr) || throw(ArgumentError("linsolver = :$s is not supported with a JacobianObjective. $JACOBIAN_SUPPORT."))
+    return nothing
+end

@@ -22,7 +22,6 @@ validatelinsolver(::StaticSymbol{:ldl}) = true
 validatelinsolver(::StaticSymbol{:qr}) = true
 validatelinsolver(::StaticSymbol{S}) where S = false
 validatelinsolver(s::Symbol) = validatelinsolver(static(s))
-validatelinsolver(s::OptimizationLinearSolver) = true
 
 # Checks on the Hessian prototype `H` of a system of `n` variables, run before the system is built
 checkhessian(H, n::Integer) = nothing
@@ -40,19 +39,7 @@ function checklinsolver(s::Symbol)
     end
     throw(ArgumentError("Unknown linear solver: $s"))
 end
-checklinsolver(s::OptimizationLinearSolver) = true
 checklinsolver(s::StaticSymbol) = checklinsolver(dynamic(s))
-
-function getlinsolver(s::Symbol)
-    s === :auto && return auto_solver
-    s === :cholesky && return cholesky_solver
-    s === :ldl && return ldl_solver
-    s === :qr && return qr_solver
-    checklinsolver(s)
-    return s
-end
-getlinsolver(s::OptimizationLinearSolver) = s
-getlinsolver(s::StaticSymbol) = getlinsolver(dynamic(s))
 
 # Indefiniteness tests on a factorization's pivots. A pivot counts as negative when it is below
 # `-rtol` times the largest pivot magnitude, so the test is independent of the matrix's scale.
@@ -157,7 +144,6 @@ end
 
 # Linear solve dispatching on solver symbol: :auto, :cholesky, :ldl, :qr
 solve!(ls) = solve!(ls, static(:auto))
-solve!(ls, solver::OptimizationLinearSolver) = solve!(ls, static(linsolver_symbol(solver)))
 
 # StaticLinearSystem
 @inline function damped_static(ls::StaticLinearSystem)
@@ -393,14 +379,8 @@ function solve!(ls::SparseLinearSystem, ::StaticSymbol{:qr})
     return all(isfinite, ls.x) ? Success : NotPositiveDefinite
 end
 
-# Method dispatch for Symbol and OptimizationLinearSolver
+# Method dispatch for a Symbol
 solve!(ls::AbstractLinearSystem, s::Symbol) = solve!(ls, static(s))
-solve!(ls::AbstractLinearSystem, s::OptimizationLinearSolver) = solve!(ls, static(linsolver_symbol(s)))
-
-# Generic matrix fallback for direct solve!(x, A, b)
-solve!(x, A, b) = try_cholesky!(x, A, b)
-solve!(x, A::SparseMatrixCSC, b) = ldiv!(x, ldl(A), b)
-solve!(x::StaticVector, A::StaticMatrix, b::StaticVector) = try_cholesky!(x, A, b)
 
 # Symmetric matrix inversion
 invsym(A::AbstractMatrix) = inv(bunchkaufman(A))

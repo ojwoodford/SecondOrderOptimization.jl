@@ -1,14 +1,8 @@
 @enum SolveStatus Success NotPositiveDefinite Indefinite
-@enum OptimizationLinearSolver auto_solver cholesky_solver ldl_solver qr_solver
 
+# A solver is named by a Symbol or a StaticSymbol
 linsolver_symbol(s::Symbol) = s
 linsolver_symbol(s::StaticSymbol) = dynamic(s)
-function linsolver_symbol(s::OptimizationLinearSolver)
-    s == auto_solver && return :auto
-    s == cholesky_solver && return :cholesky
-    s == ldl_solver && return :ldl
-    return :qr
-end
 
 abstract type AbstractLinearSystem end
 function solve! end
@@ -139,7 +133,6 @@ makesparsews(A, ::StaticSymbol{:cholesky}) = SparseArrays.cholesky(Symmetric(A, 
 makesparsews(A, ::StaticSymbol{:qr}) = nothing
 makesparsews(A, ::StaticSymbol{S}) where S = nothing
 makesparsews(A, s::Symbol) = makesparsews(A, static(s))
-makesparsews(A, s::OptimizationLinearSolver) = makesparsews(A, static(linsolver_symbol(s)))
 
 function makelinearsystem(H::SparseMatrixCSC{T}, linsolver) where T
     T === Float64 || throw(ArgumentError("The Hessian must be Float64; got a sparse prototype with element type $T. Pass a SparseMatrixCSC{Float64}."))
@@ -203,14 +196,6 @@ function zero!(ls::SparseLinearSystem)
     return ls
 end
 
-refresh_diag_cache!(ls::AbstractLinearSystem) = nothing
-function refresh_diag_cache!(ls::SparseLinearSystem)
-    @inbounds for (i, idx) in enumerate(ls.diag_inds)
-        ls.diag_cache[i] = ls.A.nzval[idx]
-    end
-    return nothing
-end
-
 # Unified damping interface: dampen! records, solve! applies
 dampen!(ls::AbstractLinearSystem, lambda::Real) = (ls.lambda = convert(eltype(getb(ls)), lambda); ls.scaling = nothing; ls)
 dampen!(ls::AbstractLinearSystem, lambda::Real, scaling) = (ls.lambda = convert(eltype(getb(ls)), lambda); ls.scaling = scaling; ls)
@@ -246,8 +231,8 @@ function uniformscaling!(ls, k)
 end
 
 # The sparse system damps A in place, so these first save the undamped diagonal, from which every
-# sparse solve restores it afterwards. Saving here (not in `refresh_diag_cache!`) means a solve
-# leaves A as it found it even if A was written without a refresh.
+# sparse solve restores it afterwards. Saving here, when the damping is applied, means a solve
+# leaves A as it found it however A was written.
 function uniformscaling!(ls::SparseLinearSystem, k)
     @inbounds for (i, idx) in enumerate(ls.diag_inds)
         ls.diag_cache[i] = ls.A.nzval[idx]
@@ -285,6 +270,10 @@ function damp_marquardt!(ls::SparseLinearSystem, scaling, dlambda)
     end
 end
 damp_marquardt!(ls, scaling, dlambda) = damp_marquardt!(getA(ls), scaling, dlambda)
+
+# A value equal for two prototypes from which systems of the same structure are built, for a caller
+# that caches systems. A package with its own prototype type adds a method.
+structurekey(H::AbstractMatrix) = (typeof(H), size(H))
 
 # The diagonal of the undamped A, written into d
 function getdiag!(d::AbstractVector, ls::AbstractLinearSystem)

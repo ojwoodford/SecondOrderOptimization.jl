@@ -44,8 +44,9 @@ hessian_linearsystem(x, ::Nothing, linsolver) = makelinearsystem(systemsize(x), 
 hessian_linearsystem(x, H, linsolver) = makelinearsystem(H, linsolver)
 objective_structure(obj::HessianObjective) = obj.H
 objective_structure(obj::JacobianObjective) = jacobian_structure(obj.J)
-jacobian_structure(J) = JacobianStructureKey(nresiduals_of(J))
+jacobian_structure(J::Union{Integer, Matrix}) = JacobianStructureKey(nresiduals_of(J))
 jacobian_structure(J::SparseMatrixCSC) = SparseJacobianPattern(J)
+jacobian_structure(J) = JacobianPrototypeKey(structurekey(J))
 linearizer(obj::HessianObjective) = obj.fdf!
 linearizer(obj::JacobianObjective) = TallLinearize(obj.resjac!)
 

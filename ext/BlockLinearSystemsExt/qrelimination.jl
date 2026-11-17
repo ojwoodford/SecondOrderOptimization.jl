@@ -38,8 +38,7 @@ end
 SecondOrderOptimization.jacobian_ncols(J::SchurBlockJacobian) = jacobian_ncols(J)
 SecondOrderOptimization.nresiduals_of(J::SchurBlockJacobian) = jacobian_nrows(J)
 # A workspace is reused for a prototype of the same type and the same (identical) structure
-SecondOrderOptimization.jacobian_structure(J::SchurBlockJacobian) = (:schurjacobian, typeof(J), J.structure)
-SecondOrderOptimization.h_structure_key(k::Tuple{Symbol, DataType, BlockLinearSystems.SchurJacobianStructure}) = k
+SecondOrderOptimization.structurekey(J::SchurBlockJacobian) = (typeof(J), J.structure)
 
 jacobian_ncols(J::SchurBlockJacobian) = J.structure.schur.nr + sum(Int, J.structure.schur.e_dims; init=0)
 jacobian_nrows(J::SchurBlockJacobian) = sum(t -> data_rows(J.structure, t), 1:J.structure.ntables; init=0)

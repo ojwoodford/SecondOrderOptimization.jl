@@ -23,7 +23,6 @@ function computelinearization!(data, fdf!, x)
     zero!(data.linsystem)
     cost = 0.0
     data.gradients += @elapsed_ns cost = fdf!(getb(data.linsystem), getA(data.linsystem), x)
-    refresh_diag_cache!(data.linsystem)
     return cost
 end
 
@@ -104,7 +103,6 @@ reset!(::NewtonDataRelinearize) = nothing
         data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
         zero!(data.linsystem)
         data.gradients += @elapsed_ns nd.cost = fdf!(getb(data.linsystem), getA(data.linsystem), data.varnext)
-        refresh_diag_cache!(data.linsystem)
         return nd.cost
     end
     return LINSOLVER_FAILED
@@ -149,7 +147,6 @@ end
     dd.trial = sharex(dd.trial, data.linsystem)
     zero!(dd.trial)
     data.gradients += @elapsed_ns cost_ = fdf!(getb(dd.trial), getA(dd.trial), data.varnext)
-    refresh_diag_cache!(dd.trial)
     dd.trialready = true
     dd.trialcost = cost_
     return cost_
@@ -534,7 +531,6 @@ end
             levmardata.trial = sharex(levmardata.trial, data.linsystem)
             zero!(levmardata.trial)
             data.gradients += @elapsed_ns cost_ = fdf!(getb(levmardata.trial), getA(levmardata.trial), data.varnext)
-            refresh_diag_cache!(levmardata.trial)
             levmardata.trialready = true
             levmardata.trialcost = cost_
         else
