@@ -34,6 +34,18 @@ end
 # Default linearization is at data.variables
 linearize!(::Any, data, fdf!) = computelinearization!(data, fdf!, data.variables)
 
+# The first retry when an undamped Newton solve fails: a shift of eps·max_diag (at least the
+# solver's `dampingfloor`, at which a positive-definite matrix solves). It cures a failure that came
+# from rounding alone in an ill-conditioned matrix that is positive definite, without the larger
+# shift below making the step negligible. If it fails, the matrix is not positive definite, and the
+# shifted retry below runs as before.
+function probe_shift!(ls, linsolver)
+    md = max_diag(ls)
+    (isfinite(md) && md > 0) || return NotPositiveDefinite
+    dampen!(ls, max(dampingfloor(ls), eps(Float64)) * md)
+    return solve!(ls, linsolver)
+end
+
 # First diagonal shift tried when an undamped Newton solve fails. `max_diag` is NaN if the
 # diagonal holds a NaN, and `dampen!` ignores a NaN shift, so fall back to a fixed value.
 function initial_shift(ls)
@@ -54,6 +66,7 @@ reset!(::NewtonData) = nothing
         status = solve!(data.linsystem, options.linsolver)
         if status == Success
         else
+            status = probe_shift!(data.linsystem, options.linsolver)
             mu = initial_shift(data.linsystem)
             shift_iters = isfinitesystem(data.linsystem) ? 30 : 0   # damping cannot repair a non-finite matrix
             while status != Success && shift_iters > 0
@@ -89,6 +102,7 @@ reset!(::NewtonDataRelinearize) = nothing
         status = solve!(data.linsystem, options.linsolver)
         if status == Success
         else
+            status = probe_shift!(data.linsystem, options.linsolver)
             mu = initial_shift(data.linsystem)
             shift_iters = isfinitesystem(data.linsystem) ? 30 : 0   # damping cannot repair a non-finite matrix
             while status != Success && shift_iters > 0
@@ -206,6 +220,7 @@ end
     data.solves += @elapsed_ns begin
         status = solve!(data.linsystem, options.linsolver)
         if status != Success
+            status = probe_shift!(data.linsystem, options.linsolver)
             mu = initial_shift(data.linsystem)
             shifts = isfinitesystem(data.linsystem) ? 20 : 0
             while status != Success && shifts > 0
