@@ -247,7 +247,7 @@ end
     # The sparse system fails to build a slot for R's coupling without the extra pairs ...
     H = sparse_schur_matrix(p)
     @test Set(retained_block_pairs(H.R)) ⊇ Set([(3, 1), (4, 2)])
-    @test_throws AssertionError build_r_to_s_map(H.R, plain.S_sparse, structure.boffsets_r)
+    @test_throws ArgumentError build_r_to_s_map(H.R, plain.S_sparse, structure.boffsets_r)
     # ... and builds one with them
     pattern = build_schur_pattern(structure; extra_blocks=retained_block_pairs(H.R))
     b_to_s = build_r_to_s_map(H.R, pattern.S_sparse, structure.boffsets_r)
