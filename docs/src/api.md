@@ -64,17 +64,23 @@ An iterator is chosen by the `iterator` keyword of [`OptimizationOptions`](@ref)
 linear solver is chosen by the `linsolver` keyword, also as a symbol: `:auto`, `:cholesky`, `:ldl`
 or `:qr`, and those the extensions below add.
 
+The linear systems and their solvers are those of
+[DampedLinearSolve.jl](https://ojwoodford.github.io/DampedLinearSolve.jl/stable/), on which this package is built: its
+documentation states the linear-system contract the iterators use, the solvers each system takes and
+how `:auto` chooses, and how to implement the contract for your own storage. `OptimizationOptions`
+validates `linsolver` by asking it.
+
 ### Extension Solvers
 
-`SecondOrderOptimization.jl` integrates with optional linear solver packages via Julia 1.10+ package extensions:
+Loading these packages adds solvers, through DampedLinearSolve's package extensions:
 
-- **`Krylov.jl` (via `KrylovExt`)**: Provides iterative Krylov subspace linear solvers. `:cg` is the Krylov solver for a Hessian.
+- **`Krylov.jl`**: Provides iterative Krylov subspace linear solvers. `:cg` is the Krylov solver for a Hessian.
   - `:cg`: Conjugate Gradients for symmetric positive-definite systems. Reports the system as indefinite on nonpositive curvature.
   - `:minres`: MINRES for symmetric indefinite systems.
   - On sparse systems, `:cg` and `:minres` are Jacobi (diagonal) preconditioned whenever the damped diagonal is positive.
   - `:lsmr`: LSMR on the Jacobian of a [`JacobianObjective`](@ref) (dense or sparse), with the damping as its regularization parameter. Rejected for a `HessianObjective`, where it would square the condition number of the normal equations again.
   To enable: `using Krylov`.
-- **`Pardiso.jl` (via `PardisoExt`)**: Provides multithreaded direct sparse factorization using Intel MKL PARDISO or Panua Pardiso.
+- **`Pardiso.jl`**: Provides multithreaded direct sparse factorization using Intel MKL PARDISO or Panua Pardiso.
   - `:pardiso`: Multi-threaded sparse direct solver for large sparse matrices. The symbolic analysis runs once, when the linear system is built; each solve runs only the positive-definite numerical factorization, and reports the system as not positive definite when it fails.
   To enable: `using Pardiso`.
 - **`BlockLinearSystems.jl` (via `BlockLinearSystemsExt`)**: Schur-complement elimination for a `SchurBlockHessian` prototype.

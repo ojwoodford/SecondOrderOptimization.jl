@@ -93,7 +93,7 @@ x_opt, result = optimize(x0, HessianObjective(chain_cost, chain_fdf!; H = H_prot
 println("Final cost: ", result.bestcost)
 ```
 
-> **Note**: `PardisoExt` automatically detects whether Intel MKL (`MKLPardisoSolver`) or Panua Pardiso (`PardisoSolver`) is available in your environment, configures the solver for symmetric positive-definite systems (`REAL_SYM_POSDEF`), and reports a breakdown or singularity as a system that is not positive definite.
+> **Note**: DampedLinearSolve's Pardiso extension automatically detects whether Intel MKL (`MKLPardisoSolver`) or Panua Pardiso (`PardisoSolver`) is available in your environment, configures the solver for symmetric positive-definite systems (`REAL_SYM_POSDEF`), and reports a breakdown or singularity as a system that is not positive definite.
 
 ---
 
