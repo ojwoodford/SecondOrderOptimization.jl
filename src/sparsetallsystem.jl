@@ -226,6 +226,7 @@ end
 
 tall_linearsystem(x0, J::SparseMatrixCSC{Float64, Int}, linsolver) = SparseTallLinearSystem(J; linsolver)
 workspace_tall_linearsystem(x0, J::SparseMatrixCSC{Float64, Int}, linsolver) = SparseTallLinearSystem(copy(J); linsolver)
+isfinitesystem(ls::SparseTallLinearSystem) = all(isfinite, nonzeros(ls.A.J)) && all(isfinite, ls.A.r)
 
 zero!(ls::SparseTallLinearSystem) = (fill!(ls.b, 0.0); markstale!(ls.A); ls)
 
@@ -258,16 +259,29 @@ end
 
 function solve!(ls::SparseTallLinearSystem, ::Union{StaticSymbol{:auto}, StaticSymbol{:qr}})
     A = ls.A
-    J, r = A.J, A.r
-    m, n = size(J)
-    if !(all(isfinite, nonzeros(J)) && all(isfinite, r))
+    if !(all(isfinite, nonzeros(A.J)) && all(isfinite, A.r))
         fill!(ls.x, NaN)
         return NotPositiveDefinite
     end
     sp = A.ws.spqr
     isnothing(sp) && solvermismatch(ls, :qr)
-    lambda = max(ls.lambda, 0.0)
-    scaling = ls.scaling
+    A.ws.nfactor += 1
+    return spqr_solve!(ls.x, sp, A.J, A.r, max(ls.lambda, 0.0), ls.scaling)
+end
+
+"""
+    spqr_solve!(x, sp::SPQRWorkspace, J, r, lambda, scaling) -> SolveStatus
+
+The least-squares solution `x` of `[J; √(λ s)] x = [r; 0]` by SPQR, with `sp` built for `J`'s pattern
+(`SPQRWorkspace(J)`), `s` the `scaling` (all ones for `nothing`): the values of `J` and `r` are written into
+the augmented storage in place, and SPQR's numeric factorization, Qᵀb and triangular solve run. Returns
+`NotPositiveDefinite` when the augmented matrix is numerically rank deficient (SPQR's rank estimate below
+`n` at a column-norm tolerance of `max(m + n, n)·eps` times its largest column norm), `Success` otherwise.
+The caller checks that `J` and `r` are finite. Shared by the sparse tall system and the sparse reduced
+system of QR elimination.
+"""
+function spqr_solve!(x::AbstractVector, sp::SPQRWorkspace, J::SparseMatrixCSC{Float64, Int}, r::AbstractVector, lambda::Float64, scaling)
+    m, n = size(J)
     nzv = nonzeros(J)
     # The augmented values, and the largest squared column norm of the augmented matrix
     maxnorm2 = 0.0
@@ -294,7 +308,6 @@ function solve!(ls::SparseTallLinearSystem, ::Union{StaticSymbol{:auto}, StaticS
     GC.@preserve sp begin
         ok = LSS.SuiteSparseQR_C_numeric(tol, spqr_A(sp), sp.QR, sp.common)
         ok == 1 || error("SPQR's numeric factorization failed (status $(sp.common[].status))")
-        A.ws.nfactor += 1
         # SPQR_istat[4] (zero based) is the rank estimate at `tol`
         sp.common[].SPQR_istat[5] < n && return NotPositiveDefinite
         Y = LSS.SuiteSparseQR_C_qmult(LSS.SPQR_QTX, sp.QR, spqr_B(sp), sp.common)
@@ -304,7 +317,7 @@ function solve!(ls::SparseTallLinearSystem, ::Union{StaticSymbol{:auto}, StaticS
         X == C_NULL && error("SPQR's triangular solve failed (status $(sp.common[].status))")
         xs = dense_x(X)
         @inbounds for i in 1:n
-            ls.x[i] = unsafe_load(xs, i)
+            x[i] = unsafe_load(xs, i)
         end
         free_dense!(sp, X)
     end

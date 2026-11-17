@@ -1,5 +1,3 @@
-using LDLFactorizations, LinearAlgebra, StaticArrays, SparseArrays, Static
-
 # The linsolver a sparse system's solver workspace was built for by `makesparsews`, as text, for
 # the error raised when `solve!` is asked for another solver. Extensions add methods for their
 # workspace types.
@@ -40,7 +38,7 @@ function checklinsolver(s::Symbol)
     validatelinsolver(s) && return true
     if s === :pardiso
         throw(ArgumentError("Linear solver :pardiso requires Pardiso.jl. Please run `using Pardiso` first."))
-    elseif s in (:cg, :minres, :krylov, :lsmr)
+    elseif s in (:cg, :minres, :lsmr)
         throw(ArgumentError("Linear solver :$s requires Krylov.jl. Please run `using Krylov` first."))
     end
     throw(ArgumentError("Unknown linear solver: $s"))
@@ -207,10 +205,15 @@ function solve!(ls::StaticLinearSystem, ::StaticSymbol{:ldl})
     return Indefinite
 end
 
-# Static `:qr` uses LU (`\`): StaticArrays has no pivoted QR
+# Static `:qr` uses LU: StaticArrays has no pivoted QR. A singular or non-finite matrix is a failed
+# solve, not an exception.
 function solve!(ls::StaticLinearSystem, ::StaticSymbol{:qr})
     A_ = damped_static(ls)
-    ls.x .= A_ \ SVector(ls.b)
+    lufac = lu(A_; check=false)
+    issuccess(lufac) || return NotPositiveDefinite
+    x_ = lufac \ SVector(ls.b)
+    all(isfinite, x_) || return NotPositiveDefinite
+    ls.x .= x_
     return Success
 end
 
@@ -227,7 +230,8 @@ function solve!(ls::DenseLinearSystem, ::Union{StaticSymbol{:auto}, StaticSymbol
     cholfac = cholesky!(Symmetric(ls.A_scratch); check=false)
     if issuccess(cholfac)
         ldiv!(ls.x, cholfac, ls.b)
-        return Success
+        # Whether a NaN fails the factorization depends on the LAPACK; a non-finite solution does not
+        return all(isfinite, ls.x) ? Success : NotPositiveDefinite
     end
     return NotPositiveDefinite
 end
@@ -283,6 +287,7 @@ function solve!(ls::DenseLinearSystem{Float64, DenseLDLWorkspace}, ::StaticSymbo
     sytrf_ws!(ls.A_scratch, ls.solver_ws) == 0 || return NotPositiveDefinite
     copyto!(ls.x, ls.b)
     LinearAlgebra.LAPACK.sytrs!('U', ls.A_scratch, ls.solver_ws.ipiv, ls.x)
+    all(isfinite, ls.x) || return NotPositiveDefinite
     return is_indefinite_packed(ls.A_scratch, ls.solver_ws.ipiv, 'U') ? Indefinite : Success
 end
 
@@ -299,6 +304,7 @@ function solve!(ls::DenseLinearSystem, ::StaticSymbol{:ldl})
     bk = bunchkaufman!(Symmetric(ls.A_scratch); check=false)
     if issuccess(bk)
         ldiv!(ls.x, bk, ls.b)
+        all(isfinite, ls.x) || return NotPositiveDefinite
         if is_indefinite(bk)
             return Indefinite
         end
@@ -318,7 +324,7 @@ function solve!(ls::DenseLinearSystem, ::StaticSymbol{:qr})
     end
     qrfac = qr!(ls.A_scratch, ColumnNorm())
     ldiv!(ls.x, qrfac, ls.b)
-    return Success
+    return all(isfinite, ls.x) ? Success : NotPositiveDefinite
 end
 
 # SparseLinearSystem
@@ -338,6 +344,7 @@ function solve!(ls::SparseLinearSystem, ::Union{StaticSymbol{:auto}, StaticSymbo
     end
     if LDLFactorizations.factorized(F)
         ldiv!(ls.x, F, ls.b)
+        all(isfinite, ls.x) || return NotPositiveDefinite
         if is_indefinite(F)
             return Indefinite
         end
@@ -367,7 +374,7 @@ function solve!(ls::SparseLinearSystem, ::StaticSymbol{:cholesky})
         else
             ls.x .= cholfac \ ls.b
         end
-        return Success
+        return all(isfinite, ls.x) ? Success : NotPositiveDefinite
     end
     return NotPositiveDefinite
 end
@@ -386,7 +393,7 @@ function solve!(ls::SparseLinearSystem, ::StaticSymbol{:qr})
             ls.A.nzval[idx] = ls.diag_cache[i]
         end
     end
-    return Success
+    return all(isfinite, ls.x) ? Success : NotPositiveDefinite
 end
 
 # Method dispatch for Symbol and OptimizationLinearSolver

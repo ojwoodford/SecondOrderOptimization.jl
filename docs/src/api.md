@@ -32,7 +32,8 @@ the run converged:
 | `TERMINATION_MAX_ITERS`, `TERMINATION_MAX_TIME` | `maxiters` or `maxtime` was reached |
 | `TERMINATION_COST_INF`, `TERMINATION_COST_NAN` | the cost was not finite |
 | `TERMINATION_STEP_INF`, `TERMINATION_STEP_NAN` | the step was not finite |
-| `TERMINATION_GRAD_NOT_FINITE`, `TERMINATION_START_NOT_FINITE` | the gradient, or the cost or gradient at the start, was not finite |
+| `TERMINATION_GRAD_INF`, `TERMINATION_GRAD_NAN` | the gradient held an infinite value, or a `NaN` |
+| `TERMINATION_START_NOT_FINITE` | the cost or the gradient at the start was not finite |
 | `TERMINATION_LINSOLVER_FAILED` | the linear solver failed |
 
 A callback's own flags are in `result.termination >> 16`.
@@ -50,7 +51,8 @@ TERMINATION_COST_INF
 TERMINATION_COST_NAN
 TERMINATION_STEP_INF
 TERMINATION_STEP_NAN
-TERMINATION_GRAD_NOT_FINITE
+TERMINATION_GRAD_INF
+TERMINATION_GRAD_NAN
 TERMINATION_START_NOT_FINITE
 TERMINATION_LINSOLVER_FAILED
 ```
@@ -66,18 +68,17 @@ or `:qr`, and those the extensions below add.
 
 `SecondOrderOptimization.jl` integrates with optional linear solver packages via Julia 1.10+ package extensions:
 
-- **`Krylov.jl` (via `KrylovExt`)**: Provides iterative Krylov subspace linear solvers.
+- **`Krylov.jl` (via `KrylovExt`)**: Provides iterative Krylov subspace linear solvers. `:cg` is the Krylov solver for a Hessian.
   - `:cg`: Conjugate Gradients for symmetric positive-definite systems. Reports the system as indefinite on nonpositive curvature.
   - `:minres`: MINRES for symmetric indefinite systems.
   - On sparse systems, `:cg` and `:minres` are Jacobi (diagonal) preconditioned whenever the damped diagonal is positive.
-  - `:krylov`: Alias for `:cg`.
   - `:lsmr`: LSMR on the Jacobian of a [`JacobianObjective`](@ref) (dense or sparse), with the damping as its regularization parameter. Rejected for a `HessianObjective`, where it would square the condition number of the normal equations again.
   To enable: `using Krylov`.
 - **`Pardiso.jl` (via `PardisoExt`)**: Provides multithreaded direct sparse factorization using Intel MKL PARDISO or Panua Pardiso.
   - `:pardiso`: Multi-threaded sparse direct solver for large sparse matrices. The symbolic analysis runs once, when the linear system is built; each solve runs only the positive-definite numerical factorization, and reports the system as not positive definite when it fails.
   To enable: `using Pardiso`.
-- **`BlockLinearSystems.jl` (via `BlockLinearSystemsExt`)**: Schur-complement elimination for a `SchurBlockMatrix` Hessian.
-  The type of `H` selects the linear system, including elimination for a `SchurBlockMatrix`: there is no solver symbol or option for it.
+- **`BlockLinearSystems.jl` (via `BlockLinearSystemsExt`)**: Schur-complement elimination for a `SchurBlockHessian` prototype.
+  The type of `H` selects the linear system, including elimination for a `SchurBlockHessian`: there is no solver symbol or option for it.
   `linsolver` then names the solver for the reduced system: `:auto` or `:cholesky` (Cholesky, falling back to Bunch-Kaufman) or `:ldl` (Bunch-Kaufman); any other is an `ArgumentError` when the system is built.
   On the Jacobian path, a `SchurBlockJacobian{Float64, RType}` prototype for a [`JacobianObjective`](@ref) selects QR elimination of the eliminated blocks; `RType` (dense `Matrix{Float64}` or `SparseMatrixCSC{Float64, Int}`) is the storage of the reduced system, and `linsolver` names its solver (see the [`JacobianObjective`](@ref) docstring). With Krylov.jl also loaded (`BlockLinearSystemsKrylovExt`), `:lsmr` solves the reduced problem by LSMR on the reduced Jacobian.
   The elimination kernels run threaded over the structure's chunks only when Polyester.jl is also loaded (BlockLinearSystems' `PolyesterExt`); otherwise they run serially. A warm run allocates nothing, except that on Julia 1.10 each threaded kernel call may allocate a little (up to 2 048 bytes per thread).

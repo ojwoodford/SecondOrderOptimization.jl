@@ -1,8 +1,3 @@
-using SparseArrays, Static
-import Printf.@printf
-
-@enum OptimizationIterator newton levenbergmarquardt dogleg gradientdescent levenbergmarquardt_dtd
-
 struct OptimizationOptions{S, L, B <: StaticBool}
     reldcost::Float64           # Minimum relative change in cost (either direction) required to avoid termination
     absdcost::Float64           # Minimum absolute change in cost (either direction) required to avoid termination
@@ -38,22 +33,22 @@ const TERMINATION_STEP_SIZE         = 1 << 6
 const TERMINATION_MAX_FAILS         = 1 << 7
 const TERMINATION_MAX_ITERS         = 1 << 8
 const TERMINATION_MAX_TIME          = 1 << 9
-# 1 << 10 is free
-const TERMINATION_START_NOT_FINITE  = 1 << 11
-const TERMINATION_GRAD_NOT_FINITE   = 1 << 12
+const TERMINATION_START_NOT_FINITE  = 1 << 10
+const TERMINATION_GRAD_INF          = 1 << 11
+const TERMINATION_GRAD_NAN          = 1 << 12
 const TERMINATION_GRAD_TOL          = 1 << 13
 const TERMINATION_LINSOLVER_FAILED  = 1 << 14
 const TERMINATION_STALLED           = 1 << 15   # the last bit below the callback's flags (16 and up)
 
 const SUCCESS_CONVERGENCE_MASK = TERMINATION_REL_DCOST | TERMINATION_ABS_DCOST | TERMINATION_STEP_SIZE | TERMINATION_GRAD_TOL | TERMINATION_STALLED
 # Something non-finite: a failure whatever else is set
-const NONFINITE_TERMINATION_MASK = TERMINATION_COST_INF | TERMINATION_COST_NAN | TERMINATION_STEP_INF | TERMINATION_STEP_NAN | TERMINATION_GRAD_NOT_FINITE | TERMINATION_START_NOT_FINITE
+const NONFINITE_TERMINATION_MASK = TERMINATION_COST_INF | TERMINATION_COST_NAN | TERMINATION_STEP_INF | TERMINATION_STEP_NAN | TERMINATION_GRAD_INF | TERMINATION_GRAD_NAN | TERMINATION_START_NOT_FINITE
 # The bits that make a run a failure even with a convergence bit set (see `isconverged`)
 const FAILED_CONVERGENCE_MASK = NONFINITE_TERMINATION_MASK | TERMINATION_LINSOLVER_FAILED
 # Every bit that is not a convergence criterion. No longer used by `isconverged` (a limit alongside
 # a convergence bit is converged); kept for SmoothOptimizerBenchmark, which reads it until it moves
 # to `isconverged`.
-const FAILURE_TERMINATION_MASK = TERMINATION_COST_INF | TERMINATION_COST_NAN | TERMINATION_STEP_INF | TERMINATION_STEP_NAN | TERMINATION_MAX_FAILS | TERMINATION_MAX_ITERS | TERMINATION_MAX_TIME | TERMINATION_START_NOT_FINITE | TERMINATION_GRAD_NOT_FINITE | TERMINATION_LINSOLVER_FAILED
+const FAILURE_TERMINATION_MASK = FAILED_CONVERGENCE_MASK | TERMINATION_MAX_FAILS | TERMINATION_MAX_ITERS | TERMINATION_MAX_TIME
 
 # Each termination bit and the message `show` prints for it
 const TERMINATION_REASONS = (
@@ -68,7 +63,8 @@ const TERMINATION_REASONS = (
     (TERMINATION_MAX_ITERS,        "Maximum number of outer iterations reached."),
     (TERMINATION_MAX_TIME,         "Maximum allowed computation time exceeded."),
     (TERMINATION_START_NOT_FINITE, "Cost or gradient not finite at the start point."),
-    (TERMINATION_GRAD_NOT_FINITE,  "Gradient not finite."),
+    (TERMINATION_GRAD_INF,         "Gradient contains an infinite value."),
+    (TERMINATION_GRAD_NAN,         "Gradient contains a NaN."),
     (TERMINATION_GRAD_TOL,         "Gradient norm below threshold."),
     (TERMINATION_LINSOLVER_FAILED, "Linear solver failed to solve the linear system."),
     (TERMINATION_STALLED,          "The best cost improved by less than the stall tolerance over the last iterations."),
@@ -94,7 +90,7 @@ function OptimizationOptions(;
     isnothing(callback) || throw(ArgumentError("Callbacks should be passed directly to optimize, not to the options struct."))
     isnothing(iteratordata) || throw(ArgumentError("Iteratordata should not be passed to the options struct."))
     iter_sym = Symbol(iterator)
-    getiterator(iter_sym) # validates iterator symbol
+    checkiterator(iter_sym) # validates iterator symbol
     linsolv_sym = linsolver_symbol(linsolver)
     checklinsolver(linsolv_sym) # validates linear solver symbol
     # Saturate: anything at or beyond the UInt64 nanosecond range means no time limit
@@ -106,17 +102,6 @@ function OptimizationOptions(;
         static(iter_sym), static(linsolv_sym),
         makestaticbool(callbackchangesstate)
     )
-end
-
-getiterator(options::OptimizationOptions) = getiterator(options.iterator)
-getiterator(s::StaticSymbol) = getiterator(dynamic(s))
-function getiterator(s::Symbol)::OptimizationIterator
-    s === :newton && return newton
-    s === :levenbergmarquardt && return levenbergmarquardt
-    s === :levenbergmarquardt_dtd && return levenbergmarquardt_dtd
-    s === :dogleg && return dogleg
-    s === :gradientdescent && return gradientdescent
-    throw(ArgumentError("Unknown iterator: $s"))
 end
 
 struct OptimizationResult
@@ -201,7 +186,7 @@ went wrong that makes the point it returned untrustworthy.
   found; that is not proof of a minimum (see [`OptimizationOptions`](@ref)).
 - **Failures, whatever else is set:** anything non-finite (`TERMINATION_COST_INF`,
   `TERMINATION_COST_NAN`, `TERMINATION_STEP_INF`, `TERMINATION_STEP_NAN`,
-  `TERMINATION_GRAD_NOT_FINITE`, `TERMINATION_START_NOT_FINITE`), and
+  `TERMINATION_GRAD_INF`, `TERMINATION_GRAD_NAN`, `TERMINATION_START_NOT_FINITE`), and
   `TERMINATION_LINSOLVER_FAILED`. So a small step to a point whose cost is not finite is not
   converged, nor is a small gradient at a start point whose cost is not finite.
 - **Neither:** a limit (`TERMINATION_MAX_FAILS`, `TERMINATION_MAX_ITERS`, `TERMINATION_MAX_TIME`).
@@ -216,24 +201,27 @@ in `result.termination >> 16`. `show(result)` prints a message for every bit set
 isconverged(x::OptimizationResult) = isconverged_bits(x.termination)
 isconverged_bits(t::Integer) = (t & SUCCESS_CONVERGENCE_MASK) != 0 && (t & FAILED_CONVERGENCE_MASK) == 0
 
+# A percentage of a time, 0 when the total is 0 (a run too short to time)
+percentof(part, total) = total == 0 ? 0.0 : 100.0 * part / total
+
 function Base.show(io::IO, x::OptimizationResult)
     optimtime = x.timetotal - x.timeinit
     timedoptim = max(x.timecost + x.timegradient + x.timesolver, optimtime)
     cost_change_pct = (x.startcost != 0.0 && isfinite(x.startcost) && isfinite(x.bestcost)) ?
         100.0 * (x.startcost - x.bestcost) / abs(x.startcost) : 0.0
     @printf(io, "SecondOrderOptimization optimization using %s took %s and %d iterations to change the cost from %e to %e (%.2f%% change), requiring:\n",
-        String(getiterator(x.iterator)),
+        iteratorname(x.iterator),
         timestring(x.timetotal), x.niterations, x.startcost, x.bestcost, cost_change_pct)
     @printf(io, "   %s for initialization (%.2f%% of total time, with %d allocations totalling %s), and\n",
-        timestring(x.timeinit), 100.0 * x.timeinit / x.timetotal, x.initallocations, bytesstring(x.initallocated))
+        timestring(x.timeinit), percentof(x.timeinit, x.timetotal), x.initallocations, bytesstring(x.initallocated))
     @printf(io, "   %s for optimization (%.2f%% of total time, with %d allocations totalling %s), of which:\n",
-        timestring(optimtime), 100.0 * optimtime / x.timetotal, x.optimizeallocations, bytesstring(x.optimizeallocated))
+        timestring(optimtime), percentof(optimtime, x.timetotal), x.optimizeallocations, bytesstring(x.optimizeallocated))
     @printf(io, "        %d cost computations accounted for %.2f%% of the time,\n",
-        x.costcomputations, 100.0 * x.timecost / timedoptim)
+        x.costcomputations, percentof(x.timecost, timedoptim))
     @printf(io, "        %d gradient computations accounted for %.2f%%, and\n",
-        x.gradientcomputations, 100.0 * x.timegradient / timedoptim)
+        x.gradientcomputations, percentof(x.timegradient, timedoptim))
     @printf(io, "        %d linear solver computations accounted for %.2f%%.\n",
-        x.linearsolves, 100.0 * x.timesolver / timedoptim)
+        x.linearsolves, percentof(x.timesolver, timedoptim))
     if 0 != x.termination;            println(io, "Reason(s) for termination:"); end
     for (bit, message) in TERMINATION_REASONS
         0 != x.termination & bit && println(io, "   ", message)

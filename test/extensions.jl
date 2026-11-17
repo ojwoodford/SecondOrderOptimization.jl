@@ -38,7 +38,11 @@ end
     # M10: LSMR on the Hessian works with H'H, squaring its condition number again, so only a
     # JacobianObjective accepts it (TP2, test/lsmr.jl)
     @test SecondOrderOptimization.validatelinsolver(:lsmr)
-    @test SecondOrderOptimization.validatelinsolver(:krylov)
+    # X2: :krylov was an alias of :cg and is gone; it fails validation like any unknown solver
+    @test !SecondOrderOptimization.validatelinsolver(:krylov)
+    err = try OptimizationOptions(linsolver=:krylov); nothing catch e; e end
+    @test err isa ArgumentError
+    @test occursin("Unknown linear solver", sprint(showerror, err))
 
     # Quadratic test problem: f(x) = 0.5 * x' A x - b' x
     A_spd = sparse([5.0 1.0 0.0; 1.0 6.0 1.0; 0.0 1.0 7.0])
@@ -53,7 +57,7 @@ end
     end
 
     # Test Krylov solvers on SparseLinearSystem
-    for solver in (:cg, :minres, :krylov)
+    for solver in (:cg, :minres)
         # Newton iterator
         opts_newton = OptimizationOptions(iterator=:newton, linsolver=solver, maxiters=10, gtol=1e-6)
         x_newton, res_newton = optimize([0.0, 0.0, 0.0], HessianObjective(quad_cost, quad_fdf!; H = copy(A_spd)), opts_newton)
@@ -80,7 +84,7 @@ end
         @test isapprox(ls_right.x, x_exact; rtol=1e-5)
     end
     # P2b: each workspace type names the solver it was built for
-    for (built, asked, text) in ((:cg, :minres, ":cg or :krylov"), (:minres, :cg, ":minres"),
+    for (built, asked, text) in ((:cg, :minres, ":cg"), (:minres, :cg, ":minres"),
                                  (:cholesky, :cg, ":cholesky"), (:qr, :minres, ":qr"))
         ls_other = SecondOrderOptimization.makelinearsystem(zeros(3), copy(A_spd), static(built))
         mismatch_message(ls_other, asked, text)
@@ -216,4 +220,31 @@ end
     @test L isa SparseMatrixCSC{Float64, Int32}
     @test L == tril(A_full)
     @test L.nzval == A_full.nzval[lmap]
+end
+
+# AS4: the Krylov solves neither throw nor report Success with a non-finite step on a non-finite matrix
+@testset "Krylov solves on a non-finite or singular matrix (AS4)" begin
+    using Krylov
+    base = [4.0 1 0 0; 1 3 1 0; 0 1 2 0.5; 0 0 0.5 1]
+    variants = (nan_diag = (A -> A[2, 2] = NaN), nan_off = (A -> A[1, 2] = A[2, 1] = NaN), inf_diag = (A -> A[2, 2] = Inf),
+                singular = (A -> A .= [1.0 1 0 0; 1 1 0 0; 0 0 2 0; 0 0 0 1]))
+    for storage in (:dense, :sparse), s in (:cg, :minres), (kind, f!) in pairs(variants), lambda in (0.0, 1e-3)
+        @testset "$storage, $s, $kind, λ = $lambda" begin
+        A = copy(base)
+        f!(A)
+        ls = storage === :dense ? SecondOrderOptimization.makelinearsystem(zeros(4), zeros(4, 4), s) :
+                                  SecondOrderOptimization.makelinearsystem(zeros(4), sparse(ones(4, 4)), s)
+        if storage === :sparse
+            ls.A.nzval .= vec(A)
+            ls.diag_cache .= diag(A)
+        else
+            ls.A .= A
+        end
+        ls.b .= [1.0, 2, 3, 4]
+        dampen!(ls, lambda)
+        st = SecondOrderOptimization.solve!(ls, static(s))   # does not throw
+        @test st != Success || all(isfinite, ls.x)
+        @test SecondOrderOptimization.isfinitesystem(ls) == (kind === :singular)
+      end
+    end
 end

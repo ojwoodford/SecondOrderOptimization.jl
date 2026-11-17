@@ -397,13 +397,14 @@ end
         # at the start
         objnan = JacobianObjective(x -> 1.0, (r, J, x) -> (r .= 1.0; J .= NaN; 1.0), 2)
         _, res = optimize([0.0, 0.0], objnan, w_opts(it, :callbackchangesstate => ccs))
-        @test hasbits(res, TERMINATION_GRAD_NOT_FINITE) && hasbits(res, TERMINATION_START_NOT_FINITE)
+        @test hasbits(res, TERMINATION_GRAD_NAN) && hasbits(res, TERMINATION_START_NOT_FINITE)
         @test res.niterations == 0
         # after the first step: J holds an Inf once x[1] > 0.5
         f(x) = 0.5 * sum(abs2, x .- 1)
         objlate = JacobianObjective(f, (r, J, x) -> (r .= x .- 1; J .= I(2); x[1] > 0.5 && (J[1, 1] = Inf); f(x)), 2)
         _, res = optimize([0.0, 0.0], objlate, w_opts(it, :callbackchangesstate => ccs))
-        @test hasbits(res, TERMINATION_GRAD_NOT_FINITE)
+        # Inf times the residual: an infinite gradient, or NaN where that residual is exactly zero
+        @test hasbits(res, TERMINATION_GRAD_INF | TERMINATION_GRAD_NAN)
         @test res.niterations >= 1 && !isconverged(res)
         # a NaN cost everywhere but the start: every trial is rejected, and the run stops on it
         fnan(x) = x == [0.0, 0.0] ? f(x) : NaN
@@ -463,16 +464,6 @@ end
             @test exH > 1e-6
             @test resJ.niterations < resH.niterations
         end
-    end
-
-    @testset ":gradientdescent is rejected before f or resjac! is called" begin
-        obj = JacobianObjective(wrosen_cost, wrosen_resjac!, 2)
-        WCALLS[] = 0
-        opts = OptimizationOptions(iterator=:gradientdescent)
-        @test_throws ArgumentError optimize([-1.2, 1.0], obj, opts)
-        @test_throws ArgumentError optimize!([-1.2, 1.0], obj, opts)
-        @test_throws ArgumentError OptimizationWorkspace([-1.2, 1.0], obj, opts)
-        @test WCALLS[] == 0
     end
 end
 
@@ -670,7 +661,7 @@ end
         end
         for it in Z_ITERATORS
             x, res = optimize([-1.5, 2.0], JacobianObjective(f, nan_resjac!, 2), w_opts(it))
-            @test !hasbits(res, TERMINATION_GRAD_NOT_FINITE)
+            @test !hasbits(res, TERMINATION_GRAD_INF | TERMINATION_GRAD_NAN)
             @test isfinite(res.bestcost) && res.bestcost < res.startcost
         end
     end

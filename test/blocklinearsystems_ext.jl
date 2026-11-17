@@ -8,15 +8,16 @@ using SecondOrderOptimization: check_linear_system   # internal names
 const SOOExt = Base.get_extension(SecondOrderOptimization, :BlockLinearSystemsExt)
 
 # rules.md 21: a warm kernel call allocates nothing, except that on Julia 1.10 a threaded call may allocate up to
-# 2 048 bytes per thread (decided 2026-11-15, BlockLinearSystems R2; its `threaded_allocs_ok`)
-threaded_allocs_ok(bytes) = bytes == 0 || (VERSION < v"1.11" && Threads.nthreads() > 1 && bytes <= 2048 * Threads.nthreads())
+# 3 072 bytes per thread. BlockLinearSystems R2 set 2 048 (2026-11-15); from its R10 the mixed-dims reduction takes
+# 8 304 bytes on 4 threads, 2 076 per thread, so this is raised by half (decided 2026-11-16)
+threaded_allocs_ok(bytes) = bytes == 0 || (VERSION < v"1.11" && Threads.nthreads() > 1 && bytes <= 3072 * Threads.nthreads())
 
 """
     SchurTestProblem
 
 A random, strictly diagonally dominant (hence positive definite) bipartite system with retained
 variables first and eliminated variables second, in full dense form plus everything needed to build
-`SchurBlockMatrix` objects from it.
+`SchurBlockHessian` objects from it.
 """
 struct SchurTestProblem
     H::Matrix{Float64}
@@ -89,7 +90,7 @@ function dense_schur_matrix(p::SchurTestProblem; nchunks=1)
     E_data = zeros(sum(abs2, p.e_dims))
     C_data = zeros(structure.coffsets[end] + Int(structure.r_dims[structure.entry_retained[end]]) * Int(structure.e_dims[end]) - 1)
     fill_ce!(p, structure, E_data, C_data)
-    return SchurBlockMatrix(structure, R, E_data, C_data)
+    return SchurBlockHessian(structure, R, E_data, C_data)
 end
 
 function sparse_schur_matrix(p::SchurTestProblem; nchunks=1)
@@ -111,7 +112,7 @@ function sparse_schur_matrix(p::SchurTestProblem; nchunks=1)
     E_data = zeros(sum(abs2, p.e_dims))
     C_data = zeros(structure.coffsets[end] + Int(structure.r_dims[structure.entry_retained[end]]) * Int(structure.e_dims[end]) - 1)
     fill_ce!(p, structure, E_data, C_data)
-    return SchurBlockMatrix(structure, R, E_data, C_data)
+    return SchurBlockHessian(structure, R, E_data, C_data)
 end
 
 function make_schur_ls(kind::Symbol, p::SchurTestProblem, scaling=ones(length(p.b)); nchunks=1)
@@ -173,8 +174,8 @@ end
     end
 end
 
-# Copy the numerical content of `src` (a SchurBlockMatrix) into `dst`
-function copy_content!(dst::SchurBlockMatrix, src::SchurBlockMatrix)
+# Copy the numerical content of `src` (a SchurBlockHessian) into `dst`
+function copy_content!(dst::SchurBlockHessian, src::SchurBlockHessian)
     dst.R isa Matrix ? copyto!(dst.R, src.R) : copyto!(dst.R.data, src.R.data)
     copyto!(dst.E_data, src.E_data)
     copyto!(dst.C_data, src.C_data)
@@ -246,7 +247,7 @@ end
     # The sparse system fails to build a slot for R's coupling without the extra pairs ...
     H = sparse_schur_matrix(p)
     @test Set(retained_block_pairs(H.R)) ⊇ Set([(3, 1), (4, 2)])
-    @test_throws AssertionError build_r_to_s_map(H.R, plain.S_sparse, structure.boffsets_r)
+    @test_throws ArgumentError build_r_to_s_map(H.R, plain.S_sparse, structure.boffsets_r)
     # ... and builds one with them
     pattern = build_schur_pattern(structure; extra_blocks=retained_block_pairs(H.R))
     b_to_s = build_r_to_s_map(H.R, pattern.S_sparse, structure.boffsets_r)
@@ -333,13 +334,13 @@ end
 
 # Measured through a function barrier: at testset scope Julia 1.10 boxes the Float64 result
 schur_quadform_allocations(H, v) = @allocated SecondOrderOptimization.quadform(H, v)
-@testset "quadform of a SchurBlockMatrix is BlockLinearSystems' dot, through the fallback (D1)" begin
+@testset "quadform of a SchurBlockHessian is BlockLinearSystems' dot, through the fallback (D1)" begin
     p = standard_problem()
     n = length(p.b)
     v = randn(Random.Xoshiro(7), n)
     for kind in (:dense, :sparse)
         H = SecondOrderOptimization.getA(make_schur_ls(kind, p))
-        @test H isa SchurBlockMatrix
+        @test H isa SchurBlockHessian
         @test which(SecondOrderOptimization.quadform, (typeof(H), typeof(v))) == which(SecondOrderOptimization.quadform, (Any, Any))
         @test SecondOrderOptimization.quadform(H, v) ≈ dot(v, p.H * v) rtol = 1e-12
         @test SecondOrderOptimization.quadform(H, v) == dot(v, H, v)
@@ -425,7 +426,7 @@ end
     sq(x) = sum(abs2, x)
     sq_fdf!(g, H, x) = sq(x)
     for H in (Hd, Hs)
-        for s in (:qr, :pardiso, :cg, :minres, :krylov, static(:qr), SecondOrderOptimization.qr_solver)
+        for s in (:qr, :pardiso, :cg, :minres, static(:qr), SecondOrderOptimization.qr_solver)
             err = try mk(H, s); nothing catch e; e end
             @test err isa ArgumentError
             @test occursin("reduced system", sprint(showerror, err))
@@ -493,29 +494,30 @@ end
     end
 end
 
-function to_float32(H::SchurBlockMatrix)
+function to_float32(H::SchurBlockHessian)
     R = if H.R isa Matrix
         Float32.(H.R)
     else
         S = H.R
         SparseBlockLinearSystem{Float32}(Float32.(S.data), S.indices, S.indicestransposed, S.rowblocksizes, S.columnblocksizes, S.m, S.n)
     end
-    return SchurBlockMatrix(H.structure, R, Float32.(H.E_data), Float32.(H.C_data))
+    return SchurBlockHessian(H.structure, R, Float32.(H.E_data), Float32.(H.C_data))
 end
 
-@testset "Schur solve in Float32 (M4)" begin
+@testset "A SchurBlockHessian must be Float64; Float32 is rejected up front" begin
     p = standard_problem()
     n = length(p.b)
-    x_ref = reference_solve(p, 0.3, ones(n))
-    for kind in (:dense, :sparse)
+    for kind in (:dense, :sparse), x0 in (zeros(Float32, n), zeros(n))
         H = to_float32(kind === :dense ? dense_schur_matrix(p) : sparse_schur_matrix(p))
-        ls = kind === :dense ? SOOExt.DenseSchurLinearSystem(H, Float32.(p.b), zeros(Float32, n)) :
-                               SOOExt.SparseSchurLinearSystem(H, Float32.(p.b), zeros(Float32, n))
-        @test eltype(ls.S) == Float32
-        @test eltype(ls.x) == Float32
-        SecondOrderOptimization.dampen!(ls, 0.3)
-        @test SecondOrderOptimization.solve!(ls) == SecondOrderOptimization.Success
-        @test norm(Float64.(ls.x) - x_ref) <= 1e-3 * norm(x_ref)
+        calls = Ref(0)
+        obj = HessianObjective(x -> (calls[] += 1; 0.0), (g, Hs, x) -> (calls[] += 1; 0.0); H)
+        for s in (:auto, :ldl)
+            @test_throws ArgumentError optimize(x0, obj, OptimizationOptions(; linsolver = s))
+            @test_throws ArgumentError OptimizationWorkspace(x0, obj, OptimizationOptions(; linsolver = s))
+        end
+        @test calls[] == 0
+        err = try optimize(x0, obj, OptimizationOptions()) catch e; e end
+        @test occursin("SchurBlockHessian{Float32", sprint(showerror, err))
     end
     # The sparse system's factor type is concrete
     ls = SOOExt.SparseSchurLinearSystem(sparse_schur_matrix(p), copy(p.b), zeros(n))
@@ -708,7 +710,7 @@ end
     n = length(p.b)
     H0 = sparse_schur_matrix(p)
     pre = build_schur_pattern(H0.structure; extra_blocks=retained_block_pairs(H0.R))
-    Hp = SchurBlockMatrix(H0.structure, H0.R, H0.E_data, H0.C_data; pattern=pre)
+    Hp = SchurBlockHessian(H0.structure, H0.R, H0.E_data, H0.C_data; pattern=pre)
     x_ref = reference_solve(p, 0.3, ones(n))
     mk(H) = SecondOrderOptimization.makelinearsystem(nothing, H, :auto)
 
@@ -743,7 +745,7 @@ end
 
     # An analysed factor carried by the pattern is reused
     fac = SparseArrays.CHOLMOD.analyze(SparseArrays.CHOLMOD.Sparse(Symmetric(copy(pre.S_sparse), :U)))
-    Hf = SchurBlockMatrix(H0.structure, H0.R, H0.E_data, H0.C_data; pattern=merge(pre, (S_factor = fac,)))
+    Hf = SchurBlockHessian(H0.structure, H0.R, H0.E_data, H0.C_data; pattern=merge(pre, (S_factor = fac,)))
     ls_f = mk(Hf)
     @test ls_f.S_factor === fac
     ls_f.b .= p.b
@@ -753,12 +755,12 @@ end
 
     # The dense system ignores a pattern
     Hd = dense_schur_matrix(p)
-    Hdp = SchurBlockMatrix(Hd.structure, Hd.R, Hd.E_data, Hd.C_data; pattern=build_schur_pattern(Hd.structure))
+    Hdp = SchurBlockHessian(Hd.structure, Hd.R, Hd.E_data, Hd.C_data; pattern=build_schur_pattern(Hd.structure))
     @test SecondOrderOptimization.makelinearsystem(nothing, Hdp, :auto) isa SOOExt.DenseSchurLinearSystem
 end
 
-# Add d to the diagonal of the full matrix a SchurBlockMatrix represents
-function add_schur_diag!(H::SchurBlockMatrix, d)
+# Add d to the diagonal of the full matrix a SchurBlockHessian represents
+function add_schur_diag!(H::SchurBlockHessian, d)
     st = H.structure
     for r in 1:st.nrblocks, i in 1:Int(st.r_dims[r])
         k = st.boffsets_r[r] + i - 1
@@ -778,7 +780,7 @@ function add_schur_diag!(H::SchurBlockMatrix, d)
 end
 
 # A quadratic plus a quartic term, so the Hessian H + diag(3x^2) changes every iteration. `kind` is
-# :dense or :sparse (a SchurBlockMatrix with that storage of R) or :full (a plain dense Hessian).
+# :dense or :sparse (a SchurBlockHessian with that storage of R) or :full (a plain dense Hessian).
 function quartic_run(p, kind, linsolver, iterator)
     cost(x) = 0.5 * dot(x, p.H * x) - dot(p.b, x) + 0.25 * sum(xi -> xi^4, x)
     if kind === :full
@@ -795,7 +797,7 @@ function quartic_run(p, kind, linsolver, iterator)
     return (; x, res, costs = copy(traj.costs), steps = deepcopy(traj.steps))
 end
 
-@testset "Full optimization with a SchurBlockMatrix Hessian: :auto, :cholesky and :ldl (A2)" begin
+@testset "Full optimization with a SchurBlockHessian: :auto, :cholesky and :ldl (A2)" begin
     p = standard_problem()
     for kind in (:dense, :sparse), it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :newton, :dogleg)
         @testset "$kind, $it" begin
@@ -830,5 +832,184 @@ end
     p = standard_problem()
     for H in (dense_schur_matrix(p), sparse_schur_matrix(p))
         @test SecondOrderOptimization.conformance_matrix(H) ≈ p.H
+    end
+end
+
+# AS1: a workspace for a SchurBlockHessian. The quartic of `quartic_run`, evaluated without allocating
+function as1_objective(p, Href)
+    d = similar(p.b)
+    cost(x) = 0.5 * dot(x, p.H, x) - dot(p.b, x) + 0.25 * sum(xi -> xi^4, x)
+    function fdf!(g, H, x)
+        mul!(g, p.H, x)
+        g .+= x .^ 3 .- p.b
+        copy_content!(H, Href)
+        d .= 3 .* x .^ 2
+        add_schur_diag!(H, d)
+        return cost(x)
+    end
+    return cost, fdf!
+end
+as1_allocs(x, obj, o, w) = (x .= 3.0; @allocated optimize!(x, obj, o; workspace = w))
+as1_valid_allocs(w, x, o, H) = @allocated SecondOrderOptimization.workspacevalid(w, x, o, H)
+
+@testset "OptimizationWorkspace with a SchurBlockHessian (AS1)" begin
+    p = standard_problem()
+    n = length(p.b)
+    opts = OptimizationOptions(; iterator = :levenbergmarquardt, gtol = 1e-10)
+    for kind in (:dense, :sparse)
+        schur(q) = kind === :dense ? dense_schur_matrix(q) : sparse_schur_matrix(q)
+        H = schur(p)
+        cost, fdf! = as1_objective(p, schur(p))
+        obj = HessianObjective(cost, fdf!; H)
+        x_ref, res_ref = optimize(fill(3.0, n), obj, opts)
+        @test isconverged(res_ref)
+        for typed in (true, false)
+            @testset "$kind, $(typed ? "typed" : "untyped") workspace" begin
+                ws = typed ? OptimizationWorkspace(fill(3.0, n), obj, opts) : OptimizationWorkspace()
+                # The first solve with a workspace gives the result of a solve without one
+                x1 = fill(3.0, n)
+                res1 = optimize!(x1, obj, opts; workspace = ws)
+                @test x1 == x_ref && res1.niterations == res_ref.niterations
+                @test !isempty(ws)
+                built = ws.data
+                # A second solve with the same H reuses it. With a typed workspace, matching the key allocates
+                # nothing, and the whole dense run allocates nothing, as for a dense Hessian (the sparse run's
+                # CHOLMOD allocates, rules.md 21; an untyped workspace dispatches dynamically)
+                x2 = fill(3.0, n)
+                optimize!(x2, obj, opts; workspace = ws)
+                @test ws.data === built && x2 == x_ref
+                if typed
+                    as1_valid_allocs(ws, x2, opts, H)
+                    @test as1_valid_allocs(ws, x2, opts, H) == 0
+                end
+                if typed && kind === :dense
+                    as1_allocs(x2, obj, opts, ws)
+                    @test as1_allocs(x2, obj, opts, ws) == 0
+                end
+                # An H with another structure object rebuilds it, and still gives the right result
+                H_other = schur(p)
+                @test H_other.structure !== H.structure
+                obj_other = HessianObjective(cost, fdf!; H = H_other)
+                @test !SecondOrderOptimization.workspacevalid(ws, x2, opts, H_other)
+                x3 = fill(3.0, n)
+                optimize!(x3, obj_other, opts; workspace = ws)
+                @test ws.data !== built
+                @test x3 == x_ref
+            end
+        end
+        # A workspace for a Schur H is not accepted for a dense H of the same size, nor the reverse
+        Hd = zeros(n, n)
+        ws_s = OptimizationWorkspace(fill(3.0, n), obj, opts)
+        ws_d = OptimizationWorkspace(fill(3.0, n), HessianObjective(cost, (g, Hm, x) -> 0.0; H = Hd), opts)
+        @test !SecondOrderOptimization.workspacevalid(ws_s, fill(3.0, n), opts, Hd)
+        @test !SecondOrderOptimization.workspacevalid(ws_d, fill(3.0, n), opts, H)
+        @test SecondOrderOptimization.workspacevalid(ws_s, fill(3.0, n), opts, H)
+        # An x0 of the wrong size is a DimensionMismatch up front, before the objective is evaluated
+        calls = Ref(0)
+        obj_count = HessianObjective(cost, (g, Hm, x) -> (calls[] += 1; 0.0); H)
+        @test_throws DimensionMismatch optimize!(fill(3.0, n + 1), obj_count, opts)
+        @test_throws DimensionMismatch OptimizationWorkspace(fill(3.0, n - 1), obj_count, opts)
+        @test calls[] == 0
+        err = try optimize!(fill(3.0, n + 1), obj_count, opts) catch e; e end
+        @test occursin("$(n + 1) degrees of freedom", sprint(showerror, err))
+    end
+end
+
+@testset "updatescaling! guards a non-finite diagonal entry, as the other systems do (AS2)" begin
+    p = standard_problem()
+    n = length(p.b)
+    for kind in (:dense, :sparse), bad in (NaN, Inf, -Inf), k in (1, nr(p) + 1)   # one retained, one eliminated entry
+        @testset "$kind, $bad at $(k == 1 ? "retained" : "eliminated") entry" begin
+            ls = make_schur_ls(kind, p)
+            d = zeros(n)
+            d[k] = bad
+            add_schur_diag!(ls.H, d)
+            M = SecondOrderOptimization.conformance_matrix(ls.H)
+            @test !isfinite(M[k, k])
+            ref = SecondOrderOptimization.DenseLinearSystem{Float64}(M, copy(p.b), zeros(n))
+            for mk in (() -> SecondOrderOptimization.MarquardtData(0.0, zeros(n)),
+                       () -> SecondOrderOptimization.MarquardtDataTrial(0.0, zeros(n), nothing, NaN, false))
+                lmd, lmd_ref = mk(), mk()
+                SecondOrderOptimization.updatescaling!(lmd, ls)
+                SecondOrderOptimization.updatescaling!(lmd_ref, ref)
+                @test all(isfinite, lmd.scaling)
+                @test lmd.scaling == lmd_ref.scaling
+                @test lmd.lambda == lmd_ref.lambda
+            end
+        end
+    end
+end
+
+# AS3: the dense Schur system's Bunch-Kaufman solve, for :ldl and as :auto's fallback. The reference is
+# the solve as it was written before: Cholesky (for :auto), then LinearAlgebra's bunchkaufman
+function as3_reference(ls, solver)
+    SOOExt.build_reduced!(ls) || return (SecondOrderOptimization.NotPositiveDefinite, nothing)
+    S, g = copy(ls.S), copy(ls.g_S)
+    if solver === :auto
+        F = cholesky(Symmetric(copy(S), :U); check = false)
+        issuccess(F) && return (SecondOrderOptimization.Success, F \ g)
+    end
+    bk = bunchkaufman(Symmetric(S, :U); check = false)
+    issuccess(bk) || return (SecondOrderOptimization.NotPositiveDefinite, nothing)
+    xr = bk \ g
+    return (SecondOrderOptimization.is_indefinite(bk) ? SecondOrderOptimization.Indefinite : SecondOrderOptimization.Success, xr)
+end
+as3_solve_allocs(ls, s) = @allocated SecondOrderOptimization.solve!(ls, s)
+as3_allocs(x, obj, o, w) = (x .= 0.1; @allocated optimize!(x, obj, o; workspace = w))
+
+@testset "The dense Schur system's Bunch-Kaufman solve allocates nothing (AS3)" begin
+    p = standard_problem()
+    n = length(p.b)
+    q = standard_problem()
+    q.H[1, 1] = -50.0                        # S indefinite, so Cholesky fails (B5)
+    zeroS(ls) = (ls.H.R .= 0; ls.H.C_data .= 0; ls)   # S = 0: Bunch-Kaufman finds an exactly zero pivot
+    for (name, mk, expected) in (("positive definite", () -> make_schur_ls(:dense, p), Dict(:auto => :Success, :ldl => :Success)),
+                                 ("indefinite", () -> make_schur_ls(:dense, q), Dict(:auto => :Indefinite, :ldl => :Indefinite)),
+                                 ("singular", () -> zeroS(make_schur_ls(:dense, p)), Dict(:auto => :NotPositiveDefinite, :ldl => :NotPositiveDefinite)))
+        for s in (:auto, :ldl)
+            @testset "$name, $s" begin
+                ls = mk()
+                SecondOrderOptimization.dampen!(ls, 0.0)
+                st_ref, xr_ref = as3_reference(ls, s)
+                @test Symbol(st_ref) === expected[s]
+                st = SecondOrderOptimization.solve!(ls, static(s))
+                @test st == st_ref
+                isnothing(xr_ref) || @test norm(ls.x_r - xr_ref) <= 1e-12 * norm(xr_ref)
+                # Warm: a solve allocates nothing (the system is serial here: one chunk)
+                as3_solve_allocs(ls, static(s))
+                @test as3_solve_allocs(ls, static(s)) == 0
+            end
+        end
+    end
+    # A whole Newton or dogleg run on an indefinite Schur problem allocates nothing (typed workspace)
+    for it in (:newton, :dogleg), s in (:auto, :ldl)
+        @testset "$it, $s run" begin
+            cost, fdf! = as1_objective(q, dense_schur_matrix(q))
+            obj = HessianObjective(cost, fdf!; H = dense_schur_matrix(q))
+            opts = OptimizationOptions(; iterator = it, linsolver = s, maxiters = 30)
+            ws = OptimizationWorkspace(fill(0.1, n), obj, opts)
+            x = fill(0.1, n)
+            as3_allocs(x, obj, opts, ws)
+            @test as3_allocs(x, obj, opts, ws) == 0
+        end
+    end
+end
+
+@testset "No Schur solve reports Success with a non-finite step (AS4)" begin
+    p = standard_problem()
+    setR!(H, i, j, v) = H.R isa Matrix ? (H.R[i, j] = H.R[j, i] = v) : (B = block(H.R, 1, 1); B[i, j] = B[j, i] = v)
+    variants = (("NaN on R's diagonal", H -> setR!(H, 1, 1, NaN)), ("NaN off R's diagonal", H -> setR!(H, 1, 2, NaN)),
+                ("NaN on E's diagonal", H -> (H.E_data[1] = NaN)), ("NaN in C", H -> (H.C_data[1] = NaN)),
+                ("Inf on R's diagonal", H -> setR!(H, 1, 1, Inf)))
+    for kind in (:dense, :sparse), s in (:auto, :cholesky, :ldl), (name, f!) in variants, lambda in (0.0, 1e-3)
+        @testset "$kind, $s, $name, λ = $lambda" begin
+            ls = make_schur_ls(kind, p)
+            @test SecondOrderOptimization.isfinitesystem(ls)
+            f!(ls.H)
+            @test !SecondOrderOptimization.isfinitesystem(ls)
+            SecondOrderOptimization.dampen!(ls, lambda)
+            st = SecondOrderOptimization.solve!(ls, static(s))
+            @test st != SecondOrderOptimization.Success || all(isfinite, ls.x)
+        end
     end
 end

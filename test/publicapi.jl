@@ -13,7 +13,8 @@ const PUBLIC_API = sort([
     :TERMINATION_ABS_DCOST,
     :TERMINATION_COST_INF,
     :TERMINATION_COST_NAN,
-    :TERMINATION_GRAD_NOT_FINITE,
+    :TERMINATION_GRAD_INF,
+    :TERMINATION_GRAD_NAN,
     :TERMINATION_GRAD_TOL,
     :TERMINATION_LINSOLVER_FAILED,
     :TERMINATION_MAX_FAILS,
@@ -45,8 +46,7 @@ const PUBLIC_API = sort([
     @testset "$name is defined but internal" for name in (
             :OptimizationInternal, :NewtonData, :NewtonDataRelinearize, :DoglegData,
             :LevenbergData, :LevenbergDataTrial, :MarquardtData, :MarquardtDataTrial, :GradientDescentData,
-            :OptimizationIterator, :newton, :levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg,
-            :gradientdescent, :getiterator,
+            :iteratorname, :knowniterators, :checkiterator,
             :OptimizationLinearSolver, :auto_solver, :cholesky_solver, :ldl_solver, :qr_solver,
             :LINSOLVER_FAILED, :fast_dot,
             :AbstractLinearSystem, :solve!, :dampen!, :zero!, :makelinearsystem, :copy_structure,
@@ -90,5 +90,19 @@ end
         @test r.iterator === s
         @test (r + r).iterator === s
         @test startswith(sprint(show, r), "SecondOrderOptimization optimization using $name took ")
+    end
+end
+
+@testset "Iterators are named by symbol only (IT1)" begin
+    # The enum, its values and getiterator are gone; an iterator is known by its iteratorname method
+    for name in (:OptimizationIterator, :newton, :levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg,
+                 :gradientdescent, :getiterator)
+        @test !isdefined(SecondOrderOptimization, name)
+    end
+    @test SecondOrderOptimization.knowniterators() == sort([:newton, :levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :gradientdescent])
+    for s in (:not_an_iterator, :lbfgs)
+        err = try OptimizationOptions(iterator = s); nothing catch e; e end
+        @test err isa ArgumentError
+        @test sprint(showerror, err) == "ArgumentError: Unknown iterator: :$s. The iterators are :dogleg, :gradientdescent, :levenbergmarquardt, :levenbergmarquardt_dtd and :newton."
     end
 end

@@ -7,9 +7,11 @@
 #
 #   RType               :auto            :qr              :cholesky / :ldl            :lsmr (with Krylov)
 #   Matrix{Float64}     dense QR of J̃    dense QR of J̃    S = J̃ᵀJ̃, dense factor      LSMR on J̃
-#   SparseMatrixCSC     sparse S         rejected         S = J̃ᵀJ̃, sparse factor     LSMR on J̃
+#   SparseMatrixCSC     SPQR of J̃        SPQR of J̃        S = J̃ᵀJ̃, sparse factor     LSMR on J̃
 #
-# A sparse QR of J̃ would need J̃ in sparse form, which BlockLinearSystems does not build. The gradient, the
+# The sparse J̃ has a fixed pattern (BlockLinearSystems' `build_reduced_jacobian_pattern`), built once and filled
+# per damping value by `reduced_jacobian!`; its damped least-squares problem goes through the sparse tall
+# system's SPQR route (`spqr_solve!`: symbolic analysis once, numeric factorization per solve). The gradient, the
 # column norms and ‖J v‖² come from the raw tables (`jtr!`, `jtj_diag!`, `jtj_quadform`): Q is orthogonal, so
 # nothing else is needed.
 
@@ -80,6 +82,11 @@ struct DenseNormalReduced
     g::Vector{Float64}         # J̃ᵀr̃
     ldl::DenseLDLWorkspace     # Bunch-Kaufman, for :ldl and when Cholesky fails
 end
+struct SparseQRReduced
+    Jt::SparseMatrixCSC{Float64, Int}   # J̃, its pattern fixed, filled per solve
+    rt::Vector{Float64}                 # r̃
+    spqr::SPQRWorkspace                 # the symbolic analysis of [J̃; √(λ s_r)], done once
+end
 struct SparseNormalReduced{TF, TL, TC, P}
     S::SparseMatrixCSC{Float64, Int}
     g::Vector{Float64}
@@ -103,7 +110,12 @@ function SecondOrderOptimization.make_reduced(J::SchurBlockJacobian{Float64, Mat
     nr = J.structure.schur.nr
     return DenseNormalReduced(zeros(nr, nr), zeros(nr), DenseLDLWorkspace(nr))
 end
-function SecondOrderOptimization.make_reduced(J::SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}, ::Union{StaticSymbol{:auto}, StaticSymbol{:cholesky}, StaticSymbol{:ldl}})
+# QR whatever the storage: `:auto` is QR of J̃ for a sparse RType too (decided 2026-11-15, TP6)
+function SecondOrderOptimization.make_reduced(J::SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}, ::Union{StaticSymbol{:auto}, StaticSymbol{:qr}})
+    Jt = build_reduced_jacobian_pattern(J.structure, Float64)
+    return SparseQRReduced(Jt, zeros(size(Jt, 1)), SPQRWorkspace(Jt))
+end
+function SecondOrderOptimization.make_reduced(J::SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}, ::Union{StaticSymbol{:cholesky}, StaticSymbol{:ldl}})
     jst = J.structure
     pattern = build_schur_pattern(jst.schur, Float64; extra_blocks = free_block_pairs(jst))
     S = copy(pattern.S_sparse)
@@ -116,11 +128,10 @@ SecondOrderOptimization.make_reduced(J::SchurBlockJacobian, ::StaticSymbol{S}) w
 
 # The solvers accepted for each reduced storage, checked before anything is built or called
 reduced_linsolvers(::Type{Matrix{Float64}}) = (:auto, :qr, :cholesky, :ldl, :lsmr)
-reduced_linsolvers(::Type{SparseMatrixCSC{Float64, Int}}) = (:auto, :cholesky, :ldl, :lsmr)
+reduced_linsolvers(::Type{SparseMatrixCSC{Float64, Int}}) = (:auto, :qr, :cholesky, :ldl, :lsmr)
 function linsolver_message(J::SchurBlockJacobian{Float64, RType}, s) where RType
     ok = join((":$x" for x in reduced_linsolvers(RType)), ", ", " or ")
-    why = RType <: SparseMatrixCSC && s === :qr ? " (a QR of the reduced Jacobian needs it in dense form; BlockLinearSystems builds a sparse reduced system only as J̃ᵀJ̃)" : ""
-    return "linsolver = :$s is not supported with a SchurBlockJacobian{Float64, $RType} Jacobian prototype$why; use $ok (:lsmr with Krylov.jl loaded)."
+    return "linsolver = :$s is not supported with a SchurBlockJacobian{Float64, $RType} Jacobian prototype; use $ok (:lsmr with Krylov.jl loaded)."
 end
 function SecondOrderOptimization.check_jacobian_linsolver(J::SchurBlockJacobian{Float64, RType}, s::Symbol) where RType
     s in reduced_linsolvers(RType) || throw(ArgumentError(linsolver_message(J, s)))
@@ -152,6 +163,7 @@ function QRSchurLinearSystem(J::SchurBlockJacobian{Float64}, linsolver)
     return QRSchurLinearSystem(SchurJacobianHessian(J), zeros(n), zeros(n), QRReductionWorkspace(J), make_reduced(J, linsolver),
                                ones(n), zeros(nr), zeros(n - nr), 0.0, nothing)
 end
+SecondOrderOptimization.isfinitesystem(ls::QRSchurLinearSystem) = all(isfinite, ls.A.J.data)   # the tables hold J and r
 
 SecondOrderOptimization.tall_linearsystem(x0, J::SchurBlockJacobian{Float64}, linsolver) = QRSchurLinearSystem(J, linsolver)
 SecondOrderOptimization.workspace_tall_linearsystem(x0, J::SchurBlockJacobian{Float64, RType}, linsolver) where RType =
@@ -204,7 +216,8 @@ end
 SecondOrderOptimization.solve!(ls::QRSchurLinearSystem, ::StaticSymbol{S}) where S = solvermismatch(ls, S)
 SecondOrderOptimization.builtfor(::DenseQRReduced) = ":auto or :qr"
 SecondOrderOptimization.builtfor(::DenseNormalReduced) = ":cholesky or :ldl"
-SecondOrderOptimization.builtfor(::SparseNormalReduced) = ":auto, :cholesky or :ldl"
+SecondOrderOptimization.builtfor(::SparseQRReduced) = ":auto or :qr"
+SecondOrderOptimization.builtfor(::SparseNormalReduced) = ":cholesky or :ldl"
 SecondOrderOptimization.solverworkspace(ls::QRSchurLinearSystem) = ls.reduced
 
 # Dense QR of [J̃ r̃; √(λ s_r) 0], then R x_r = q
@@ -227,6 +240,13 @@ function SecondOrderOptimization.solve_reduced!(ls::QRSchurLinearSystem, red::De
     end
     SecondOrderOptimization.backsubstitute!(ls.xr, Aug, nr)
     return Success
+end
+
+# Sparse J̃ and r̃, then the damped least-squares problem by SPQR, as for a sparse Jacobian
+function SecondOrderOptimization.solve_reduced!(ls::QRSchurLinearSystem, red::SparseQRReduced, ::Union{StaticSymbol{:auto}, StaticSymbol{:qr}}, lambda, s_r)
+    reduced_jacobian!(red.Jt, red.rt, ls.ws)
+    (all(isfinite, nonzeros(red.Jt)) && all(isfinite, red.rt)) || return NotPositiveDefinite
+    return spqr_solve!(ls.xr, red.spqr, red.Jt, red.rt, lambda, s_r)
 end
 
 # S = J̃ᵀJ̃ + λ diag(s_r) (upper triangle), then Cholesky, falling back to Bunch-Kaufman, or Bunch-Kaufman for
@@ -256,7 +276,7 @@ function SecondOrderOptimization.solve_reduced!(ls::QRSchurLinearSystem, red::De
 end
 
 # Sparse S, then CHOLMOD Cholesky falling back to LDLᵀ, or LDLᵀ for :ldl: the sparse Schur system's rule
-function SecondOrderOptimization.solve_reduced!(ls::QRSchurLinearSystem, red::SparseNormalReduced, s::Union{StaticSymbol{:auto}, StaticSymbol{:cholesky}, StaticSymbol{:ldl}}, lambda, s_r)
+function SecondOrderOptimization.solve_reduced!(ls::QRSchurLinearSystem, red::SparseNormalReduced, s::Union{StaticSymbol{:cholesky}, StaticSymbol{:ldl}}, lambda, s_r)
     reduced_normal_sparse!(red.S, red.g, ls.ws, red.pattern)
     nz = nonzeros(red.S)
     @inbounds for i in eachindex(s_r)

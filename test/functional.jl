@@ -66,7 +66,7 @@ end
     @test hasbits(res, TERMINATION_GRAD_TOL)
     @test occursin("Gradient norm below threshold.", sprint(show, res0))
     bits = [bit for (bit, _) in SecondOrderOptimization.TERMINATION_REASONS]
-    @test allunique(bits) && all(ispow2, bits) && reduce(|, bits) == (1 << 16) - 1 - (1 << 10)   # every bit below the callback's but 1 << 10, which is free
+    @test allunique(bits) && all(ispow2, bits) && reduce(|, bits) == (1 << 16) - 1   # every bit below the callback's flags
     _, res_cb = optimize(copy(x0_dense), HessianObjective(rosenbrock_cost, rosenbrock_fdf!), OptimizationOptions(maxiters=50); callback=(c, args...) -> (c, 1))
     @test res_cb.termination == 1 << 16      # only the callback's flag
     @test !isconverged(res_cb)
@@ -98,6 +98,20 @@ end
     allocs = rosen_allocs(x0_static, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), opts_alloc, ws)
     @test allocs == 0
 
+    # ...and with a dense Vector, for every iterator (gradient descent once negated its gradient
+    # outside the broadcast, allocating a vector per step and per line-search trial)
+    dense_allocs(x, obj, o, w) = @allocated optimize!(x, obj, o; workspace=w)
+    for it in (:newton, :levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :gradientdescent)
+        obj_d = HessianObjective(rosenbrock_cost, rosenbrock_fdf!)
+        opts_d = OptimizationOptions(iterator=it, maxiters=30)
+        ws_d = OptimizationWorkspace(copy(x0_dense), obj_d, opts_d)
+        x_d = copy(x0_dense)
+        dense_allocs(x_d, obj_d, opts_d, ws_d)
+        x_d .= x0_dense
+        GC.gc()
+        @test dense_allocs(x_d, obj_d, opts_d, ws_d) == 0
+    end
+
     # Test printoutcallback and OptimizationResult show
     io = IOBuffer()
     show(io, res)
@@ -105,8 +119,8 @@ end
     @test occursin("SecondOrderOptimization", str)
     @test occursin("termination", str)
 
-    # Test enum options (OptimizationIterator & OptimizationLinearSolver)
-    opts_enum = OptimizationOptions(iterator=SecondOrderOptimization.dogleg, linsolver=SecondOrderOptimization.cholesky_solver, maxiters=50)
+    # Test enum options (OptimizationLinearSolver)
+    opts_enum = OptimizationOptions(iterator=:dogleg, linsolver=SecondOrderOptimization.cholesky_solver, maxiters=50)
     x_enum, _ = optimize(x0_static, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), opts_enum)
     @test isapprox(x_enum, [1.0, 1.0]; atol=1e-4)
 
@@ -129,4 +143,45 @@ end
     @test_throws ArgumentError optimize!(x0_static, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), opts_test)
     x_stat_opt, _ = optimize(x0_static, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), opts_test)
     @test isapprox(x_stat_opt, [1.0, 1.0]; atol=1e-4)
+end
+
+# AS6: a caller's input is rejected with DimensionMismatch or ArgumentError, not AssertionError
+@testset "Input errors are DimensionMismatch or ArgumentError, not AssertionError (AS6)" begin
+    obj_sq(H) = HessianObjective(rosenbrock_cost, (g, Hm, x) -> rosenbrock_fdf!(g, zeros(2, 2), x); H)
+    # A non-square sparse Hessian
+    for f in (() -> optimize([-1.2, 1.0], obj_sq(sparse(ones(2, 3))), OptimizationOptions()),
+              () -> OptimizationWorkspace([-1.2, 1.0], obj_sq(sparse(ones(2, 3))), OptimizationOptions()))
+        @test_throws DimensionMismatch f()
+    end
+    # A callback that changes the cost when callbackchangesstate is false: an ArgumentError naming the option
+    changecost(c, args...) = (c + 1.0, 0)
+    for x0 in ([-1.2, 1.0], @SVector([-1.2, 1.0]))
+        @test_throws ArgumentError optimize(x0, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), OptimizationOptions(); callback = changecost)
+        err = try optimize(x0, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), OptimizationOptions(); callback = changecost) catch e; e end
+        @test occursin("callbackchangesstate", sprint(showerror, err))
+        # ...and is accepted when it is true
+        _, res = optimize(x0, HessianObjective(rosenbrock_cost, rosenbrock_fdf!), OptimizationOptions(; callbackchangesstate = true, maxiters = 3); callback = changecost)
+        @test res.niterations == 3
+    end
+    # The loop still allocates nothing: a callback that keeps the cost, on a dense Vector
+    keepcost(c, args...) = (c, 0)
+    obj = HessianObjective(rosenbrock_cost, rosenbrock_fdf!)
+    opts = OptimizationOptions(; iterator = :levenbergmarquardt, maxiters = 30)
+    ws = OptimizationWorkspace([-1.2, 1.0], obj, opts)
+    as6_allocs(x, o, w) = (x .= [-1.2, 1.0]; @allocated optimize!(x, obj, o; workspace = w, callback = keepcost))
+    x = [-1.2, 1.0]
+    as6_allocs(x, opts, ws)
+    @test as6_allocs(x, opts, ws) == 0
+end
+
+@testset "show(::OptimizationResult) with zero times prints no NaN (AS7)" begin
+    _, r = optimize([-1.2, 1.0], HessianObjective(rosenbrock_cost, rosenbrock_fdf!), OptimizationOptions(; maxiters = 3))
+    zerotimes(r) = OptimizationResult((startswith(String(f), "time") ? zero(fieldtype(OptimizationResult, f)) : getfield(r, f) for f in fieldnames(OptimizationResult))...)
+    r0 = zerotimes(r)
+    @test r0.timetotal == 0 && r0.timesolver == 0
+    s = sprint(show, r0)
+    @test !occursin("NaN", s)
+    @test occursin("0.00% of total time", s)
+    @test occursin("accounted for 0.00%", s)
+    @test !occursin("NaN", sprint(show, r))
 end

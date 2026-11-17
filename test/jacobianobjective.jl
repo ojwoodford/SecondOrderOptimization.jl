@@ -1,5 +1,5 @@
 using SecondOrderOptimization, StaticArrays, SparseArrays, LinearAlgebra, Static, Random, Test
-using SecondOrderOptimization: LevenbergDataTrial, newton, levenbergmarquardt, levenbergmarquardt_dtd, dogleg, gradientdescent, auto_solver, cholesky_solver, ldl_solver, qr_solver, dampen!, zero!, Success, NotPositiveDefinite   # internal names
+using SecondOrderOptimization: LevenbergDataTrial, auto_solver, cholesky_solver, ldl_solver, qr_solver, dampen!, zero!, Success, NotPositiveDefinite   # internal names
 include("termbits.jl")
 const SOO = SecondOrderOptimization
 using SecondOrderOptimization: getA, getb, getx, solve!   # explicit: Krylov, loaded by other test files, also exports solve!
@@ -40,19 +40,14 @@ end
             err = try JacobianObjective(jrosen_cost, jrosen_resjac!, J); nothing catch e; e end
             @test err isa ArgumentError
             @test occursin(needle, err.msg)
-            @test occursin("Matrix{Float64}", err.msg) && occursin(":levenbergmarquardt", err.msg)
+            @test occursin("Matrix{Float64}", err.msg) && occursin("every iterator", err.msg)
         end
     end
 
     @testset "Validation at entry: iterator, linsolver and the prototype's columns" begin
         obj = JacobianObjective(jrosen_cost, jrosen_resjac!, 2)
-        err = try SOO.checkobjective([0.0, 0.0], obj, OptimizationOptions(iterator=:gradientdescent)); nothing catch e; e end
-        @test err isa ArgumentError && occursin(":gradientdescent", err.msg) && occursin("gains nothing", err.msg)
-        @test occursin(":levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg or :newton", err.msg)
-        err = try SOO.checkobjective([0.0, 0.0], obj, OptimizationOptions(iterator=gradientdescent)); nothing catch e; e end
-        @test err isa ArgumentError && occursin(":gradientdescent", err.msg)
-        # the other iterators are accepted, as symbols and as OptimizationIterator values
-        for it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton, levenbergmarquardt, levenbergmarquardt_dtd, dogleg, newton)
+        # every iterator is accepted (IT2: :gradientdescent too)
+        for it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton, :gradientdescent)
             @test SOO.checkobjective([0.0, 0.0], obj, OptimizationOptions(iterator=it)) === nothing
         end
         for s in (:cholesky, :ldl)
@@ -72,7 +67,7 @@ end
 
     @testset "Every rejection throws before f or resjac! is called" begin
         obj = JacobianObjective(jrosen_cost, jrosen_resjac!, 2)
-        bad = Any[(obj, OptimizationOptions(iterator=it), ArgumentError) for it in (:gradientdescent, gradientdescent)]
+        bad = Any[]
         append!(bad, [(obj, OptimizationOptions(linsolver=s), ArgumentError) for s in (:cholesky, :ldl, cholesky_solver, ldl_solver)])
         push!(bad, (JacobianObjective(jrosen_cost, jrosen_resjac!, zeros(2, 3)), OptimizationOptions(), DimensionMismatch))
         for (o, opts, E) in bad
@@ -330,13 +325,14 @@ SOO.update(x::Rot3, dx, start=1) = Rot3(x.R * expso3(SVector(dx[start], dx[start
         # at the start
         objnan = JacobianObjective(x -> 1.0, (r, J, x) -> (r .= 1.0; J .= NaN; 1.0), 2)
         _, res = optimize([0.0, 0.0], objnan, OptimizationOptions())
-        @test hasbits(res, TERMINATION_GRAD_NOT_FINITE) && hasbits(res, TERMINATION_START_NOT_FINITE)
+        @test hasbits(res, TERMINATION_GRAD_NAN) && hasbits(res, TERMINATION_START_NOT_FINITE)
         @test res.niterations == 0
         # after the first accepted step: J holds an Inf once x[1] > 0.5
         f(x) = 0.5 * sum(abs2, x .- 1)
         objlate = JacobianObjective(f, (r, J, x) -> (r .= x .- 1; J .= I(2); x[1] > 0.5 && (J[1, 1] = Inf); f(x)), 2)
         _, res = optimize([0.0, 0.0], objlate, OptimizationOptions())
-        @test hasbits(res, TERMINATION_GRAD_NOT_FINITE)
+        # Inf times the residual: an infinite gradient, or NaN where that residual is exactly zero
+        @test hasbits(res, TERMINATION_GRAD_INF | TERMINATION_GRAD_NAN)
         @test res.niterations >= 1 && !isconverged(res)
     end
 

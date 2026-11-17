@@ -31,7 +31,7 @@ Stores configuration options and stopping criteria for second-order optimization
   known only to the iterator. Check the gradient (`gtol`) when that matters.
 - `maxtime::Float64 = 30.0`: Maximum wall-clock optimization runtime in seconds.
 - `iterator::Symbol = :levenbergmarquardt`: Iterator algorithm (`:newton`, `:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg`, `:gradientdescent`).
-- `linsolver::Symbol = :auto`: Linear solver method (`:auto`, `:cholesky`, `:ldl`, `:qr`, or `:cg`, `:minres`, `:krylov` via `Krylov.jl`, or `:pardiso` via `Pardiso.jl`).
+- `linsolver::Symbol = :auto`: Linear solver method: `:auto`, `:cholesky`, `:ldl` or `:qr`; `:cg` or `:minres` (Krylov solvers for a Hessian) and `:lsmr` (for a [`JacobianObjective`](@ref) only), via `Krylov.jl`; or `:pardiso`, via `Pardiso.jl`. Which of these an objective accepts is set by its prototype: see [`HessianObjective`](@ref) and [`JacobianObjective`](@ref).
 - `callbackchangesstate::Union{Bool, StaticBool} = false`: Set `true` if callback modifies problem state.
 
 # Example
@@ -128,71 +128,6 @@ end
 OptimizationInternal
 
 """
-    OptimizationIterator
-
-Enum indicating the optimization iterator algorithm:
-- [`newton`](@ref): Standard Newton step without damping.
-- [`levenbergmarquardt`](@ref): Levenberg-Marquardt with diagonal uniform scaling (`lambda * I`).
-- [`levenbergmarquardt_dtd`](@ref): Marquardt scaling using running maximum diagonal entries (`lambda * D'D`).
-- [`dogleg`](@ref): Powell's dogleg trust-region method interpolating Cauchy and Newton steps.
-- [`gradientdescent`](@ref): Backtracking gradient descent.
-
-# Example
-```julia
-opts = OptimizationOptions(iterator = levenbergmarquardt_dtd)
-```
-"""
-OptimizationIterator
-
-"""
-    newton
-
-[`OptimizationIterator`](@ref) constant selecting the undamped Newton method.
-"""
-newton
-
-"""
-    levenbergmarquardt
-
-[`OptimizationIterator`](@ref) constant selecting Levenberg-Marquardt with uniform diagonal damping (`lambda * I`).
-"""
-levenbergmarquardt
-
-"""
-    levenbergmarquardt_dtd
-
-[`OptimizationIterator`](@ref) constant selecting Levenberg-Marquardt with adaptive diagonal scaling (`lambda * D'D`).
-"""
-levenbergmarquardt_dtd
-
-"""
-    dogleg
-
-[`OptimizationIterator`](@ref) constant selecting Powell's dogleg trust-region method.
-"""
-dogleg
-
-"""
-    gradientdescent
-
-[`OptimizationIterator`](@ref) constant selecting backtracking gradient descent.
-"""
-gradientdescent
-
-"""
-    getiterator(options::OptimizationOptions) -> OptimizationIterator
-    getiterator(s::Symbol) -> OptimizationIterator
-
-Returns the [`OptimizationIterator`](@ref) enum value corresponding to `options.iterator` or symbol `s`.
-
-# Example
-```julia
-it = getiterator(OptimizationOptions(iterator = :dogleg)) # dogleg
-```
-"""
-getiterator
-
-"""
     NewtonData
 
 Iterator state for undamped Newton optimization when `callbackchangesstate` is `true`.
@@ -263,7 +198,8 @@ Enum specifying linear solver strategy:
 - [`qr_solver`](@ref): QR factorization.
 
 Additional solver symbols can be passed as Symbols when package extensions are loaded:
-- `:cg`, `:minres`, `:krylov`: Iterative solvers provided by `Krylov.jl` via the `KrylovExt` extension.
+- `:cg`, `:minres`: Iterative Krylov solvers for a Hessian, provided by `Krylov.jl` via the `KrylovExt` extension.
+- `:lsmr`: LSMR on the Jacobian of a [`JacobianObjective`](@ref), provided by `Krylov.jl` via the `KrylovExt` extension.
 - `:pardiso`: Multithreaded direct sparse solver provided by `Pardiso.jl` via the `PardisoExt` extension.
 
 # Example
@@ -362,9 +298,9 @@ For a `Number`, an `SVector` or any other immutable variable it throws an `Argum
 - `x0`: Starting point, overwritten with the solution.
 - `obj`: The objective. A [`HessianObjective`](@ref) gives the cost, its gradient and Hessian, and
   the Hessian prototype. A [`JacobianObjective`](@ref) gives the cost, the residual and its
-  Jacobian, and the Jacobian prototype or number of residuals; it supports every iterator but
-  `:gradientdescent` (`:newton` is then Gauss-Newton) and `linsolver = :auto` or `:qr` so far,
-  and anything else is an `ArgumentError` before `f` or `resjac!` is called.
+  Jacobian, and the Jacobian prototype or number of residuals; it supports every iterator
+  (`:newton` is then Gauss-Newton) and the `linsolver` values its docstring lists for each
+  prototype, and anything else is an `ArgumentError` before `f` or `resjac!` is called.
 - `options::OptimizationOptions`: Optimization settings and stopping criteria.
 
 # Keyword Arguments
@@ -442,7 +378,7 @@ Solves the linear system `A * x = b` in-place using the specified `solver` and r
 # Supported Solver Identifiers
 - Core solvers: `:auto`, `:cholesky`, `:ldl`, `:qr` (or enum constants [`auto_solver`](@ref), [`cholesky_solver`](@ref), [`ldl_solver`](@ref), [`qr_solver`](@ref)).
 - Extension solvers (when package is loaded):
-  - `using Krylov`: `:cg` (Conjugate Gradient), `:minres` (MINRES), `:krylov` (defaults to `:cg`). On sparse systems, `:cg` and `:minres` are Jacobi (diagonal) preconditioned whenever the damped diagonal is positive.
+  - `using Krylov`: `:cg` (Conjugate Gradient), `:minres` (MINRES). On sparse systems, `:cg` and `:minres` are Jacobi (diagonal) preconditioned whenever the damped diagonal is positive.
   - `using Pardiso`: `:pardiso` (Intel MKL PARDISO or Panua Pardiso multi-threaded direct sparse solver).
 
 Note: On `StaticLinearSystem`, `:qr` executes static LU decomposition via `\`, and `:ldl` uses Cholesky, falling back to LU when the matrix is not positive definite (the solve is then reported as `Indefinite`).
@@ -461,7 +397,7 @@ solve!
     validatelinsolver(solver::Union{Symbol, StaticSymbol, OptimizationLinearSolver}) -> Bool
 
 Returns `true` if `solver` is a supported linear solver backend, or `false` otherwise.
-Extension solvers (`:cg`, `:minres`, `:krylov`, `:pardiso`) register validation methods when their respective packages (`Krylov.jl` or `Pardiso.jl`) are loaded.
+Extension solvers (`:cg`, `:minres` and `:lsmr`, or `:pardiso`) register validation methods when their respective packages (`Krylov.jl` or `Pardiso.jl`) are loaded.
 """
 validatelinsolver
 
@@ -542,7 +478,7 @@ Which system `makelinearsystem` builds:
   system on a `Float64` copy.
 - `H::SparseMatrixCSC{Float64}`: a sparse system that writes into `H`, or into a copy with explicit
   zeros added if a diagonal entry is missing.
-- `H::SchurBlockMatrix` (BlockLinearSystems.jl): a Schur-complement system, dense or sparse
+- `H::SchurBlockHessian` (BlockLinearSystems.jl): a Schur-complement system, dense or sparse
   according to the storage of `H.R`; `linsolver` (`:auto`, `:cholesky` or `:ldl`) names the solver
   for the reduced system.
 """
@@ -647,12 +583,20 @@ Test it with `result.termination & TERMINATION_STEP_NAN != 0`; see [`isconverged
 TERMINATION_STEP_NAN
 
 """
-    TERMINATION_GRAD_NOT_FINITE
+    TERMINATION_GRAD_INF
 
-Bit mask of [`OptimizationResult`](@ref)`.termination`, set when the gradient was not finite. A failure.
-Test it with `result.termination & TERMINATION_GRAD_NOT_FINITE != 0`; see [`isconverged`](@ref).
+Bit mask of [`OptimizationResult`](@ref)`.termination`, set when the gradient contained an infinite value
+(and no `NaN`). A failure. Test it with `result.termination & TERMINATION_GRAD_INF != 0`; see [`isconverged`](@ref).
 """
-TERMINATION_GRAD_NOT_FINITE
+TERMINATION_GRAD_INF
+
+"""
+    TERMINATION_GRAD_NAN
+
+Bit mask of [`OptimizationResult`](@ref)`.termination`, set when the gradient contained a `NaN`. A failure.
+Test it with `result.termination & TERMINATION_GRAD_NAN != 0`; see [`isconverged`](@ref).
+"""
+TERMINATION_GRAD_NAN
 
 """
     TERMINATION_START_NOT_FINITE

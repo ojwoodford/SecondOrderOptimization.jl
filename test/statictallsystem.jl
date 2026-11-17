@@ -87,7 +87,7 @@ tp4_bytes(x0, obj, opts, ws) = (tp4_run(x0, obj, opts, ws); @allocated tp4_run(x
         @test OptimizationWorkspace(x2, JacobianObjective(tp4_cost, tp4_resjac!, ones(20, 2))).data[1].linsystem isa SOO.StaticTallLinearSystem
     end
 
-    @testset "Every Jacobian iterator: :$it, callbackchangesstate = $ccs" for it in SOO.JACOBIAN_ITERATORS, ccs in (false, true)
+    @testset "Every Jacobian iterator: :$it, callbackchangesstate = $ccs" for it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton), ccs in (false, true)
         opts = OptimizationOptions(; iterator = it, callbackchangesstate = ccs)
         _, rd = optimize([1.0, 0.0], JacobianObjective(tp4_cost, tp4_resjac!, 20), opts)
         for P in (20, zeros(20, 2))

@@ -72,8 +72,8 @@ checker_message(make_ls; kwargs...) = try check_linear_system(make_ls; kwargs...
         using Krylov
         n = 8
         pattern = spdiagm(-1 => ones(n - 1), 0 => ones(n), 1 => ones(n - 1))
-        @test check_linear_system(s -> SOO.makelinearsystem(zeros(n), copy(pattern), s); n, linsolvers=(:cg, :minres, :krylov), rtol=1e-6) === nothing
-        @test check_linear_system(s -> SOO.makelinearsystem(zeros(n), zeros(n, n), s); n, linsolvers=(:cg, :minres, :krylov), rtol=1e-6) === nothing
+        @test check_linear_system(s -> SOO.makelinearsystem(zeros(n), copy(pattern), s); n, linsolvers=(:cg, :minres), rtol=1e-6) === nothing
+        @test check_linear_system(s -> SOO.makelinearsystem(zeros(n), zeros(n, n), s); n, linsolvers=(:cg, :minres), rtol=1e-6) === nothing
     end
 
     @testset "Pardiso" begin

@@ -9,6 +9,7 @@ by [`OptimizationOptions`](@ref).
 module SecondOrderOptimization
 
 using FastNorm
+using LinearAlgebra, SparseArrays, StaticArrays, Static, LDLFactorizations
 using Printf: @printf, @sprintf
 using OptimizationVariableInterface
 import OptimizationVariableInterface: nvars, update, update!, copyvars, syncvars!, ismutablevar
@@ -23,7 +24,7 @@ export nullcallback, printoutcallback, storecostscallback
 export TERMINATION_COST_INF, TERMINATION_COST_NAN, TERMINATION_REL_DCOST, TERMINATION_ABS_DCOST
 export TERMINATION_STEP_INF, TERMINATION_STEP_NAN, TERMINATION_STEP_SIZE, TERMINATION_MAX_FAILS
 export TERMINATION_MAX_ITERS, TERMINATION_MAX_TIME
-export TERMINATION_START_NOT_FINITE, TERMINATION_GRAD_TOL, TERMINATION_GRAD_NOT_FINITE
+export TERMINATION_START_NOT_FINITE, TERMINATION_GRAD_INF, TERMINATION_GRAD_NAN, TERMINATION_GRAD_TOL
 export TERMINATION_LINSOLVER_FAILED, TERMINATION_STALLED
 
 # Utilities

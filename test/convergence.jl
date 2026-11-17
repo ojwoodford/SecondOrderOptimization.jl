@@ -9,7 +9,7 @@ q6conv(masks::Integer...) = SOO.isconverged_bits(reduce(|, masks; init=0))
 
 const Q6_CONVERGENCE = (TERMINATION_REL_DCOST, TERMINATION_ABS_DCOST, TERMINATION_STEP_SIZE, TERMINATION_GRAD_TOL, TERMINATION_STALLED)   # STALLED: Q7
 const Q6_LIMITS = (TERMINATION_MAX_FAILS, TERMINATION_MAX_ITERS, TERMINATION_MAX_TIME)
-const Q6_NONFINITE = (TERMINATION_COST_INF, TERMINATION_COST_NAN, TERMINATION_STEP_INF, TERMINATION_STEP_NAN, TERMINATION_GRAD_NOT_FINITE, TERMINATION_START_NOT_FINITE)
+const Q6_NONFINITE = (TERMINATION_COST_INF, TERMINATION_COST_NAN, TERMINATION_STEP_INF, TERMINATION_STEP_NAN, TERMINATION_GRAD_INF, TERMINATION_GRAD_NAN, TERMINATION_START_NOT_FINITE)
 
 @testset "convergence.jl" begin
     @testset "isconverged on hand-built termination values" begin
@@ -80,7 +80,7 @@ const Q6_NONFINITE = (TERMINATION_COST_INF, TERMINATION_COST_NAN, TERMINATION_ST
         # grad_tol alone
         _, res = optimize([-1.2, 1.0], rosen, OptimizationOptions(gtol=1e-6, reldcost=0.0, absdcost=0.0, dstep=0.0))
         @test res.termination == TERMINATION_GRAD_TOL && isconverged(res)
-        # f and fdf! are not compared (that check and its bit, 1 << 10, are gone): an fdf! whose
+        # f and fdf! are not compared (that check and its termination bit are gone): an fdf! whose
         # cost is 1e-6 above f's away from the start runs to the gradient test. (callbackchangesstate
         # = true: the plain Newton variant scores the step with f and relinearizes with fdf!)
         f(x) = 0.5 * (x[1] - 1)^2
@@ -88,7 +88,6 @@ const Q6_NONFINITE = (TERMINATION_COST_INF, TERMINATION_COST_NAN, TERMINATION_ST
         _, res = optimize([0.0], objd, OptimizationOptions(iterator=:newton, gtol=1e-10, callbackchangesstate=true))
         @test res.termination == TERMINATION_GRAD_TOL && isconverged(res)
         @test !isdefined(SOO, :TERMINATION_COST_DISCREPANCY) && !isdefined(SOO, :COST_DISCREPANCY_RTOL)
-        @test all(x -> x[1] != 1 << 10, SOO.TERMINATION_REASONS)
         # a small gradient at a start with no finite cost (converged before Q6)
         objinf = HessianObjective(x -> Inf, (g, H, x) -> (g .= 0.0; H .= I(1); Inf))
         _, res = optimize([0.0], objinf, OptimizationOptions(gtol=1e-3))
@@ -164,7 +163,8 @@ const SCRIPTED_OBJ = JacobianObjective(scost, (r, J, x::Scripted) -> (c = scost(
     @test OptimizationOptions(maxstall=7).maxstall == 7
     @test_throws MethodError OptimizationOptions(maxfails=3)
     @test !hasfield(typeof(OptimizationOptions()), :maxfails)
-    @test TERMINATION_STALLED == 1 << 15 && TERMINATION_STALLED in [x[1] for x in SOO.TERMINATION_REASONS]
+    # The stalled bit is the highest termination bit, below the callback's flags (16 and up)
+    @test TERMINATION_STALLED == maximum(x[1] for x in SOO.TERMINATION_REASONS) && TERMINATION_STALLED < 1 << 16
 
     @testset "isconverged with the stalled bit" begin
         @test q6conv(TERMINATION_STALLED)

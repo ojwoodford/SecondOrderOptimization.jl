@@ -9,7 +9,7 @@ problem to [`optimize`](@ref) in two ways:
   Jacobian $J$. The optimizer then solves each step by a QR factorization of $J$ and never forms
   $J^\top J$.
 
-Both give the same iterations, with any iterator but `:gradientdescent`. They differ in how
+Both give the same iterations, with any iterator. They differ in how
 accurately each step is solved, and in what that accuracy costs. With a `JacobianObjective` the
 model Hessian is $J^\top J$, so `iterator = :newton` is Gauss-Newton.
 
@@ -121,12 +121,12 @@ shift the diagonal.
 | integer `m ≥ 1`, or `Matrix{Float64}` (`m × n`) | dense QR of `J`; static QR when `x0` has a static size and `m·n ≤ 48` | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
 | `SparseMatrixCSC{Float64, Int}` | sparse QR of `J` (SPQR) | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
 | `SchurBlockJacobian{Float64, Matrix{Float64}}` (with BlockLinearSystems.jl) | QR elimination, dense reduced system | `:auto`, `:qr` (QR of the reduced Jacobian); `:cholesky`, `:ldl` (factor its normal equations); `:lsmr` (with Krylov.jl) |
-| `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}` (with BlockLinearSystems.jl) | QR elimination, sparse reduced system | `:auto`, `:cholesky` (sparse Cholesky of the reduced normal equations, falling back to LDLᵀ); `:ldl`; `:lsmr` (with Krylov.jl) |
+| `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}` (with BlockLinearSystems.jl) | QR elimination, sparse reduced system | `:auto`, `:qr` (sparse QR of the reduced Jacobian, SPQR); `:cholesky` (sparse Cholesky of the reduced normal equations, falling back to LDLᵀ), `:ldl`; `:lsmr` (with Krylov.jl) |
 
-Every row takes `iterator = :levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg` or `:newton`
-(Gauss-Newton). Everything else is rejected with an `ArgumentError` before `f` or `resjac!` is
-called: any other prototype type, element type or index type; `iterator = :gradientdescent`, which
-uses only the gradient $J^\top r$ and gains nothing from the Jacobian form; and any other `linsolver`.
+Every row takes every iterator: `:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg`, `:newton`
+(Gauss-Newton) and `:gradientdescent`, which uses only the gradient $J^\top r$ and never solves the
+linear system. Everything else is rejected with an `ArgumentError` before `f` or `resjac!` is called:
+any other prototype type, element type or index type, and any other `linsolver`.
 
 With `linsolver = :lsmr` each damped step is solved iteratively by LSMR on $J$ (dense or sparse):
 the damping enters as LSMR's regularization parameter and the Marquardt scaling as its

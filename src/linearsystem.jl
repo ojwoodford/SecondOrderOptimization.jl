@@ -1,5 +1,3 @@
-using StaticArrays, Static, SparseArrays, LinearAlgebra
-
 @enum SolveStatus Success NotPositiveDefinite Indefinite
 @enum OptimizationLinearSolver auto_solver cholesky_solver ldl_solver qr_solver
 
@@ -191,6 +189,10 @@ static linear system: when `nvars(x0)` is a static size (as for a `Number`, a `S
 tuple of them) of at most [`MAX_STATIC_SYSTEM`](@ref). Otherwise the system is dense, of size
 `nvars(x0)`. The rule does not depend on `linsolver`.
 """
+# NLLSModel has its own rule for when to build a static single-variable Hessian. It is deliberately
+# not shared: neither package depends on the other except weakly (decided 2026-11-16). The two rules
+# may differ; when they do, the Hessian is converted to the system's storage, which costs a copy, not
+# correctness.
 usesstaticsystem(x0) = isstaticsize(nvars(x0))
 
 # For a static `nv` this is resolved at compile time, so `makelinearsystem` is type stable
@@ -209,6 +211,12 @@ getb(ls::AbstractLinearSystem) = ls.b
 getx(ls::AbstractLinearSystem) = ls.x
 
 getgrad(ls::AbstractLinearSystem) = getb(ls)
+
+# Whether every stored value of the system's matrix is finite. The iterators ask after a failed solve:
+# damping cannot repair a non-finite matrix, so they stop retrying (each system type has a method).
+isfinitesystem(ls::Union{StaticLinearSystem, DenseLinearSystem}) = all(isfinite, ls.A)
+isfinitesystem(ls::SparseLinearSystem) = all(isfinite, nonzeros(ls.A))
+
 gethessian(ls::AbstractLinearSystem) = getA(ls)
 gethessgrad(ls::AbstractLinearSystem) = gethessian(ls), getgrad(ls)
 

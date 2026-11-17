@@ -6,11 +6,11 @@ module BlockLinearSystemsExt
 using SecondOrderOptimization
 import SecondOrderOptimization: OptimizationLinearSolver
 import SecondOrderOptimization: AbstractLinearSystem, solve!, dampen!, sharex, getA, getb, getx, SolveStatus, Success, NotPositiveDefinite, Indefinite, makelinearsystem, max_diag, updatescaling!, AnyMarquardtData, is_indefinite
-import SecondOrderOptimization: AbstractTallLinearSystem, TallLinearize, DenseLDLWorkspace, is_indefinite_packed, solvermismatch, make_reduced, solve_reduced!
+import SecondOrderOptimization: AbstractTallLinearSystem, TallLinearize, DenseLDLWorkspace, is_indefinite_packed, solvermismatch, make_reduced, solve_reduced!, SPQRWorkspace, spqr_solve!
 import SecondOrderOptimization.LDLFactorizations: ldl_analyze, ldl_factorize!, factorized
 import BlockLinearSystems
-import BlockLinearSystems: SchurBlockJacobian, QRReductionWorkspace, reduce_qr!, reduced_nrows, reduced_jacobian!, reduced_normal_dense!, reduced_normal_sparse!, free_block_pairs, jtj_diag!, jtj_quadform
-import BlockLinearSystems: SchurBlockMatrix, SchurReductionWorkspace, SparseBlockLinearSystem, reset_schur_dense!, reset_schur_sparse!, reduce_schur_dense!, reduce_schur_sparse!, backsubstitute!, build_schur_pattern, build_r_to_s_map, retained_block_pairs, trial_workspace
+import BlockLinearSystems: SchurBlockJacobian, QRReductionWorkspace, reduce_qr!, reduced_nrows, reduced_jacobian!, build_reduced_jacobian_pattern, reduced_normal_dense!, reduced_normal_sparse!, free_block_pairs, jtj_diag!, jtj_quadform
+import BlockLinearSystems: SchurBlockHessian, SchurReductionWorkspace, SparseBlockLinearSystem, reset_schur_dense!, reset_schur_sparse!, reduce_schur_dense!, reduce_schur_sparse!, backsubstitute!, build_schur_pattern, build_r_to_s_map, retained_block_pairs, trial_workspace
 using LinearAlgebra, SparseArrays, Static
 
 # `linsolver` names the solver for the reduced system S. Only these are implemented for it; any other
@@ -19,7 +19,7 @@ const REDUCED_SOLVERS = (:auto, :cholesky, :ldl)
 const ReducedSolver = Union{StaticSymbol{:auto}, StaticSymbol{:cholesky}, StaticSymbol{:ldl}}
 function check_reduced_solver(linsolver)
     sym = SecondOrderOptimization.linsolver_symbol(linsolver)
-    sym in REDUCED_SOLVERS || throw(ArgumentError("linsolver = :$sym is not implemented for the reduced system of a SchurBlockMatrix Hessian; use :auto or :cholesky (Cholesky, falling back to Bunch-Kaufman) or :ldl (Bunch-Kaufman)."))
+    sym in REDUCED_SOLVERS || throw(ArgumentError("linsolver = :$sym is not implemented for the reduced system of a SchurBlockHessian; use :auto or :cholesky (Cholesky, falling back to Bunch-Kaufman) or :ldl (Bunch-Kaufman)."))
     return nothing
 end
 
@@ -29,7 +29,7 @@ end
 Linear system solving bipartite normal equations via dense Schur reduction.
 """
 mutable struct DenseSchurLinearSystem{T} <: AbstractLinearSystem
-    H::SchurBlockMatrix{T, Matrix{T}}
+    H::SchurBlockHessian{T, Matrix{T}}
     b::Vector{T}
     x::Vector{T}
     b_r::SubArray{T, 1, Vector{T}, Tuple{UnitRange{Int}}, true}
@@ -38,6 +38,7 @@ mutable struct DenseSchurLinearSystem{T} <: AbstractLinearSystem
     x_e::SubArray{T, 1, Vector{T}, Tuple{UnitRange{Int}}, true}
     g_S::Vector{T}
     S::Matrix{T}
+    ldl::DenseLDLWorkspace            # Bunch-Kaufman of S, for :ldl and when Cholesky fails (Float64: checkhessian)
     lambda::T
     scaling::Vector{T}
     scaling_r::SubArray{T, 1, Vector{T}, Tuple{UnitRange{Int}}, true}
@@ -46,7 +47,7 @@ mutable struct DenseSchurLinearSystem{T} <: AbstractLinearSystem
 end
 
 function DenseSchurLinearSystem(
-    H::SchurBlockMatrix{T, Matrix{T}},
+    H::SchurBlockHessian{T, Matrix{T}},
     b::Vector{T}, x::Vector{T},
     scaling::Vector{T}=ones(T, length(b));
     nchunks::Int=0
@@ -66,10 +67,10 @@ function DenseSchurLinearSystem(
     S = zeros(T, nr, nr)
 
     K = nchunks > 0 ? nchunks : (isempty(H.structure.chunks) ? 1 : length(H.structure.chunks[1]))
-    ws = SchurReductionWorkspace{T}(H.structure, K; is_dense=true)
+    ws = SchurReductionWorkspace{T}(H.structure, K)
 
     return DenseSchurLinearSystem{T}(
-        H, b, x, b_r, b_e, x_r, x_e, g_S, S, zero(T), scaling, scaling_r, scaling_e, ws
+        H, b, x, b_r, b_e, x_r, x_e, g_S, S, DenseLDLWorkspace(nr), zero(T), scaling, scaling_r, scaling_e, ws
     )
 end
 
@@ -79,7 +80,7 @@ end
 Linear system solving bipartite normal equations via sparse Schur reduction, CHOLMOD sparse Cholesky, and LDL factorizations.
 """
 mutable struct SparseSchurLinearSystem{T, Ti, TL, TF, TC} <: AbstractLinearSystem
-    H::SchurBlockMatrix{T, SparseBlockLinearSystem{T}}
+    H::SchurBlockHessian{T, SparseBlockLinearSystem{T}}
     b::Vector{T}
     x::Vector{T}
     b_r::SubArray{T, 1, Vector{T}, Tuple{UnitRange{Int}}, true}
@@ -105,7 +106,7 @@ mutable struct SparseSchurLinearSystem{T, Ti, TL, TF, TC} <: AbstractLinearSyste
 end
 
 function SparseSchurLinearSystem(
-    H::SchurBlockMatrix{T, SparseBlockLinearSystem{T}},
+    H::SchurBlockHessian{T, SparseBlockLinearSystem{T}},
     b::Vector{T}, x::Vector{T},
     scaling::Vector{T}=ones(T, length(b));
     nchunks::Int=0,
@@ -149,7 +150,7 @@ function SparseSchurLinearSystem(
     g_S = zeros(T, nr)
 
     K = nchunks > 0 ? nchunks : (isempty(H.structure.chunks) ? 1 : length(H.structure.chunks[1]))
-    ws = SchurReductionWorkspace{T}(H.structure, K; is_dense=false, nnz_S=nnz(S))
+    ws = SchurReductionWorkspace{T}(H.structure, K)
 
     return SparseSchurLinearSystem{T, Ti, typeof(S_factor_ldl), typeof(S_factor), typeof(S_chol)}(
         H, b, x, b_r, b_e, x_r, x_e, g_S, S, S_factor, S_factor_ldl, S_chol,
@@ -186,7 +187,7 @@ function SecondOrderOptimization.dampen!(ls::Union{DenseSchurLinearSystem{T}, Sp
     return ls
 end
 
-function SecondOrderOptimization.max_diag(H::SchurBlockMatrix{T}) where T
+function SecondOrderOptimization.max_diag(H::SchurBlockHessian{T}) where T
     m = zero(T)
     if H.R isa Matrix
         for i in 1:H.structure.nr
@@ -214,67 +215,52 @@ function SecondOrderOptimization.max_diag(H::SchurBlockMatrix{T}) where T
 end
 
 SecondOrderOptimization.max_diag(ls::Union{DenseSchurLinearSystem, SparseSchurLinearSystem}) = SecondOrderOptimization.max_diag(ls.H)
+SecondOrderOptimization.isfinitesystem(ls::Union{DenseSchurLinearSystem, SparseSchurLinearSystem}) =
+    all(isfinite, ls.H.R isa Matrix ? ls.H.R : ls.H.R.data) && all(isfinite, ls.H.E_data) && all(isfinite, ls.H.C_data)
 
-function SecondOrderOptimization.updatescaling!(lmd::AnyMarquardtData, ls::DenseSchurLinearSystem{T}) where T
+# Marquardt scaling: the running maximum of |diag(H)|, with a non-finite entry counted as one, as the
+# other systems do. Only the retained diagonal is read differently for dense and sparse R.
+function SecondOrderOptimization.updatescaling!(lmd::AnyMarquardtData, ls::Union{DenseSchurLinearSystem{T}, SparseSchurLinearSystem{T}}) where T
     if lmd.lambda == 0
         lmd.lambda = 1e-6
     end
-    R = ls.H.R
-    E_data = ls.H.E_data
-    struct_info = ls.H.structure
-    nr = struct_info.nr
-    m = zero(T)
-
-    for i in 1:nr
-        @inbounds d = lmd.scaling[i] = max(lmd.scaling[i], abs(R[i, i]))
-        m = max(m, d)
-    end
-    for e in 1:struct_info.neblocks
-        eo = struct_info.eoffsets[e]
-        e_off = struct_info.boffsets_e[e]
-        de = Int(struct_info.e_dims[e])
+    st = ls.H.structure
+    m = scale_retained!(lmd.scaling, ls.H.R, st, zero(T))
+    for e in 1:st.neblocks
+        eo = st.eoffsets[e]
+        o = st.nr + st.boffsets_e[e] - 1
+        de = Int(st.e_dims[e])
         for i in 1:de
-            c_ii = E_data[eo + (i - 1)*(de + 1)]
-            @inbounds d = lmd.scaling[nr + e_off + i - 1] = max(lmd.scaling[nr + e_off + i - 1], abs(c_ii))
-            m = max(m, d)
+            m = scale_entry!(lmd.scaling, o + i, ls.H.E_data[eo + (i - 1) * (de + 1)], m)
         end
     end
     lmd.scaling .= max.(lmd.scaling, max(m * 1e-8, 1e-12))
 end
 
-function SecondOrderOptimization.updatescaling!(lmd::AnyMarquardtData, ls::SparseSchurLinearSystem{T}) where T
-    if lmd.lambda == 0
-        lmd.lambda = 1e-6
-    end
-    R_sys = ls.H.R
-    E_data = ls.H.E_data
-    struct_info = ls.H.structure
-    nr = struct_info.nr
-    m = zero(T)
+@inline function scale_entry!(scaling, k, h_kk::T, m) where T
+    val = abs(h_kk)
+    @inbounds d = scaling[k] = max(scaling[k], isfinite(val) ? val : one(T))
+    return max(m, d)
+end
 
-    for b in 1:struct_info.nrblocks
-        ptr = R_sys.indices[b, b]
-        db = Int(struct_info.r_dims[b])
-        bo = struct_info.boffsets_r[b]
-        if ptr > 0
-            for i in 1:db
-                b_ii = R_sys.data[ptr + (i - 1)*(db + 1)]
-                @inbounds d = lmd.scaling[bo + i - 1] = max(lmd.scaling[bo + i - 1], abs(b_ii))
-                m = max(m, d)
-            end
+function scale_retained!(scaling, R::Matrix, st, m)
+    for i in 1:st.nr
+        m = scale_entry!(scaling, i, R[i, i], m)
+    end
+    return m
+end
+
+function scale_retained!(scaling, R::SparseBlockLinearSystem, st, m)
+    for b in 1:st.nrblocks
+        ptr = R.indices[b, b]
+        ptr > 0 || continue
+        db = Int(st.r_dims[b])
+        bo = st.boffsets_r[b] - 1
+        for i in 1:db
+            m = scale_entry!(scaling, bo + i, R.data[ptr + (i - 1) * (db + 1)], m)
         end
     end
-    for e in 1:struct_info.neblocks
-        eo = struct_info.eoffsets[e]
-        e_off = struct_info.boffsets_e[e]
-        de = Int(struct_info.e_dims[e])
-        for i in 1:de
-            c_ii = E_data[eo + (i - 1)*(de + 1)]
-            @inbounds d = lmd.scaling[nr + e_off + i - 1] = max(lmd.scaling[nr + e_off + i - 1], abs(c_ii))
-            m = max(m, d)
-        end
-    end
-    lmd.scaling .= max.(lmd.scaling, max(m * 1e-8, 1e-12))
+    return m
 end
 
 function SecondOrderOptimization.zero!(ls::DenseSchurLinearSystem)
@@ -299,12 +285,12 @@ function build_reduced!(ls::DenseSchurLinearSystem)
     )
 end
 
+# Bunch-Kaufman of the upper triangle of S in place, in the system's preallocated workspace
 function solve_bunchkaufman!(ls::DenseSchurLinearSystem)
-    bk = bunchkaufman!(Symmetric(ls.S, :U); check=false)
-    issuccess(bk) || return NotPositiveDefinite
-    ldiv!(ls.x_r, bk, ls.g_S)
-    is_indefinite(bk) && return Indefinite
-    return Success
+    SecondOrderOptimization.sytrf_ws!(ls.S, ls.ldl) == 0 || return NotPositiveDefinite
+    copyto!(ls.x_r, ls.g_S)
+    LinearAlgebra.LAPACK.sytrs!('U', ls.S, ls.ldl.ipiv, ls.x_r)
+    return is_indefinite_packed(ls.S, ls.ldl.ipiv, 'U') ? Indefinite : Success
 end
 
 SecondOrderOptimization.solve!(ls::DenseSchurLinearSystem) = SecondOrderOptimization.solve!(ls, static(:auto))
@@ -329,7 +315,8 @@ function SecondOrderOptimization.solve!(ls::DenseSchurLinearSystem, solver_opt::
     status == Success || return status
 
     backsubstitute!(ls.x_e, ls.x_r, ls.H.structure, ls.H.C_data, ls.workspace)
-    return Success
+    # A non-finite R or C can pass the factorization; a non-finite solution does not
+    return all(isfinite, ls.x) ? Success : NotPositiveDefinite
 end
 SecondOrderOptimization.solve!(ls::DenseSchurLinearSystem, s::Symbol) = SecondOrderOptimization.solve!(ls, static(s))
 SecondOrderOptimization.solve!(ls::DenseSchurLinearSystem, s::OptimizationLinearSolver) = SecondOrderOptimization.solve!(ls, static(SecondOrderOptimization.linsolver_symbol(s)))
@@ -395,7 +382,8 @@ function SecondOrderOptimization.solve!(ls::SparseSchurLinearSystem, solver_opt:
     end
 
     backsubstitute!(ls.x_e, ls.x_r, ls.H.structure, ls.H.C_data, ls.workspace)
-    return Success
+    # A non-finite R or C can pass the factorization; a non-finite solution does not
+    return all(isfinite, ls.x) ? Success : NotPositiveDefinite
 end
 SecondOrderOptimization.solve!(ls::SparseSchurLinearSystem, s::Symbol) = SecondOrderOptimization.solve!(ls, static(s))
 SecondOrderOptimization.solve!(ls::SparseSchurLinearSystem, s::OptimizationLinearSolver) = SecondOrderOptimization.solve!(ls, static(SecondOrderOptimization.linsolver_symbol(s)))
@@ -403,7 +391,7 @@ SecondOrderOptimization.solve!(ls::SparseSchurLinearSystem, s::OptimizationLinea
 # `quadratic_model_change` is intentionally not specialised: SecondOrderOptimization's generic method
 # (0.5 * quadform(getA(ls), dx) + fast_dot(getb(ls), dx)) is the undamped model change. Its quadratic
 # form falls back to LinearAlgebra.dot(dx, H, dx), which BlockLinearSystems defines for a
-# SchurBlockMatrix. (An earlier override added the damping term with the wrong sign, and used a
+# SchurBlockHessian. (An earlier override added the damping term with the wrong sign, and used a
 # damping value the iterators have already reset to zero when a step is scored.)
 
 function SecondOrderOptimization.copy_structure(ls::DenseSchurLinearSystem{T}) where T
@@ -417,7 +405,7 @@ function SecondOrderOptimization.copy_structure(ls::DenseSchurLinearSystem{T}) w
         BlockLinearSystems.copy_structure(ls.H), b, x,
         view(b, 1:nr), view(b, nr+1:length(b)),
         view(x, 1:nr), view(x, nr+1:length(x)),
-        similar(ls.g_S), similar(ls.S), ls.lambda, scaling,
+        similar(ls.g_S), similar(ls.S), DenseLDLWorkspace(nr), ls.lambda, scaling,
         view(scaling, 1:nr), view(scaling, nr+1:length(scaling)),
         ws_trial
     )
@@ -455,7 +443,7 @@ function SecondOrderOptimization.sharex(ls::DenseSchurLinearSystem{T}, from) whe
         ls.H, ls.b, x,
         ls.b_r, ls.b_e,
         view(x, 1:nr), view(x, nr+1:length(x)),
-        ls.g_S, ls.S, ls.lambda, ls.scaling,
+        ls.g_S, ls.S, ls.ldl, ls.lambda, ls.scaling,
         ls.scaling_r, ls.scaling_e,
         ls.workspace
     )
@@ -478,10 +466,10 @@ function SecondOrderOptimization.sharex(ls::SparseSchurLinearSystem{T, Ti, TL, T
     )
 end
 
-# The full matrix [R C'; C E] a SchurBlockMatrix represents, read and written as a dense matrix (for
+# The full matrix [R C'; C E] a SchurBlockHessian represents, read and written as a dense matrix (for
 # check_linear_system). R is a dense Matrix, or a SparseBlockLinearSystem storing the lower-triangle
 # blocks; each E_e is stored column-major; each C_er (eliminated rows, retained columns) column-major.
-function schur_blocks(f, H::SchurBlockMatrix)
+function schur_blocks(f, H::SchurBlockHessian)
     st = H.structure
     rrange(r) = st.boffsets_r[r]:(st.boffsets_r[r] + Int(st.r_dims[r]) - 1)
     erange(e) = st.nr + st.boffsets_e[e] .+ (0:Int(st.e_dims[e]) - 1)
@@ -502,7 +490,7 @@ function schur_blocks(f, H::SchurBlockMatrix)
     end
     return nothing
 end
-function SecondOrderOptimization.conformance_matrix(H::SchurBlockMatrix)
+function SecondOrderOptimization.conformance_matrix(H::SchurBlockHessian)
     n = H.structure.nr + sum(Int, H.structure.e_dims; init=0)
     M = zeros(n, n)
     schur_blocks(H) do blk, rows, cols
@@ -511,12 +499,12 @@ function SecondOrderOptimization.conformance_matrix(H::SchurBlockMatrix)
     end
     return M
 end
-function SecondOrderOptimization.conformance_fill!(H::SchurBlockMatrix, M::AbstractMatrix)
+function SecondOrderOptimization.conformance_fill!(H::SchurBlockHessian, M::AbstractMatrix)
     schur_blocks((blk, rows, cols) -> (blk .= view(M, rows, cols)), H)
     return H
 end
 
-function SecondOrderOptimization.makelinearsystem(x0, H::SchurBlockMatrix{T}, linsolver) where T
+function SecondOrderOptimization.makelinearsystem(x0, H::SchurBlockHessian{T}, linsolver) where T
     nr = H.structure.nr
     ne = sum(Int, H.structure.e_dims; init=0)
     tot = nr + ne
@@ -529,6 +517,22 @@ function SecondOrderOptimization.makelinearsystem(x0, H::SchurBlockMatrix{T}, li
     pattern = hasfield(typeof(H), :pattern) ? H.pattern : nothing
     return H.R isa SparseBlockLinearSystem ? SparseSchurLinearSystem(H, b, x; pattern) : DenseSchurLinearSystem(H, b, x)
 end
+
+# The prototype's checks and workspace key. The optimizer works in Float64 (as the Jacobian path's
+# `checkjacobian` requires of a SchurBlockJacobian), so another element type is rejected before any work.
+function SecondOrderOptimization.checkhessian(x0, H::SchurBlockHessian{T}) where T
+    T === Float64 || throw(ArgumentError("The Hessian prototype must be Float64; got a $(typeof(H))."))
+    return SecondOrderOptimization.checkhessiansize(x0, H)
+end
+# As on the Jacobian path, a workspace is reused for an H of the same type (which carries the reduced
+# system's storage) and the same (identical) structure.
+function SecondOrderOptimization.checkhessiansize(x0, H::SchurBlockHessian)
+    n = dynamic(SecondOrderOptimization.nvars(x0))
+    m = H.structure.nr + sum(Int, H.structure.e_dims; init=0)
+    n == m || throw(DimensionMismatch("Hessian prototype H is a SchurBlockHessian of $m variables, but the variables have $n degrees of freedom."))
+    return nothing
+end
+SecondOrderOptimization.h_structure_key(H::SchurBlockHessian) = (:schurhessian, typeof(H), H.structure)
 
 # QR elimination on the Jacobian path
 include("BlockLinearSystemsExt/qrelimination.jl")
