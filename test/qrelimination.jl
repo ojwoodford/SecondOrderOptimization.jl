@@ -158,6 +158,19 @@ function tp3_warm_bytes(p, ::Type{RT}, opts) where RT
     return tp3_run(x, obj, opts, ws)
 end
 
+# LP1: the TP3 problem with the retained columns of each block scaled by powers of ten from 1e-2 to 1e2
+function tp3_scaled_problem(; seed = 1)
+    p = TP3Problem(tp3_structure(); seed)
+    st = p.jst.schur
+    for r in 1:st.nrblocks
+        dr = Int(st.r_dims[r])
+        for k in 1:dr
+            p.V[:, st.boffsets_r[r] + k - 1] .*= exp10(-2 + 4 * (k - 1) / (dr - 1))
+        end
+    end
+    return p
+end
+
 @testset "qrelimination.jl" begin
 
     @testset "TP6: :qr on a sparse reduced system equals the dense one's, under-determined block = $under" for under in (false, true)
@@ -280,5 +293,12 @@ end
         data1 = wsany.data[1]
         optimize(fill(0.1, p2.lay.n), tp3_objective(p2, Matrix{Float64}), opts; workspace = wsany)
         @test wsany.data[1] !== data1
+    end
+    @testset "LM with :lsmr takes :qr's iterations on a badly scaled problem (LP1): $RT, :$it" for RT in keys(TP3_SOLVERS), it in (:levenbergmarquardt, :levenbergmarquardt_dtd)
+        p = tp3_scaled_problem()
+        runs = Dict(s => optimize(fill(0.1, p.lay.n), tp3_objective(p, RT), OptimizationOptions(; iterator = it, linsolver = s, maxiters = 200))[2] for s in (:qr, :lsmr))
+        @test isconverged(runs[:qr]) && isconverged(runs[:lsmr])
+        @test abs(runs[:lsmr].niterations - runs[:qr].niterations) <= 1
+        @test runs[:lsmr].bestcost <= runs[:qr].bestcost * (1 + 1e-8) + 1e-20
     end
 end
