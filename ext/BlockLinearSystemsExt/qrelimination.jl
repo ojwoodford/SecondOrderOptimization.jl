@@ -64,12 +64,10 @@ function SecondOrderOptimization.max_diag(A::SchurJacobianHessian)
     return md
 end
 
-function (t::TallLinearize)(g::AbstractVector, A::SchurJacobianHessian, x)
-    cost = t.resjac!(A.r, A.J, x)
-    BlockLinearSystems.jtr!(g, A.J)
-    SecondOrderOptimization.markstale!(A)
-    return cost
-end
+# The storage the linearization writes (the tables, which hold J and r, and an empty r), and the gradient
+SecondOrderOptimization.getJ(A::SchurJacobianHessian) = A.J
+SecondOrderOptimization.getr(A::SchurJacobianHessian) = A.r
+SecondOrderOptimization.gradient!(g::AbstractVector, A::SchurJacobianHessian) = BlockLinearSystems.jtr!(g, A.J)
 
 # The reduced solvers' storage, built once by `make_reduced` (the Krylov extension adds :lsmr's)
 struct DenseQRReduced
@@ -166,15 +164,12 @@ end
 SecondOrderOptimization.isfinitesystem(ls::QRSchurLinearSystem) = all(isfinite, ls.A.J.data)   # the tables hold J and r
 
 SecondOrderOptimization.tall_linearsystem(J::SchurBlockJacobian{Float64}, n, linsolver) = QRSchurLinearSystem(J, linsolver)
-SecondOrderOptimization.workspace_tall_linearsystem(J::SchurBlockJacobian{Float64, RType}, n, linsolver) where RType =
-    QRSchurLinearSystem(SchurBlockJacobian{Float64, RType}(copy(J.data), J.structure), linsolver)
+# A workspace's own copy of the prototype
+SecondOrderOptimization.workspace_prototype(J::SchurBlockJacobian{Float64, RType}) where RType = SchurBlockJacobian{Float64, RType}(copy(J.data), J.structure)
 
 SecondOrderOptimization.zero!(ls::QRSchurLinearSystem) = (fill!(ls.b, 0.0); SecondOrderOptimization.markstale!(ls.A); ls)
-function SecondOrderOptimization.initjacobian!(ls::QRSchurLinearSystem, P::SchurBlockJacobian)
-    ls.A.J === P || copyto!(ls.A.J.data, P.data)
-    SecondOrderOptimization.markstale!(ls.A)
-    return ls
-end
+# A reused workspace's tables have the prototype's structure, so only the values are set
+SecondOrderOptimization.copyprototype!(J::SchurBlockJacobian, P::SchurBlockJacobian) = copyto!(J.data, P.data)
 
 # The trial system: its own tables (with the same entries), factored tables and gradient; the reduced solver's
 # storage and the scratch are shared, since only one of the two is solved at a time

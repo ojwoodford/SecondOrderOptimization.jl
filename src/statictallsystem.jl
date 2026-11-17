@@ -38,6 +38,8 @@ StaticTallHessian(J::MMatrix{M, N}) where {M, N} = StaticTallHessian(J, zeros(MV
 Base.size(A::StaticTallHessian{M, N}) where {M, N} = (N, N)
 Base.size(A::StaticTallHessian, d::Integer) = size(A)[d]
 markstale!(A::StaticTallHessian) = (A.stale[] = true; A.normsstale[] = true; A)
+getJ(A::StaticTallHessian) = A.J
+getr(A::StaticTallHessian) = A.r
 
 function jmul!(y::AbstractVector, J::MMatrix, v::AbstractVector)
     m, n = size(J)
@@ -122,8 +124,6 @@ isfinitesystem(ls::StaticTallLinearSystem) = all(isfinite, ls.A.J) && all(isfini
 StaticTallLinearSystem(J::Matrix{Float64}) = StaticTallLinearSystem(MMatrix{size(J, 1), size(J, 2), Float64}(J))
 
 zero!(ls::StaticTallLinearSystem) = (fill!(ls.b, 0.0); markstale!(ls.A); ls)
-initjacobian!(ls::StaticTallLinearSystem, ::Integer) = (fill!(ls.A.J, 0.0); markstale!(ls.A); ls)
-initjacobian!(ls::StaticTallLinearSystem, P::Matrix{Float64}) = (copyto!(ls.A.J, P); markstale!(ls.A); ls)
 
 function copy_structure(ls::StaticTallLinearSystem{M, N, MN, K, KN}) where {M, N, MN, K, KN}
     return StaticTallLinearSystem{M, N, MN, K, KN}(StaticTallHessian(copy(ls.A.J)), zeros(MVector{N, Float64}), ls.x,
@@ -132,12 +132,7 @@ end
 sharex(ls::StaticTallLinearSystem{M, N, MN, K, KN}, from) where {M, N, MN, K, KN} = ls.x === from.x ? ls :
     StaticTallLinearSystem{M, N, MN, K, KN}(ls.A, ls.b, from.x, ls.R, ls.q, ls.nonfinite, ls.lambda, ls.scaling)
 
-function (t::TallLinearize)(g::AbstractVector, A::StaticTallHessian, x)
-    cost = t.resjac!(A.r, A.J, x)
-    jtr!(g, A.J, A.r)
-    markstale!(A)
-    return cost
-end
+gradient!(g::AbstractVector, A::StaticTallHessian) = jtr!(g, A.J, A.r)
 
 # R and q = (Qᵀr)[1:K] from the thin QR of J
 function factor_static!(ls::StaticTallLinearSystem{M, N, MN, K}) where {M, N, MN, K}

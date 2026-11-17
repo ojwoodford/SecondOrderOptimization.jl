@@ -48,9 +48,53 @@ jacobian_structure(J) = JacobianStructureKey(nresiduals_of(J))
 jacobian_structure(J::SparseMatrixCSC) = SparseJacobianPattern(J)
 linearizer(obj::HessianObjective) = obj.fdf!
 linearizer(obj::JacobianObjective) = TallLinearize(obj.resjac!)
+
+# How the iterators and the outer loop drive a tall system unchanged: they call
+# `fdf!(getb(ls), getA(ls), x)`, and this wrapper turns that into `resjac!(r, J, x)` on the storage's
+# J and r, then has the storage form g = Jᵀr and invalidate what it computed from the old J and r
+struct TallLinearize{RJ}
+    resjac!::RJ
+end
+function (t::TallLinearize)(g::AbstractVector, A, x)
+    cost = t.resjac!(getr(A), getJ(A), x)
+    gradient!(g, A)
+    markstale!(A)
+    return cost
+end
+
 # What a run with a reused workspace must set up before it starts: for a JacobianObjective, the
 # Jacobian storage (see `initjacobian!`)
 initlinearization!(cached, obj::HessianObjective) = nothing
+function initlinearization!(cached::Tuple, obj::JacobianObjective)
+    data, iteratedata = cached
+    initjacobian!(data.linsystem, obj.J)
+    initjacobian!(trialsystem(iteratedata), obj.J)
+    return nothing
+end
+
+# The start of a run with a reused workspace. Every J the run uses (the main system's, and the
+# trial system's if the iterator has one) must start as the J a fresh run would: the prototype as
+# handed, or zeros for an integer m. A cached J holds the previous run's entries, so it is set
+# from the prototype (never written itself). r needs nothing: resjac! sets every entry.
+initjacobian!(::Nothing, J) = nothing
+initjacobian!(::Nothing, ::Integer) = nothing
+function initjacobian!(ls, ::Integer)
+    A = getA(ls)
+    fill!(getJ(A), 0.0)
+    markstale!(A)
+    return ls
+end
+function initjacobian!(ls, P)
+    A = getA(ls)
+    J = getJ(A)
+    J === P || copyprototype!(J, P)
+    markstale!(A)
+    return ls
+end
+# A reused workspace's J has the prototype's pattern (the workspace key checks it), so for a sparse J
+# only the values are set
+copyprototype!(J, P) = copyto!(J, P)
+copyprototype!(J::SparseMatrixCSC, P::SparseMatrixCSC) = copyto!(nonzeros(J), nonzeros(P))
 
 # The iterator's spare linear system, for reusing the trial linearization, or `nothing`. An
 # iterator data type that holds one must have a method, so that whatever prepares a run's systems
@@ -59,10 +103,13 @@ trialsystem(iteratedata) = nothing
 trialsystem(lmd::LevenbergDataTrial) = lmd.trial
 trialsystem(lmd::MarquardtDataTrial) = lmd.trial
 trialsystem(dd::DoglegData) = dd.trial          # nothing when callbackchangesstate = true
-# The system a workspace caches. For a JacobianObjective with a Matrix prototype it owns its
-# Jacobian storage (a copy of the prototype), so that a later run with another prototype never
-# writes into this one's (see `workspace_linearsystem` in tallsystem.jl)
+# The system a workspace caches. For a JacobianObjective it owns its Jacobian storage, a copy of the
+# prototype: were it the prototype itself, a later run with another prototype would set this one's
+# contents, and a run handed this prototype again would start from the other's.
 workspace_linearsystem(x, obj::HessianObjective, linsolver) = objective_linearsystem(x, obj, linsolver)
+workspace_linearsystem(x, obj::JacobianObjective, linsolver) = tall_linearsystem(workspace_prototype(obj.J), systemsize(x), linsolver)
+workspace_prototype(J) = copy(J)
+workspace_prototype(m::Integer) = m
 
 # Runs on `x` (updated in place when it is mutable) and returns `(x, result)`
 function optimize_internal!(x, obj::AnyObjective, options::OptimizationOptions, callback::CB, workspace::WS, startstats::Stats) where {CB, WS}

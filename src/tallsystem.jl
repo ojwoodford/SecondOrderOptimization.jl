@@ -99,6 +99,10 @@ TallHessian(J::Matrix{Float64}) = TallHessian(J, zeros(size(J, 1)), zeros(size(J
 Base.size(A::TallHessian) = (size(A.J, 2), size(A.J, 2))
 Base.size(A::TallHessian, d::Integer) = size(A)[d]
 markstale!(A::TallHessian) = (A.ws.stale = true; A.ws.normsstale = true; A)
+# The storage the linearization writes, J and r, and the gradient Jᵀr it then forms
+getJ(A::TallHessian) = A.J
+getr(A::TallHessian) = A.r
+gradient!(g::AbstractVector, A::TallHessian) = jtr!(g, A.J, A.r)
 
 # y = J v, one scaled column at a time: a plain loop, not BLAS gemv, so that per-cost work stays
 # single-threaded (rules.md 23). The first column is written, not added, so y needs no zeroing.
@@ -276,31 +280,6 @@ function zero!(ls::DenseTallLinearSystem)
     return ls
 end
 
-# A workspace's system owns its Jacobian storage: a copy of a Matrix prototype. Were it the
-# prototype itself, a later run with another prototype would set this one's contents, and a run
-# handed this prototype again would start from the other's.
-workspace_linearsystem(x0, obj::JacobianObjective, linsolver) = workspace_tall_linearsystem(obj.J, systemsize(x0), linsolver)
-workspace_tall_linearsystem(m::Integer, n, linsolver) = tall_linearsystem(m, n, linsolver)
-workspace_tall_linearsystem(J::Matrix{Float64}, n, linsolver) = tall_linearsystem(copy(J), n, linsolver)
-
-# The start of a run with a reused workspace. Every J the run uses (the main system's, and the
-# trial system's if the iterator has one) must start as the J a fresh run would: the prototype as
-# handed, or zeros for an integer m. A cached J holds the previous run's entries, so it is set
-# from the prototype (never written itself). r needs nothing: resjac! sets every entry.
-initjacobian!(ls::DenseTallLinearSystem, ::Integer) = (fill!(ls.A.J, 0.0); markstale!(ls.A); ls)
-function initjacobian!(ls::DenseTallLinearSystem, P::Matrix{Float64})
-    ls.A.J === P || copyto!(ls.A.J, P)
-    markstale!(ls.A)
-    return ls
-end
-initjacobian!(ls, J) = ls
-function initlinearization!(cached::Tuple, obj::JacobianObjective)
-    data, iteratedata = cached
-    initjacobian!(data.linsystem, obj.J)
-    initjacobian!(trialsystem(iteratedata), obj.J)
-    return nothing
-end
-
 # The trial system starts from the same J (its unwritten entries must match the main system's),
 # and shares the factorization scratch: its own J, r, b, stale flags and column norms, so it costs
 # one more J, not two
@@ -311,18 +290,6 @@ function copy_structure(ls::DenseTallLinearSystem)
     return DenseTallLinearSystem(At, zeros(length(ls.b)), ls.x, ls.solver_ws, ls.lambda, ls.scaling)
 end
 sharex(ls::DenseTallLinearSystem, from) = ls.x === from.x ? ls : DenseTallLinearSystem(ls.A, ls.b, from.x, ls.solver_ws, ls.lambda, ls.scaling)
-
-# How the iterators and the outer loop drive the tall system unchanged: they call
-# `fdf!(getb(ls), getA(ls), x)`, and this wrapper turns that into `resjac!(r, J, x)` and g = Jᵀr
-struct TallLinearize{RJ}
-    resjac!::RJ
-end
-function (t::TallLinearize)(g::AbstractVector, A::TallHessian, x)
-    cost = t.resjac!(A.r, A.J, x)
-    jtr!(g, A.J, A.r)
-    markstale!(A)
-    return cost
-end
 
 # QR of [J r]; afterwards Jr[1:k, 1:n] holds R (upper trapezoidal) and Jr[1:k, n+1] holds
 # q = (Qᵀr)[1:k], with k = min(m, n)

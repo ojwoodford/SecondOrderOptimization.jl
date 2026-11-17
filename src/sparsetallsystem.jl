@@ -117,6 +117,8 @@ end
 Base.size(A::SparseTallHessian) = (size(A.J, 2), size(A.J, 2))
 Base.size(A::SparseTallHessian, d::Integer) = size(A)[d]
 markstale!(A::SparseTallHessian) = (A.ws.normsstale = true; A)
+getJ(A::SparseTallHessian) = A.J
+getr(A::SparseTallHessian) = A.r
 
 # The linearization changed J's stored entries if resjac! wrote outside the pattern (which
 # inserts entries): the augmented pattern SPQR analysed would no longer be J's
@@ -225,18 +227,9 @@ function SparseTallLinearSystem(J::SparseMatrixCSC{Float64, Int}; linsolver = :a
 end
 
 tall_linearsystem(J::SparseMatrixCSC{Float64, Int}, n, linsolver) = SparseTallLinearSystem(J; linsolver)
-workspace_tall_linearsystem(J::SparseMatrixCSC{Float64, Int}, n, linsolver) = SparseTallLinearSystem(copy(J); linsolver)
 isfinitesystem(ls::SparseTallLinearSystem) = all(isfinite, nonzeros(ls.A.J)) && all(isfinite, ls.A.r)
 
 zero!(ls::SparseTallLinearSystem) = (fill!(ls.b, 0.0); markstale!(ls.A); ls)
-
-# A reused workspace's J has the prototype's pattern (the workspace key checks it), so only the
-# values are set
-function initjacobian!(ls::SparseTallLinearSystem, P::SparseMatrixCSC{Float64, Int})
-    ls.A.J === P || copyto!(nonzeros(ls.A.J), nonzeros(P))
-    markstale!(ls.A)
-    return ls
-end
 
 # The trial system: its own J (same pattern and entries), r, b and column norms; the SPQR state
 # is shared
@@ -249,12 +242,10 @@ function copy_structure(ls::SparseTallLinearSystem)
 end
 sharex(ls::SparseTallLinearSystem, from) = ls.x === from.x ? ls : SparseTallLinearSystem(ls.A, ls.b, from.x, ls.solver_ws, ls.lambda, ls.scaling)
 
-function (t::TallLinearize)(g::AbstractVector, A::SparseTallHessian, x)
-    cost = t.resjac!(A.r, A.J, x)
+# The gradient Jᵀr, after checking that the linearization kept J's pattern
+function gradient!(g::AbstractVector, A::SparseTallHessian)
     checkpattern(A)
-    jtr!(g, A.J, A.r)
-    markstale!(A)
-    return cost
+    return jtr!(g, A.J, A.r)
 end
 
 function solve!(ls::SparseTallLinearSystem, ::Union{StaticSymbol{:auto}, StaticSymbol{:qr}})
