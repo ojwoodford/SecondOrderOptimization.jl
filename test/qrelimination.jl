@@ -217,6 +217,10 @@ end
 
 
     @testset "Every Jacobian iterator: $RT, :$s, :$it, callbackchangesstate = $ccs" for RT in keys(TP3_SOLVERS), s in TP3_SOLVERS[RT], it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton), ccs in (false, true)
+        # Every (prototype, solver, iterator) at ccs = false, the path that builds a trial system with
+        # copy_structure and swaps it with the live one; ccs = true, which uses a subset of those methods,
+        # with :auto only, for each prototype and iterator
+        ccs && s !== :auto && continue
         p = TP3Problem(tp3_structure())
         opts = OptimizationOptions(; iterator = it, linsolver = s, callbackchangesstate = ccs, maxiters = 200)
         _, rd = optimize(fill(0.1, p.lay.n), tp3_dense_objective(p), OptimizationOptions(; iterator = it, callbackchangesstate = ccs, maxiters = 200))
