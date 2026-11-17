@@ -150,6 +150,14 @@ function gd_fdf!(g, H, x)
 end
 
 @testset "IT2: :gradientdescent on a JacobianObjective" begin
+# No stall or cost-change stop, so both runs go on to the minimum (they end on the step size); the
+# number of iterations differs by rounding, so they are compared on cost (rules.md 31)
+strict = (; iterator = :gradientdescent, maxiters = 5000, stalltol = 0.0, reldcost = 0.0, absdcost = 0.0)
+# The HessianObjective reference is the same run in every cell: solved once per kind of x0
+reference_obj, reference_opts = HessianObjective(gd_f, gd_fdf!), OptimizationOptions(; strict...)
+reference = Dict(false => optimize(zeros(4), reference_obj, reference_opts),
+    true => optimize(zeros(SVector{4, Float64}), reference_obj, reference_opts))
+fmin = gd_f(TP5_V \ TP5_Y)
 @testset "$kind$(static ? " (static x0)" : ""), :$s" for kind in keys(TP5_TABLE), static in (false, true), s in TP5_TABLE[kind]
     static && kind !== :integer && kind !== :matrix && continue
     static && s === :lsmr && continue   # :lsmr has no static form; the static x0 runs the dense system
@@ -157,13 +165,9 @@ end
     proto = tp5_prototype(kind)
     layout = proto isa SchurBlockJacobian ? gd_layout(proto) : nothing
     obj = JacobianObjective(gd_f, (r, J, x) -> gd_resjac!(r, J, x, layout), proto)
-    # No stall or cost-change stop, so both runs go on to the minimum (they end on the step size); the
-    # number of iterations differs by rounding, so they are compared on cost (rules.md 31)
-    strict = (; iterator = :gradientdescent, maxiters = 5000, stalltol = 0.0, reldcost = 0.0, absdcost = 0.0)
     opts = OptimizationOptions(; strict..., linsolver = s)
     x, res = optimize(x0(), obj, opts)
-    xH, resH = optimize(x0(), HessianObjective(gd_f, gd_fdf!), OptimizationOptions(; strict...))
-    fmin = gd_f(TP5_V \ TP5_Y)
+    xH, resH = reference[static]
     @test isconverged(res) && isconverged(resH)
     @test abs(res.bestcost - resH.bestcost) <= 1e-13 * fmin
     @test abs(res.bestcost - fmin) <= 1e-13 * fmin
