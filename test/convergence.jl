@@ -1,5 +1,5 @@
 using SecondOrderOptimization, StaticArrays, LinearAlgebra, Static, Test
-include("termbits.jl")
+include("fixtures/termbits.jl")
 const SOO = SecondOrderOptimization
 
 # Q6: what counts as converged (isconverged), and the two-sided cost-change tests of optimizeloop!

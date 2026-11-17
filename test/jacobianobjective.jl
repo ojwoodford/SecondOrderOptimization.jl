@@ -1,6 +1,6 @@
 using SecondOrderOptimization, StaticArrays, SparseArrays, LinearAlgebra, Static, Random, Test
 using SecondOrderOptimization: LevenbergDataTrial, auto_solver, cholesky_solver, ldl_solver, qr_solver, dampen!, zero!, Success, NotPositiveDefinite   # internal names
-include("termbits.jl")
+include("fixtures/termbits.jl")
 const SOO = SecondOrderOptimization
 using SecondOrderOptimization: getA, getb, getx, solve!   # explicit: Krylov, loaded by other test files, also exports solve!
 

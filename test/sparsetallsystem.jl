@@ -3,7 +3,7 @@ import DampedLinearSolve
 using SecondOrderOptimization: dampen!, zero!, copy_structure, Success, NotPositiveDefinite, check_linear_system   # internal names
 using SecondOrderOptimization: getA, getb, getx, solve!   # explicit: Krylov, loaded by other test files, also exports solve!
 const SOO = SecondOrderOptimization
-include("termbits.jl")
+include("fixtures/termbits.jl")
 
 # TP1: the sparse tall system (a SparseMatrixCSC{Float64, Int} Jacobian, solved by SPQR) against
 # the dense tall system on the same J
