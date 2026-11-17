@@ -13,22 +13,12 @@ SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 Static = "aedffcd0-7271-4cad-89d0-dc628f76c6d3"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
-[weakdeps]
-BlockLinearSystems = "a7d4e89f-9c3b-4d0e-8f5a-5b8c7d1e4f28"
-Krylov = "ba0b0d4f-ebba-5204-a429-3ac8c609bfb7"
-
 [extras]
 BlockLinearSystems = "a7d4e89f-9c3b-4d0e-8f5a-5b8c7d1e4f28"
 
-[extensions]
-BlockLinearSystemsExt = "BlockLinearSystems"
-BlockLinearSystemsKrylovExt = ["BlockLinearSystems", "Krylov"]
-
 [compat]
-BlockLinearSystems = "0.2"
 DampedLinearSolve = "0.1"
 FastNorm = "0.2, 0.3"
-Krylov = "0.10"
 LinearAlgebra = "1.10"
 OptimizationVariableInterface = "0.3"
 Printf = "1.10"

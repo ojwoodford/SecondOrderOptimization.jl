@@ -3,7 +3,7 @@ using Polyester   # BlockLinearSystems' kernels thread only with Polyester loade
 using SecondOrderOptimization: dampen!, zero!, Success, NotPositiveDefinite, check_linear_system   # internal names
 using SecondOrderOptimization: getA, getb, getx, solve!
 const SOO = SecondOrderOptimization
-const QREXT = Base.get_extension(SecondOrderOptimization, :BlockLinearSystemsExt)
+const QREXT = Base.get_extension(BlockLinearSystems, :DampedLinearSolveExt)
 
 # TP3: QR elimination on the Jacobian path (a SchurBlockJacobian prototype), against the normal path's Schur
 # system and a dense least-squares solve of the same problem
@@ -159,33 +159,6 @@ function tp3_warm_bytes(p, ::Type{RT}, opts) where RT
 end
 
 @testset "qrelimination.jl" begin
-    @testset "Steps equal the Schur system's: $RT, under-determined block = $under" for RT in keys(TP3_SOLVERS), under in (false, true)
-        p = TP3Problem(tp3_structure(; under))
-        x = 0.1 .* randn(Xoshiro(2), p.lay.n)
-        lsS, Jd, rd = tp3_schur(p, x)
-        sc = 0.5 .+ rand(Xoshiro(3), p.lay.n)
-        for s in TP3_SOLVERS[RT]
-            ls = tp3_system(p, RT, s, x)
-            @test getb(ls) ≈ Jd' * rd rtol = 1e-12
-            @test SOO.quadform(getA(ls), x) ≈ norm(Jd * x)^2 rtol = 1e-12
-            @test SOO.max_diag(getA(ls)) ≈ maximum(sum(abs2, Jd; dims = 1)) rtol = 1e-12
-            for (lambda, scaling) in ((0.0, nothing), (0.3, nothing), (0.3, sc))
-                a = tp3_solve!(ls, s, lambda, scaling)
-                if under && lambda == 0
-                    # an under-determined block without damping is singular, as on the Schur path
-                    @test a == NotPositiveDefinite
-                    @test tp3_solve!(lsS, :cholesky, lambda, scaling) == NotPositiveDefinite
-                    continue
-                end
-                @test a == Success
-                @test tp3_solve!(lsS, :cholesky, lambda, scaling) == Success
-                xref = (Jd' * Jd + lambda * Diagonal(something(scaling, ones(p.lay.n)))) \ (Jd' * rd)
-                tol = s === :lsmr ? 1e-6 : 1e-10
-                @test getx(ls) ≈ getx(lsS) rtol = tol
-                @test getx(ls) ≈ xref rtol = tol
-            end
-        end
-    end
 
     @testset "TP6: :qr on a sparse reduced system equals the dense one's, under-determined block = $under" for under in (false, true)
         p = TP3Problem(tp3_structure(; under))
@@ -229,11 +202,6 @@ end
         end
     end
 
-    @testset "Meets the linear-system interface: $RT" for RT in keys(TP3_SOLVERS)
-        jst = tp3_structure()
-        n = jst.schur.nr + sum(jst.schur.e_dims)
-        @test isnothing(check_linear_system(s -> QREXT.QRSchurLinearSystem(SchurBlockJacobian{Float64, RT}(jst), s); n, linsolvers = TP3_SOLVERS[RT], rtol = 1e-6))
-    end
 
     @testset "Every Jacobian iterator: $RT, :$s, :$it, callbackchangesstate = $ccs" for RT in keys(TP3_SOLVERS), s in TP3_SOLVERS[RT], it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton), ccs in (false, true)
         p = TP3Problem(tp3_structure())

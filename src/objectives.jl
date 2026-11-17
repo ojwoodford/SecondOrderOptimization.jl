@@ -8,7 +8,8 @@ An objective given by its cost and by its gradient and Hessian, for [`optimize`]
 - `fdf!(g, H, x) -> cost` writes the gradient into `g` and the Hessian into `H` (both arrive
   zeroed), and returns the cost at `x`.
 - `H` is the Hessian prototype: `nothing` (a static or dense system sized from `x0`), a `Matrix`,
-  an `MMatrix`, a `SparseMatrixCSC`, or, with BlockLinearSystems.jl loaded, a `SchurBlockHessian`.
+  an `MMatrix`, a `SparseMatrixCSC`, or another package's prototype for which that package implements
+  DampedLinearSolve's linear-system contract (a `SchurBlockHessian`, for Schur-complement elimination).
   The type of `H` selects the linear system, including elimination for a `SchurBlockHessian`; the
   `linsolver` option then names the solver for that system.
 
@@ -80,12 +81,13 @@ dense Householder QR for a dense `J`, and SuiteSparse's sparse QR (SPQR) for a s
   matrix. A sparse prototype's stored entries are its pattern: `resjac!` must write only stored
   entries (through `nonzeros(J)`, or `J[i, j]` for a stored `(i, j)`). Writing any other entry
   inserts it, which changes the pattern, and the run throws an `ArgumentError`.
-- With BlockLinearSystems.jl loaded, `J` may also be a `SchurBlockJacobian{Float64, RType}`: the
-  variables are partitioned into retained and eliminated blocks, and each step eliminates the
-  eliminated blocks by QR (BlockLinearSystems' `reduce_qr!`), solves the reduced problem in the
-  retained variables and back-substitutes. `resjac!` writes the Jacobian blocks and the residuals
-  into `J`'s tables (BlockLinearSystems' `coupling_block`, `eliminated_block` and
-  `residual_block`); its `r` argument is then an empty vector. `RType`, `Matrix{Float64}` or
+- `J` may also be another package's prototype for which that package implements DampedLinearSolve's
+  linear-system contract, such as a `SchurBlockJacobian{Float64, RType}`: the variables are
+  partitioned into retained and eliminated blocks, and each step eliminates the eliminated blocks by
+  QR, solves the reduced problem in the retained variables and back-substitutes. `resjac!` writes
+  the Jacobian blocks and the residuals into `J`'s tables (through that package's
+  `coupling_block`, `eliminated_block` and `residual_block`); its `r` argument is then an empty
+  vector. `RType`, `Matrix{Float64}` or
   `SparseMatrixCSC{Float64, Int}`, is the storage of the reduced system. A prototype is the matrix `resjac!` writes
   into, with its values (a trial system, for `callbackchangesstate = false`, works on a copy
   made at the start of the run), except with an [`OptimizationWorkspace`](@ref): a workspace owns
@@ -102,8 +104,8 @@ that this holds.
 |:---|:---|:---|
 | integer `m ≥ 1`, or `Matrix{Float64}` (`m × n`) | dense QR of `J`; static QR when `x0` has a static size and `m·n ≤ 48` | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
 | `SparseMatrixCSC{Float64, Int}` | sparse QR of `J` (SPQR) | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
-| `SchurBlockJacobian{Float64, Matrix{Float64}}` (with BlockLinearSystems.jl) | QR elimination, dense reduced system | `:auto`, `:qr` (QR of the reduced Jacobian); `:cholesky`, `:ldl` (factor its normal equations); `:lsmr` (with Krylov.jl) |
-| `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}` (with BlockLinearSystems.jl) | QR elimination, sparse reduced system | `:auto`, `:qr` (sparse QR of the reduced Jacobian, SPQR); `:cholesky` (sparse Cholesky of the reduced normal equations, falling back to LDLᵀ), `:ldl`; `:lsmr` (with Krylov.jl) |
+| `SchurBlockJacobian{Float64, Matrix{Float64}}` (another package's) | QR elimination, dense reduced system | `:auto`, `:qr` (QR of the reduced Jacobian); `:cholesky`, `:ldl` (factor its normal equations); `:lsmr` (with Krylov.jl) |
+| `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}` (another package's) | QR elimination, sparse reduced system | `:auto`, `:qr` (sparse QR of the reduced Jacobian, SPQR); `:cholesky` (sparse Cholesky of the reduced normal equations, falling back to LDLᵀ), `:ldl`; `:lsmr` (with Krylov.jl) |
 
 Every row takes every iterator: `:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg`, `:newton`
 (Gauss-Newton) and `:gradientdescent`, which uses only the gradient `Jᵀr` and never solves the linear

@@ -1,7 +1,7 @@
 using SecondOrderOptimization, BlockLinearSystems, Krylov, Pardiso, StaticArrays, SparseArrays, LinearAlgebra, Random, Test
 import DampedLinearSolve
 const SOO = SecondOrderOptimization
-const CEXT = Base.get_extension(SecondOrderOptimization, :BlockLinearSystemsExt)
+const CEXT = Base.get_extension(BlockLinearSystems, :DampedLinearSolveExt)
 
 # TP5: the supported-combinations table of the JacobianObjective docstring and the Jacobian tutorial. Every
 # listed (prototype, linsolver, iterator) runs; every other one throws an ArgumentError before f or resjac!
