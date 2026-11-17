@@ -65,7 +65,7 @@ linear solver is chosen by the `linsolver` keyword, also as a symbol: `:auto`, `
 or `:qr`, and those the extensions below add.
 
 The linear systems and their solvers are those of
-[DampedLinearSolve.jl](https://ojwoodford.github.io/DampedLinearSolve.jl/stable/), on which this package is built: its
+[DampedLinearSolve.jl](https://ojwoodford.github.io/DampedLinearSolve.jl/dev/), on which this package is built: its
 documentation states the linear-system contract the iterators use, the solvers each system takes and
 how `:auto` chooses, and how to implement the contract for your own storage. `OptimizationOptions`
 validates `linsolver` by asking it.

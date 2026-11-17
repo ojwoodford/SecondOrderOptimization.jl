@@ -13,7 +13,7 @@ High-performance, zero-allocation second-order nonlinear optimization in Julia.
 
 - **Iterators**: Levenberg-Marquardt (`:levenbergmarquardt`, `:levenbergmarquardt_dtd`), Powell's Dogleg (`:dogleg`), undamped Newton (`:newton`), and backtracking Gradient Descent (`:gradientdescent`).
 - **Objectives**: a cost with its gradient and Hessian (`HessianObjective`), or, for least squares, a cost with its residual and Jacobian (`JacobianObjective`), whose steps are solved without forming `JᵀJ`.
-- **Linear Solvers**, from [DampedLinearSolve.jl](https://github.com/ojwoodford/DampedLinearSolve.jl) (its [documentation](https://ojwoodford.github.io/DampedLinearSolve.jl/stable/) states the linear-system contract and how each solver is chosen):
+- **Linear Solvers**, from [DampedLinearSolve.jl](https://github.com/ojwoodford/DampedLinearSolve.jl) (its [documentation](https://ojwoodford.github.io/DampedLinearSolve.jl/dev/) states the linear-system contract and how each solver is chosen):
   - *Built-in*: Cholesky (`:cholesky`), LDL / Bunch-Kaufman (`:ldl`, using `LDLFactorizations.jl` for sparse matrices), and QR (`:qr`, SuiteSparse's SPQR for sparse matrices), with automatic dispatch (`:auto`).
   - *Extensions*: Iterative Krylov subspace solvers via `Krylov.jl` (`:cg` and `:minres` for a Hessian, `:lsmr` on a Jacobian) and multi-threaded sparse direct factorizations (`:pardiso` via `Pardiso.jl`).
 - **Elimination**: with [`BlockLinearSystems.jl`](https://github.com/ojwoodford/BlockLinearSystems.jl) loaded, a `SchurBlockHessian` or `SchurBlockJacobian` prototype eliminates a block of the variables (by Schur complement, or by QR of the Jacobian) and solves a reduced system in the rest. The type of the prototype selects it; there is no option for it.
