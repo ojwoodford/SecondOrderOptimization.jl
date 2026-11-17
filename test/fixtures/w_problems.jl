@@ -1,3 +1,6 @@
+using SecondOrderOptimization, LinearAlgebra, Random
+using SecondOrderOptimization: getx, quadratic_model_change   # internal names
+
 # Both objectives of a least-squares problem: the HessianObjective forms the normal equations
 # from the same J
 function w_objectives(resid, jac, m, n)
@@ -65,7 +68,7 @@ function w_doglegtrace(pts::Vector{Vector{Float64}})
     prevΔ = Ref(NaN)
     cb = function (cost, x, data, dd)
         ls = data.linsystem
-        step = collect(getx(ls)); g = collect(SOO.getgrad(ls))
+        step = collect(getx(ls)); g = collect(SecondOrderOptimization.getgrad(ls))
         along = norm(step - dot(step, g) / dot(g, g) * g) <= 1e-12 * norm(step)
         kind = step == dd.newton ? :gaussnewton : along ? :gradient : :dogleg
         noise = 10eps() * abs(data.bestcost)

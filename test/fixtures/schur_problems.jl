@@ -1,3 +1,5 @@
+using Random, LinearAlgebra, SparseArrays, SecondOrderOptimization, BlockLinearSystems
+
 const SOOExt = Base.get_extension(BlockLinearSystems, :DampedLinearSolveExt)
 
 # rules.md 21: a warm kernel call allocates nothing, except that on Julia 1.10 a threaded call may allocate up to

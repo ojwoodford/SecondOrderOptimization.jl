@@ -1,3 +1,5 @@
+using SecondOrderOptimization, BlockLinearSystems, SparseArrays, LinearAlgebra, Static, Random
+using SecondOrderOptimization: dampen!, zero!, getA, getb, solve!   # internal names
 const QREXT = Base.get_extension(BlockLinearSystems, :DampedLinearSolveExt)
 
 # TP3: QR elimination on the Jacobian path (a SchurBlockJacobian prototype), against the normal path's Schur
@@ -103,14 +105,27 @@ function tp3_dense!(p::TP3Problem, rr, J::Matrix, x)
     end
     return tp3_cost(p, x)
 end
-tp3_objective(p, ::Type{RT}) where RT = JacobianObjective(x -> tp3_cost(p, x), (r, J, x) -> tp3_tables!(p, J, x), SchurBlockJacobian{Float64, RT}(p.jst))
-tp3_dense_objective(p) = JacobianObjective(x -> tp3_cost(p, x), (r, J, x) -> tp3_dense!(p, r, J, x), p.lay.m)
+# The problem functions handed to the objectives, as callable structs
+struct TP3Cost{P <: TP3Problem}
+    p::P
+end
+(c::TP3Cost)(x) = tp3_cost(c.p, x)
+struct TP3Tables{P <: TP3Problem}
+    p::P
+end
+(c::TP3Tables)(r, J, x) = tp3_tables!(c.p, J, x)
+struct TP3Dense{P <: TP3Problem}
+    p::P
+end
+(c::TP3Dense)(r, J, x) = tp3_dense!(c.p, r, J, x)
+tp3_objective(p, ::Type{RT}) where RT = JacobianObjective(TP3Cost(p), TP3Tables(p), SchurBlockJacobian{Float64, RT}(p.jst))
+tp3_dense_objective(p) = JacobianObjective(TP3Cost(p), TP3Dense(p), p.lay.m)
 
 # A system linearized at x
 function tp3_system(p, ::Type{RT}, s, x) where RT
     ls = QREXT.QRSchurLinearSystem(SchurBlockJacobian{Float64, RT}(p.jst), s)
     zero!(ls)
-    SOO.TallLinearize((r, J, x) -> tp3_tables!(p, J, x))(getb(ls), getA(ls), x)
+    SecondOrderOptimization.TallLinearize(TP3Tables(p))(getb(ls), getA(ls), x)
     return ls
 end
 
@@ -121,8 +136,8 @@ function tp3_schur(p, x)
     tp3_dense!(p, rd, Jd, x)
     clen = st.coffsets[end] + Int(st.r_dims[st.entry_retained[end]]) * Int(st.e_dims[end]) - 1
     H = SchurBlockHessian(st, zeros(st.nr, st.nr), zeros(sum(abs2, st.e_dims)), zeros(clen))
-    SOO.conformance_fill!(H, Jd' * Jd)
-    ls = SOO.makehessiansystem(H, static(:cholesky))
+    SecondOrderOptimization.conformance_fill!(H, Jd' * Jd)
+    ls = SecondOrderOptimization.makehessiansystem(H, static(:cholesky))
     getb(ls) .= Jd' * rd
     return ls, Jd, rd
 end

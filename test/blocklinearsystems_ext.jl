@@ -2,12 +2,11 @@ using Test, Random, LinearAlgebra, SparseArrays, StaticArrays, Static
 import DampedLinearSolve
 using SecondOrderOptimization, BlockLinearSystems, Polyester   # Polyester: BlockLinearSystems' threaded kernels
 using SecondOrderOptimization: check_linear_system   # internal names
+include("fixtures/load.jl"); loadfixtures("schur_problems.jl")
 
 # The Schur-complement systems of a SchurBlockHessian (BlockLinearSystems' DampedLinearSolveExt) under the
 # iterators and the workspace. Their solve-level tests are BlockLinearSystems'.
 # Every Schur solve is compared against a dense Cholesky solve of the full damped system.
-
-include("fixtures/schur_problems.jl")
 
 
 @testset "BlockLinearSystemsExt: the type of H selects elimination; linsolver names the reduced solver (A2)" begin

@@ -1,7 +1,7 @@
 using SecondOrderOptimization, BlockLinearSystems, Krylov, Pardiso, StaticArrays, SparseArrays, LinearAlgebra, Random, Test
 import DampedLinearSolve
+include("fixtures/load.jl"); loadfixtures("tp5.jl")
 const SOO = SecondOrderOptimization
-const CEXT = Base.get_extension(BlockLinearSystems, :DampedLinearSolveExt)
 
 # TP5: the supported-combinations table of the JacobianObjective docstring and the Jacobian tutorial. Every
 # listed (prototype, linsolver, iterator) runs; every other one throws an ArgumentError before f or resjac!
@@ -17,8 +17,6 @@ const TP5_TABLE = Dict(
 # Every solver symbol any extension accepts in OptimizationOptions, and every iterator
 const TP5_ALL_SOLVERS = (:auto, :cholesky, :ldl, :qr, :cg, :minres, :lsmr, :pardiso)
 const TP5_ALL_ITERATORS = TP5_ITERATORS   # every iterator (IT2)
-
-include("fixtures/tp5.jl")
 
 @testset "jacobiancombinations.jl" begin
     xref = TP5_V \ TP5_Y
@@ -70,7 +68,7 @@ fmin = gd_f(TP5_V \ TP5_Y)
     x0() = static ? zeros(SVector{4, Float64}) : zeros(4)
     proto = tp5_prototype(kind)
     layout = proto isa SchurBlockJacobian ? gd_layout(proto) : nothing
-    obj = JacobianObjective(gd_f, (r, J, x) -> gd_resjac!(r, J, x, layout), proto)
+    obj = JacobianObjective(gd_f, GDResJac(layout), proto)
     opts = OptimizationOptions(; strict..., linsolver = s)
     x, res = optimize(x0(), obj, opts)
     xH, resH = reference[static]

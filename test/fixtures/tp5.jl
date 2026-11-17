@@ -1,3 +1,6 @@
+using SecondOrderOptimization, BlockLinearSystems, SparseArrays, LinearAlgebra, Random
+const CEXT = Base.get_extension(BlockLinearSystems, :DampedLinearSolveExt)
+
 # One small linear least-squares problem, min ½‖V x − y‖², n = 4 (a retained block of 2 and two eliminated
 # blocks of 1), m = 8
 const TP5_JST = SchurJacobianStructure([2], [1, 1], [[1], [1]], [3, 3]; free_rows = [2], free_retained = [[1]])
@@ -88,6 +91,11 @@ function gd_resjac!(r, J, x, layout)
     end
     return c
 end
+# gd_resjac! with its layout, the function handed to the objective
+struct GDResJac{L}
+    layout::L
+end
+(c::GDResJac)(r, J, x) = gd_resjac!(r, J, x, c.layout)
 function gd_fdf!(g, H, x)
     c = gd_f(x)
     mul!(g, TP5_V', GD_R)

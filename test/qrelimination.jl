@@ -2,8 +2,8 @@ using SecondOrderOptimization, BlockLinearSystems, Krylov, SparseArrays, LinearA
 using Polyester   # BlockLinearSystems' kernels thread only with Polyester loaded
 using SecondOrderOptimization: dampen!, zero!, Success, NotPositiveDefinite, check_linear_system   # internal names
 using SecondOrderOptimization: getA, getb, getx, solve!
+include("fixtures/load.jl"); loadfixtures("tp3.jl")
 const SOO = SecondOrderOptimization
-include("fixtures/tp3.jl")
 
 @testset "qrelimination.jl" begin
 

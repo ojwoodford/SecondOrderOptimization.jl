@@ -1,7 +1,7 @@
 using SecondOrderOptimization, StaticArrays, SparseArrays, LinearAlgebra, Static, Random, Test
 import DampedLinearSolve
 using SecondOrderOptimization: LevenbergData, MarquardtData, MarquardtDataTrial, AbstractLinearSystem, dampen!, zero!, copy_structure, sharex, quadratic_model_change, Success, NotPositiveDefinite, check_linear_system   # internal names
-include("fixtures/termbits.jl")
+include("fixtures/load.jl"); loadfixtures("termbits.jl", "w_problems.jl")
 const SOO = SecondOrderOptimization
 using SecondOrderOptimization: getA, getb, getx, solve!   # explicit: Krylov, loaded by other test files, also exports solve!
 
@@ -10,8 +10,6 @@ using SecondOrderOptimization: getA, getb, getx, solve!   # explicit: Krylov, lo
 
 # The iterators widened to in section W, each tested in both variants
 const W_ITERATORS = (:levenbergmarquardt_dtd, :dogleg, :newton)
-
-include("fixtures/w_problems.jl")
 
 @testset "jacobianiterators.jl" begin
     @testset "Each iterator against the normal equations: :$it, callbackchangesstate = $ccs" for it in W_ITERATORS, ccs in (false, true)
