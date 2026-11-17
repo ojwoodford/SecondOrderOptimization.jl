@@ -83,10 +83,10 @@ Loading these packages adds solvers, through DampedLinearSolve's package extensi
 - **`Pardiso.jl`**: Provides multithreaded direct sparse factorization using Intel MKL PARDISO or Panua Pardiso.
   - `:pardiso`: Multi-threaded sparse direct solver for large sparse matrices. The symbolic analysis runs once, when the linear system is built; each solve runs only the positive-definite numerical factorization, and reports the system as not positive definite when it fails.
   To enable: `using Pardiso`.
-- **`BlockLinearSystems.jl` (via `BlockLinearSystemsExt`)**: Schur-complement elimination for a `SchurBlockHessian` prototype.
+- **`BlockLinearSystems.jl`** (its extension for DampedLinearSolve, `DampedLinearSolveExt`, which implements the linear-system contract for its systems): Schur-complement elimination for a `SchurBlockHessian` prototype.
   The type of `H` selects the linear system, including elimination for a `SchurBlockHessian`: there is no solver symbol or option for it.
   `linsolver` then names the solver for the reduced system: `:auto` or `:cholesky` (Cholesky, falling back to Bunch-Kaufman) or `:ldl` (Bunch-Kaufman); any other is an `ArgumentError` when the system is built.
-  On the Jacobian path, a `SchurBlockJacobian{Float64, RType}` prototype for a [`JacobianObjective`](@ref) selects QR elimination of the eliminated blocks; `RType` (dense `Matrix{Float64}` or `SparseMatrixCSC{Float64, Int}`) is the storage of the reduced system, and `linsolver` names its solver (see the [`JacobianObjective`](@ref) docstring). With Krylov.jl also loaded (`BlockLinearSystemsKrylovExt`), `:lsmr` solves the reduced problem by LSMR on the reduced Jacobian.
+  On the Jacobian path, a `SchurBlockJacobian{Float64, RType}` prototype for a [`JacobianObjective`](@ref) selects QR elimination of the eliminated blocks; `RType` (dense `Matrix{Float64}` or `SparseMatrixCSC{Float64, Int}`) is the storage of the reduced system, and `linsolver` names its solver (see the [`JacobianObjective`](@ref) docstring). With Krylov.jl also loaded (BlockLinearSystems' `DampedLinearSolveKrylovExt`), `:lsmr` solves the reduced problem by LSMR on the reduced Jacobian.
   The elimination kernels run threaded over the structure's chunks only when Polyester.jl is also loaded (BlockLinearSystems' `PolyesterExt`); otherwise they run serially. A warm run allocates nothing, except that on Julia 1.10 each threaded kernel call may allocate a little (up to 2 048 bytes per thread).
   To enable: `using BlockLinearSystems`.
 
