@@ -73,7 +73,7 @@ tp4_bytes(x0, obj, opts, ws) = (tp4_run(x0, obj, opts, ws); @allocated tp4_run(x
     @testset "The static choice is made exactly when the rule says" begin
         x2 = SVector(1.0, 0.0)
         @test SOO.MAX_STATIC_TALL == 48
-        mk(x0, P, s = :auto) = SOO.makelinearsystem(x0, JacobianObjective(tp4_cost, tp4_resjac!, P), static(s))
+        mk(x0, P, s = :auto) = SOO.objective_linearsystem(x0, JacobianObjective(tp4_cost, tp4_resjac!, P), static(s))
         @test mk(x2, 24) isa SOO.StaticTallLinearSystem{24, 2}           # m·n = 48
         @test mk(x2, 25) isa SOO.DenseTallLinearSystem                   # m·n = 50
         @test mk(x2, ones(24, 2)) isa SOO.StaticTallLinearSystem{24, 2}

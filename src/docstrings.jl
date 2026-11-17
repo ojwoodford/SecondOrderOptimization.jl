@@ -455,7 +455,7 @@ below (those not exported are extended as `SecondOrderOptimization.name`), and s
 
 | Function | Contract |
 |:---|:---|
-| `makelinearsystem(x0, H, linsolver)` | Builds the system from the Hessian prototype `H` (see below for which type each `H` gives). `linsolver` is used to preallocate a factorization or Krylov workspace; a sparse system must then be solved with that same solver. |
+| `makelinearsystem(H, linsolver)`, `makelinearsystem(n, linsolver)` | Builds the system from the Hessian prototype `H` (see below for which type each `H` gives), or, without one, for `n` variables: static when `n` is a `StaticInt`, dense when it is an `Int`. `linsolver` is used to preallocate a factorization or Krylov workspace; a sparse system must then be solved with that same solver. |
 | `getA(ls)`, `getb(ls)`, `getx(ls)` | `A` is the Hessian storage and `b` the gradient vector that `fdf!(b, A, x)` fills; `x` is the vector `solve!` writes. `b` and `x` have length `n`. The iterators read and negate `x`, and dogleg writes its own step into it. `A` must support `dot(v, A, v)` (`LinearAlgebra`'s three-argument `dot`), or have a method of the internal `quadform(A, v)`, for `v` of the type of `b`. |
 | `zero!(ls)` | Prepares the system for a fresh linearization, keeping its structure (pattern, workspaces): storage that `fdf!` accumulates into (`A`, `b`) is zeroed. A tall system only invalidates its factorization and column norms (and zeroes `b`), since `resjac!` overwrites `J` and `r`. |
 | `dampen!(ls, λ)`, `dampen!(ls, λ, s)` | Records damping without changing `A`: `solve!` then solves with `A + λI`, or `A + λ Diagonal(s)` (`s` in the units of `diag(A)`, not squared). Each call replaces the damping set before, including the scaling; `dampen!(ls, λ, nothing)` is `dampen!(ls, λ)`, and `λ = 0` is undamped. |
@@ -469,9 +469,10 @@ below (those not exported are extended as `SecondOrderOptimization.name`), and s
 | `quadratic_model_change(ls, dx)` | `dx' A dx / 2 + b' dx`, undamped. The generic method uses `quadform(getA(ls), dx)` and `fast_dot(getb(ls), dx)`. |
 
 Which system `makelinearsystem` builds:
-- `H = nothing`: a static system when `nvars(x0)` is a static size (a `Number`, a `StaticVector`,
-  a tuple of them) of at most [`MAX_STATIC_SYSTEM`](@ref) (16); otherwise a dense system of size
-  `nvars(x0)`. [`usesstaticsystem`](@ref)`(x0)` says which.
+- a size `n`: a static system for a `StaticInt`, a dense one for an `Int`. The optimizer asks for one
+  when `H = nothing`: static when `nvars(x0)` is a static size (a `Number`, a `StaticVector`, a tuple
+  of them) of at most [`MAX_STATIC_SYSTEM`](@ref) (16), otherwise dense of size `nvars(x0)`
+  ([`usesstaticsystem`](@ref)`(x0)` says which).
 - `H::MMatrix`: a static system that writes into `H`; any other `StaticMatrix`: a static system of
   its own.
 - `H::Matrix{Float64}`: a dense system that writes into `H`; any other `AbstractMatrix`: a dense

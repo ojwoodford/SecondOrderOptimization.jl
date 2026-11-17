@@ -116,7 +116,7 @@ SOO.update(x::Rot3, dx, start=1) = Rot3(x.R * expso3(SVector(dx[start], dx[start
         A = randn(rng, 12, 4); b = randn(rng, 12)
         obj = JacobianObjective(x -> 0.5 * sum(abs2, A * x - b), (r, J, x) -> (r .= A * x - b; J .= A; 0.5 * sum(abs2, r)), 12)
         for x0 in (zeros(4), randn(rng, 4), 1e3 * randn(rng, 4))
-            ls = SOO.makelinearsystem(x0, obj, :auto)
+            ls = SOO.objective_linearsystem(x0, obj, :auto)
             zero!(ls)
             SOO.linearizer(obj)(getb(ls), getA(ls), x0)
             dampen!(ls, 0.0)
@@ -220,7 +220,7 @@ SOO.update(x::Rot3, dx, start=1) = Rot3(x.R * expso3(SVector(dx[start], dx[start
         resid(x) = @. a * (x[1] + x[2]) + c * x[3] - y
         jac(x) = hcat(a, a, c)
         objJ, _ = lsq_objectives(resid, jac, 15, 3)
-        ls = SOO.makelinearsystem(zeros(3), objJ, :auto)
+        ls = SOO.objective_linearsystem(zeros(3), objJ, :auto)
         zero!(ls); SOO.linearizer(objJ)(getb(ls), getA(ls), zeros(3)); dampen!(ls, 0.0)
         @test solve!(ls, :auto) == NotPositiveDefinite
         x, res = optimize(zeros(3), objJ, OptimizationOptions())
@@ -318,7 +318,7 @@ SOO.update(x::Rot3, dx, start=1) = Rot3(x.R * expso3(SVector(dx[start], dx[start
         # the trial variant reuses the trial linearization, so it needs fewer cost evaluations
         @test res_trial.costcomputations < res_plain.costcomputations
         @test res_trial.niterations == res_plain.niterations
-        @test SOO.construct(static(:levenbergmarquardt), SOO.makelinearsystem([0.0, 0.0], objJ, :auto), False()) isa LevenbergDataTrial
+        @test SOO.construct(static(:levenbergmarquardt), SOO.objective_linearsystem([0.0, 0.0], objJ, :auto), False()) isa LevenbergDataTrial
     end
 
     @testset "Non-finite residuals or Jacobians stop the run" begin

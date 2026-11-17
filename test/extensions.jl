@@ -74,11 +74,11 @@ end
     # B1: a sparse system built for another solver throws an informative error rather than
     # trying to replace the `const` workspace field
     for solver in (:cg, :minres)
-        ls_wrong = SecondOrderOptimization.makelinearsystem(zeros(3), copy(A_spd), static(:auto))
+        ls_wrong = SecondOrderOptimization.makelinearsystem(copy(A_spd), static(:auto))
         ls_wrong.b .= b_vec
         @test_throws ArgumentError SecondOrderOptimization.solve!(ls_wrong, static(solver))
         mismatch_message(ls_wrong, solver, ":auto or :ldl")
-        ls_right = SecondOrderOptimization.makelinearsystem(zeros(3), copy(A_spd), static(solver))
+        ls_right = SecondOrderOptimization.makelinearsystem(copy(A_spd), static(solver))
         ls_right.b .= b_vec
         @test SecondOrderOptimization.solve!(ls_right, static(solver)) == Success
         @test isapprox(ls_right.x, x_exact; rtol=1e-5)
@@ -86,7 +86,7 @@ end
     # P2b: each workspace type names the solver it was built for
     for (built, asked, text) in ((:cg, :minres, ":cg"), (:minres, :cg, ":minres"),
                                  (:cholesky, :cg, ":cholesky"), (:qr, :minres, ":qr"))
-        ls_other = SecondOrderOptimization.makelinearsystem(zeros(3), copy(A_spd), static(built))
+        ls_other = SecondOrderOptimization.makelinearsystem(copy(A_spd), static(built))
         mismatch_message(ls_other, asked, text)
     end
     ls_odd = SecondOrderOptimization.SparseLinearSystem(copy(A_spd), zeros(3), zeros(3), [1, 4, 7], :not_a_workspace)
@@ -99,7 +99,7 @@ end
     A_sc = sparse(D_sc * T_sc * D_sc)
     b_sc = A_sc * ones(n_sc)
     for solver in (:cg, :minres)
-        ls_sc = SecondOrderOptimization.makelinearsystem(zeros(n_sc), copy(A_sc), static(solver))
+        ls_sc = SecondOrderOptimization.makelinearsystem(copy(A_sc), static(solver))
         ls_sc.b .= b_sc
         @test SecondOrderOptimization.solve!(ls_sc, static(solver)) == Success
         @test norm(ls_sc.x .- 1) <= 1e-5 * sqrt(n_sc)
@@ -124,7 +124,7 @@ end
 
     for solver in (:cg, :minres)
         # M9: dense Krylov solves use a preallocated workspace
-        ls_dk = SecondOrderOptimization.makelinearsystem(zeros(3), copy(A_dense), static(solver))
+        ls_dk = SecondOrderOptimization.makelinearsystem(copy(A_dense), static(solver))
         @test ls_dk.solver_ws isa Krylov.KrylovWorkspace
         ls_dk.b .= b_vec
         @test SecondOrderOptimization.solve!(ls_dk, static(solver)) == Success
@@ -148,7 +148,7 @@ end
     end
     # B4: CG reports nonpositive curvature as Indefinite, on both sparse and dense systems
     for H_indef in (copy(A_indef), Matrix(A_indef))
-        ls_indef = SecondOrderOptimization.makelinearsystem(zeros(3), H_indef, static(:cg))
+        ls_indef = SecondOrderOptimization.makelinearsystem(H_indef, static(:cg))
         ls_indef.b .= [1.0, 0.0, 0.0]
         @test SecondOrderOptimization.solve!(ls_indef, static(:cg)) == Indefinite
         # Damping enough to make it positive definite gives Success
@@ -173,13 +173,13 @@ end
         @test isconverged(res_pardiso)
         @test isapprox(x_pardiso, x_exact; rtol=1e-5)
         # B1: repeated solves on one system must not try to reassign the const workspace field
-        ls = SecondOrderOptimization.makelinearsystem(zeros(3), copy(A_spd), static(:pardiso))
+        ls = SecondOrderOptimization.makelinearsystem(copy(A_spd), static(:pardiso))
         ls.b .= b_vec
         for _ in 1:3
             @test SecondOrderOptimization.solve!(ls, static(:pardiso)) == Success
             @test isapprox(ls.x, x_exact; rtol=1e-8)
         end
-        ls_wrong = SecondOrderOptimization.makelinearsystem(zeros(3), copy(A_spd), static(:auto))
+        ls_wrong = SecondOrderOptimization.makelinearsystem(copy(A_spd), static(:auto))
         @test_throws ArgumentError SecondOrderOptimization.solve!(ls_wrong, static(:pardiso))
         mismatch_message(ls_wrong, :pardiso, ":auto or :ldl")
         mismatch_message(ls, :cg, ":pardiso")
@@ -191,7 +191,7 @@ end
         dampen!(ls, 0.0)
         # B8: an indefinite matrix is reported, not silently solved as indefinite
         for H_indef in (copy(A_indef), Matrix(A_indef))
-            ls_indef = SecondOrderOptimization.makelinearsystem(zeros(3), H_indef, static(:pardiso))
+            ls_indef = SecondOrderOptimization.makelinearsystem(H_indef, static(:pardiso))
             ls_indef.b .= b_vec
             @test SecondOrderOptimization.solve!(ls_indef, static(:pardiso)) == NotPositiveDefinite
             dampen!(ls_indef, 10.0)
@@ -207,9 +207,9 @@ end
         @test isfinite(res_pi.bestcost)
     else
         # When shared library is not installed, attempting to solve throws an informative error
-        ls = SecondOrderOptimization.makelinearsystem(zeros(3), copy(A_spd), static(:pardiso))
+        ls = SecondOrderOptimization.makelinearsystem(copy(A_spd), static(:pardiso))
         @test_throws ErrorException SecondOrderOptimization.solve!(ls, static(:pardiso))
-        ls_dense = SecondOrderOptimization.makelinearsystem(zeros(3), Matrix(A_spd), static(:pardiso))
+        ls_dense = SecondOrderOptimization.makelinearsystem(Matrix(A_spd), static(:pardiso))
         @test_throws ErrorException SecondOrderOptimization.solve!(ls_dense, static(:pardiso))
     end
 
@@ -232,8 +232,8 @@ end
         @testset "$storage, $s, $kind, λ = $lambda" begin
         A = copy(base)
         f!(A)
-        ls = storage === :dense ? SecondOrderOptimization.makelinearsystem(zeros(4), zeros(4, 4), s) :
-                                  SecondOrderOptimization.makelinearsystem(zeros(4), sparse(ones(4, 4)), s)
+        ls = storage === :dense ? SecondOrderOptimization.makelinearsystem(zeros(4, 4), s) :
+                                  SecondOrderOptimization.makelinearsystem(sparse(ones(4, 4)), s)
         if storage === :sparse
             ls.A.nzval .= vec(A)
             ls.diag_cache .= diag(A)

@@ -74,7 +74,7 @@ begin
     x_sparse = zeros(N)
 
     # Auto / LDL
-    ls_ldl = makelinearsystem(x_sparse, H_sparse, :ldl)
+    ls_ldl = makelinearsystem(H_sparse, :ldl)
     solve!(ls_ldl, :ldl)
     alloc_ldl = @allocated solve!(ls_ldl, :ldl)
     t0 = time_ns()
@@ -86,7 +86,7 @@ begin
     @printf("Sparse N=%-3d | Solver: %-10s | Allocations: %5d bytes | Time: %8.2f ms\n", N, "ldl", alloc_ldl, dt_ldl_ms)
 
     # Cholesky (cached factor)
-    ls_chol = makelinearsystem(x_sparse, H_sparse, :cholesky)
+    ls_chol = makelinearsystem(H_sparse, :cholesky)
     solve!(ls_chol, :cholesky)
     alloc_chol = @allocated solve!(ls_chol, :cholesky)
     t0 = time_ns()
@@ -97,7 +97,7 @@ begin
     @printf("Sparse N=%-3d | Solver: %-10s | Allocations: %5d bytes | Time: %8.2f ms\n", N, "cholesky", alloc_chol, dt_chol_ms)
 
     # QR (SuiteSparse SPQR)
-    ls_qr = makelinearsystem(x_sparse, H_sparse, :qr)
+    ls_qr = makelinearsystem(H_sparse, :qr)
     solve!(ls_qr, :qr)
     alloc_qr = @allocated solve!(ls_qr, :qr)
     t0 = time_ns()

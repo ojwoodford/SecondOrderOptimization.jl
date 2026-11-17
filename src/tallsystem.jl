@@ -250,19 +250,19 @@ const LSMR_CONLIM = 1 / sqrt(eps(Float64))
 function make_reduced end
 function solve_reduced! end
 
-# A Matrix prototype is the storage resjac! writes into, used with the values it holds: entries
-# resjac! never writes keep the caller's values. With an integer m the matrix starts as zeros.
-# The prototype's type selects the system (a sparse one in sparsetallsystem.jl).
-makelinearsystem(x0, obj::JacobianObjective, linsolver) = tall_linearsystem(x0, obj.J, linsolver)
-# A small problem with a static number of variables gets the static system (statictallsystem.jl). The choice
-# depends on m, known only at run time, so it is made here, once, when the system is built.
-function tall_linearsystem(x0, m::Integer, linsolver)
-    n = dynamic(nvars(x0))
-    usesstatictall(x0, m, linsolver) && return StaticTallLinearSystem(zeros(MMatrix{Int(m), n, Float64}))
-    return DenseTallLinearSystem(m, n; linsolver)
+# The tall system of `n` variables for the Jacobian prototype `J`. A Matrix prototype is the storage
+# resjac! writes into, used with the values it holds: entries resjac! never writes keep the caller's
+# values. With an integer m the matrix starts as zeros. The prototype's type selects the system (a
+# sparse one in sparsetallsystem.jl).
+# A small problem with a static number of variables (`n` a `StaticInt`) gets the static system
+# (statictallsystem.jl). The choice depends on m, known only at run time, so it is made here, once,
+# when the system is built.
+function tall_linearsystem(m::Integer, n, linsolver)
+    usesstatictall(m, n, linsolver) && return StaticTallLinearSystem(zeros(MMatrix{Int(m), dynamic(n), Float64}))
+    return DenseTallLinearSystem(m, dynamic(n); linsolver)
 end
-function tall_linearsystem(x0, J::Matrix{Float64}, linsolver)
-    usesstatictall(x0, size(J, 1), linsolver) && return StaticTallLinearSystem(J)
+function tall_linearsystem(J::Matrix{Float64}, n, linsolver)
+    usesstatictall(size(J, 1), n, linsolver) && return StaticTallLinearSystem(J)
     return DenseTallLinearSystem(J; linsolver)
 end
 
@@ -279,9 +279,9 @@ end
 # A workspace's system owns its Jacobian storage: a copy of a Matrix prototype. Were it the
 # prototype itself, a later run with another prototype would set this one's contents, and a run
 # handed this prototype again would start from the other's.
-workspace_linearsystem(x0, obj::JacobianObjective, linsolver) = workspace_tall_linearsystem(x0, obj.J, linsolver)
-workspace_tall_linearsystem(x0, m::Integer, linsolver) = tall_linearsystem(x0, m, linsolver)
-workspace_tall_linearsystem(x0, J::Matrix{Float64}, linsolver) = tall_linearsystem(x0, copy(J), linsolver)
+workspace_linearsystem(x0, obj::JacobianObjective, linsolver) = workspace_tall_linearsystem(obj.J, systemsize(x0), linsolver)
+workspace_tall_linearsystem(m::Integer, n, linsolver) = tall_linearsystem(m, n, linsolver)
+workspace_tall_linearsystem(J::Matrix{Float64}, n, linsolver) = tall_linearsystem(copy(J), n, linsolver)
 
 # The start of a run with a reused workspace. Every J the run uses (the main system's, and the
 # trial system's if the iterator has one) must start as the J a fresh run would: the prototype as

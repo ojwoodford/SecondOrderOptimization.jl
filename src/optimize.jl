@@ -34,10 +34,14 @@ function checkentry(x, obj::HessianObjective, options::OptimizationOptions)
     return nothing
 end
 checkentry(x, obj::JacobianObjective, options::OptimizationOptions) = checkobjective(x, obj, options)
-checkbuild(x, obj::HessianObjective) = checkhessian(x, obj.H)
+checkbuild(x, obj::HessianObjective) = checkhessian(obj.H, dynamic(nvars(x)))
 checkbuild(x, obj::JacobianObjective) = nothing
-objective_linearsystem(x, obj::HessianObjective, linsolver) = makelinearsystem(x, obj.H, linsolver)
-objective_linearsystem(x, obj::JacobianObjective, linsolver) = makelinearsystem(x, obj, linsolver)
+# The linear system for the variables `x`: the optimizer decides its size and whether it is static
+# (`systemsize`), and the prototype its storage
+objective_linearsystem(x, obj::HessianObjective, linsolver) = hessian_linearsystem(x, obj.H, linsolver)
+objective_linearsystem(x, obj::JacobianObjective, linsolver) = tall_linearsystem(obj.J, systemsize(x), linsolver)
+hessian_linearsystem(x, ::Nothing, linsolver) = makelinearsystem(systemsize(x), linsolver)
+hessian_linearsystem(x, H, linsolver) = makelinearsystem(H, linsolver)
 objective_structure(obj::HessianObjective) = obj.H
 objective_structure(obj::JacobianObjective) = jacobian_structure(obj.J)
 jacobian_structure(J) = JacobianStructureKey(nresiduals_of(J))

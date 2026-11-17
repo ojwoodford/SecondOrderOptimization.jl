@@ -415,7 +415,7 @@ end
 @testset "BlockLinearSystemsExt: the type of H selects elimination; linsolver names the reduced solver (A2)" begin
     p = standard_problem()
     Hd, Hs = dense_schur_matrix(p), sparse_schur_matrix(p)
-    mk(H, s) = SecondOrderOptimization.makelinearsystem(nothing, H, s)
+    mk(H, s) = SecondOrderOptimization.makelinearsystem(H, s)
     # The storage of R picks the dense or sparse system, whatever the reduced-system solver
     for s in (:auto, :cholesky, :ldl, static(:auto), static(:ldl), SecondOrderOptimization.auto_solver,
               SecondOrderOptimization.cholesky_solver, SecondOrderOptimization.ldl_solver)
@@ -712,7 +712,7 @@ end
     pre = build_schur_pattern(H0.structure; extra_blocks=retained_block_pairs(H0.R))
     Hp = SchurBlockHessian(H0.structure, H0.R, H0.E_data, H0.C_data; pattern=pre)
     x_ref = reference_solve(p, 0.3, ones(n))
-    mk(H) = SecondOrderOptimization.makelinearsystem(nothing, H, :auto)
+    mk(H) = SecondOrderOptimization.makelinearsystem(H, :auto)
 
     # With and without a pattern on H: the same solution
     for H in (H0, Hp)
@@ -756,7 +756,7 @@ end
     # The dense system ignores a pattern
     Hd = dense_schur_matrix(p)
     Hdp = SchurBlockHessian(Hd.structure, Hd.R, Hd.E_data, Hd.C_data; pattern=build_schur_pattern(Hd.structure))
-    @test SecondOrderOptimization.makelinearsystem(nothing, Hdp, :auto) isa SOOExt.DenseSchurLinearSystem
+    @test SecondOrderOptimization.makelinearsystem(Hdp, :auto) isa SOOExt.DenseSchurLinearSystem
 end
 
 # Add d to the diagonal of the full matrix a SchurBlockHessian represents
@@ -822,10 +822,10 @@ end
                       ("mixed eliminated sizes", mixed_dims_problem()))
         n = length(p.b)
         @testset "$name, dense R" begin
-            @test check_linear_system(s -> SecondOrderOptimization.makelinearsystem(nothing, dense_schur_matrix(p), s); n, linsolvers=(:auto, :cholesky, :ldl)) === nothing
+            @test check_linear_system(s -> SecondOrderOptimization.makelinearsystem(dense_schur_matrix(p), s); n, linsolvers=(:auto, :cholesky, :ldl)) === nothing
         end
         @testset "$name, sparse R" begin
-            @test check_linear_system(s -> SecondOrderOptimization.makelinearsystem(nothing, sparse_schur_matrix(p), s); n, linsolvers=(:auto, :cholesky, :ldl)) === nothing
+            @test check_linear_system(s -> SecondOrderOptimization.makelinearsystem(sparse_schur_matrix(p), s); n, linsolvers=(:auto, :cholesky, :ldl)) === nothing
         end
     end
     # The helpers read back exactly the full matrix the problem was built from

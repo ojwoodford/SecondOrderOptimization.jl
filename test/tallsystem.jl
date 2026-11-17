@@ -44,17 +44,17 @@ allocations(f::F, args::Vararg{Any, N}) where {F, N} = (f(args...); @allocated f
         for (m, n) in ((6, 6), (11, 6), (4, 6), (1, 1), (5, 1), (1, 3))
             @test check_linear_system(s -> SOO.DenseTallLinearSystem(m, n); n, linsolvers=(:auto, :qr)) === nothing
             # also built from an objective, with a prototype and with an integer m
-            @test check_linear_system(s -> SOO.makelinearsystem(zeros(n), JacobianObjective(identity, identity, zeros(m, n)), s); n, linsolvers=(:auto,)) === nothing
-            @test check_linear_system(s -> SOO.makelinearsystem(zeros(n), JacobianObjective(identity, identity, m), s); n, linsolvers=(:qr,)) === nothing
+            @test check_linear_system(s -> SOO.objective_linearsystem(zeros(n), JacobianObjective(identity, identity, zeros(m, n)), s); n, linsolvers=(:auto,)) === nothing
+            @test check_linear_system(s -> SOO.objective_linearsystem(zeros(n), JacobianObjective(identity, identity, m), s); n, linsolvers=(:qr,)) === nothing
         end
         @test SOO.conformance_traits(SOO.getA(SOO.DenseTallLinearSystem(4, 6))) == (exact = false, maxrank = 4, indefinite = false, accumulates = false)
     end
 
     @testset "makelinearsystem writes into a Matrix prototype, or builds its own J" begin
         J = zeros(7, 3)
-        ls = SOO.makelinearsystem(zeros(3), JacobianObjective(identity, identity, J), :auto)
+        ls = SOO.objective_linearsystem(zeros(3), JacobianObjective(identity, identity, J), :auto)
         @test ls isa SOO.DenseTallLinearSystem && SOO.getA(ls).J === J
-        ls = SOO.makelinearsystem(zeros(3), JacobianObjective(identity, identity, 7), :auto)
+        ls = SOO.objective_linearsystem(zeros(3), JacobianObjective(identity, identity, 7), :auto)
         @test size(SOO.getA(ls).J) == (7, 3) && length(SOO.getA(ls).r) == 7 && length(getb(ls)) == 3 && length(getx(ls)) == 3
     end
 

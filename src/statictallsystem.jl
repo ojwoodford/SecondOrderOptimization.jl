@@ -1,22 +1,24 @@
 # The static residual-and-Jacobian linear system, for small problems (TP4): J an MMatrix{M, N}, r an MVector{M},
 # solved as the dense tall system is (a QR of J once per linearization, then per damping value a QR of the
-# stacked [R; √λ D^½]), with StaticArrays' QR. Chosen at construction, without a user option, when
-# `usesstaticsystem(x0)` holds and M·N is at most MAX_STATIC_TALL.
+# stacked [R; √λ D^½]), with StaticArrays' QR. Chosen at construction, without a user option, when the
+# number of variables is static (a `StaticInt`, as the optimizer passes it when `usesstaticsystem(x0)`
+# holds) and M·N is at most MAX_STATIC_TALL.
 
 """
     MAX_STATIC_TALL = 48
 
-The largest `m·n` (residuals times variables) for which a [`JacobianObjective`](@ref) with a static number
-of variables (`usesstaticsystem(x0)`) and a dense Jacobian (an integer `m` or a `Matrix` prototype) gets a
-static tall system. A starting value (rules.md 26): measured 2026-11-15 against the dense tall system on
+The largest `m·n` (residuals times variables) for which a tall system with a static number of variables
+(`n` a `StaticInt`, as for a [`JacobianObjective`](@ref) with `usesstaticsystem(x0)`) and a dense Jacobian
+(an integer `m` or a `Matrix` prototype) is a static tall system. A starting value (rules.md 26): measured 2026-11-15 against the dense tall system on
 Julia 1.10 and 1.13, the static system was faster, per linearization and per retry, at every measured size with
 `m·n ≤ 48` (`n` from 1 to 6), and slower somewhere at every larger `m·n` measured (`n = 8, m = 8` already
 retries 1.26 times slower on 1.10).
 """
 const MAX_STATIC_TALL = 48
 
-# Whether x0 and an m-residual dense Jacobian get the static tall system
-usesstatictall(x0, m::Integer, linsolver) = usesstaticsystem(x0) && needsqr(linsolver) && m * dynamic(nvars(x0)) <= MAX_STATIC_TALL
+# Whether n variables and an m-residual dense Jacobian get the static tall system: n static, a QR solver,
+# and m·n small
+usesstatictall(m::Integer, n, linsolver) = n isa StaticInt && needsqr(linsolver) && m * dynamic(n) <= MAX_STATIC_TALL
 
 """
     StaticTallHessian

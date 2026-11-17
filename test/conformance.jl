@@ -41,18 +41,18 @@ checker_message(make_ls; kwargs...) = try check_linear_system(make_ls; kwargs...
 
     @testset "StaticLinearSystem" begin
         for n in (1, 2, 5)
-            @test check_linear_system(s -> SOO.makelinearsystem(zeros(SVector{n}), nothing, s); n, linsolvers=solvers) === nothing
-            @test check_linear_system(s -> SOO.makelinearsystem(zeros(SVector{n}), zeros(MMatrix{n, n}), s); n, linsolvers=solvers) === nothing
-            @test SOO.makelinearsystem(zeros(SVector{n}), nothing, :auto) isa SOO.StaticLinearSystem
+            @test check_linear_system(s -> SOO.makelinearsystem(static(n), s); n, linsolvers=solvers) === nothing
+            @test check_linear_system(s -> SOO.makelinearsystem(zeros(MMatrix{n, n}), s); n, linsolvers=solvers) === nothing
+            @test SOO.makelinearsystem(static(n), :auto) isa SOO.StaticLinearSystem
         end
     end
 
     @testset "DenseLinearSystem" begin
         for n in (1, 6)
-            @test check_linear_system(s -> SOO.makelinearsystem(zeros(n), zeros(n, n), s); n, linsolvers=solvers) === nothing
+            @test check_linear_system(s -> SOO.makelinearsystem(zeros(n, n), s); n, linsolvers=solvers) === nothing
             # also without the preallocated :ldl workspace
             @test check_linear_system(() -> SOO.DenseLinearSystem{Float64}(zeros(n, n), zeros(n), zeros(n)); n, linsolvers=solvers) === nothing
-            @test SOO.makelinearsystem(zeros(n), zeros(n, n), :auto) isa SOO.DenseLinearSystem
+            @test SOO.makelinearsystem(zeros(n, n), :auto) isa SOO.DenseLinearSystem
         end
     end
 
@@ -60,20 +60,20 @@ checker_message(make_ls; kwargs...) = try check_linear_system(make_ls; kwargs...
         n = 8
         pattern = spdiagm(-2 => ones(n - 2), -1 => ones(n - 1), 0 => ones(n), 1 => ones(n - 1), 2 => ones(n - 2))
         pattern[1, n] = pattern[n, 1] = 1.0
-        @test check_linear_system(s -> SOO.makelinearsystem(zeros(n), copy(pattern), s); n, linsolvers=solvers) === nothing
+        @test check_linear_system(s -> SOO.makelinearsystem(copy(pattern), s); n, linsolvers=solvers) === nothing
         # a prototype missing diagonal entries (they are inserted) and an Int32 index type
         missing_diag = sparse([1, 2, 3, 1, 4, 5, 6, 7, 8, 8, 7], [2, 1, 1, 3, 4, 5, 6, 7, 8, 7, 8], ones(11), n, n)
-        @test check_linear_system(s -> SOO.makelinearsystem(zeros(n), copy(missing_diag), s); n, linsolvers=solvers) === nothing
-        @test check_linear_system(s -> SOO.makelinearsystem(zeros(n), SparseMatrixCSC{Float64, Int32}(pattern), s); n, linsolvers=solvers) === nothing
-        @test SOO.makelinearsystem(zeros(n), copy(pattern), :auto) isa SOO.SparseLinearSystem
+        @test check_linear_system(s -> SOO.makelinearsystem(copy(missing_diag), s); n, linsolvers=solvers) === nothing
+        @test check_linear_system(s -> SOO.makelinearsystem(SparseMatrixCSC{Float64, Int32}(pattern), s); n, linsolvers=solvers) === nothing
+        @test SOO.makelinearsystem(copy(pattern), :auto) isa SOO.SparseLinearSystem
     end
 
     @testset "Krylov solvers" begin
         using Krylov
         n = 8
         pattern = spdiagm(-1 => ones(n - 1), 0 => ones(n), 1 => ones(n - 1))
-        @test check_linear_system(s -> SOO.makelinearsystem(zeros(n), copy(pattern), s); n, linsolvers=(:cg, :minres), rtol=1e-6) === nothing
-        @test check_linear_system(s -> SOO.makelinearsystem(zeros(n), zeros(n, n), s); n, linsolvers=(:cg, :minres), rtol=1e-6) === nothing
+        @test check_linear_system(s -> SOO.makelinearsystem(copy(pattern), s); n, linsolvers=(:cg, :minres), rtol=1e-6) === nothing
+        @test check_linear_system(s -> SOO.makelinearsystem(zeros(n, n), s); n, linsolvers=(:cg, :minres), rtol=1e-6) === nothing
     end
 
     @testset "Pardiso" begin
@@ -81,8 +81,8 @@ checker_message(make_ls; kwargs...) = try check_linear_system(make_ls; kwargs...
         if Pardiso.mkl_is_available() || Pardiso.panua_is_available()
             n = 8
             pattern = spdiagm(-1 => ones(n - 1), 0 => ones(n), 1 => ones(n - 1))
-            @test check_linear_system(s -> SOO.makelinearsystem(zeros(n), copy(pattern), s); n, linsolvers=(:pardiso,)) === nothing
-            @test check_linear_system(s -> SOO.makelinearsystem(zeros(n), zeros(n, n), s); n, linsolvers=(:pardiso,)) === nothing
+            @test check_linear_system(s -> SOO.makelinearsystem(copy(pattern), s); n, linsolvers=(:pardiso,)) === nothing
+            @test check_linear_system(s -> SOO.makelinearsystem(zeros(n, n), s); n, linsolvers=(:pardiso,)) === nothing
         else
             @test_skip "Pardiso library not available"
         end

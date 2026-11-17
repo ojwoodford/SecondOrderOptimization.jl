@@ -93,8 +93,8 @@ end
         end
     end
     # the static system is the one a static x0 gets with :auto and :qr; :lsmr has no static form
-    @test SOO.makelinearsystem(zeros(SVector{4}), JacobianObjective(tp5_f, tp5_resjac!, 8), :qr) isa SOO.StaticTallLinearSystem
-    @test SOO.makelinearsystem(zeros(SVector{4}), JacobianObjective(tp5_f, tp5_resjac!, 8), :lsmr) isa SOO.DenseTallLinearSystem
+    @test SOO.objective_linearsystem(zeros(SVector{4}), JacobianObjective(tp5_f, tp5_resjac!, 8), :qr) isa SOO.StaticTallLinearSystem
+    @test SOO.objective_linearsystem(zeros(SVector{4}), JacobianObjective(tp5_f, tp5_resjac!, 8), :lsmr) isa SOO.DenseTallLinearSystem
 end
 
 # IT2: gradient descent on a JacobianObjective. It uses only the gradient Jᵀr, f and update!, which every

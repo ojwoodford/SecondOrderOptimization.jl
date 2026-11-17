@@ -504,7 +504,7 @@ function SecondOrderOptimization.conformance_fill!(H::SchurBlockHessian, M::Abst
     return H
 end
 
-function SecondOrderOptimization.makelinearsystem(x0, H::SchurBlockHessian{T}, linsolver) where T
+function SecondOrderOptimization.makelinearsystem(H::SchurBlockHessian{T}, linsolver) where T
     nr = H.structure.nr
     ne = sum(Int, H.structure.e_dims; init=0)
     tot = nr + ne
@@ -520,18 +520,14 @@ end
 
 # The prototype's checks and workspace key. The optimizer works in Float64 (as the Jacobian path's
 # `checkjacobian` requires of a SchurBlockJacobian), so another element type is rejected before any work.
-function SecondOrderOptimization.checkhessian(x0, H::SchurBlockHessian{T}) where T
+function SecondOrderOptimization.checkhessian(H::SchurBlockHessian{T}, n::Integer) where T
     T === Float64 || throw(ArgumentError("The Hessian prototype must be Float64; got a $(typeof(H))."))
-    return SecondOrderOptimization.checkhessiansize(x0, H)
-end
-# As on the Jacobian path, a workspace is reused for an H of the same type (which carries the reduced
-# system's storage) and the same (identical) structure.
-function SecondOrderOptimization.checkhessiansize(x0, H::SchurBlockHessian)
-    n = dynamic(SecondOrderOptimization.nvars(x0))
     m = H.structure.nr + sum(Int, H.structure.e_dims; init=0)
     n == m || throw(DimensionMismatch("Hessian prototype H is a SchurBlockHessian of $m variables, but the variables have $n degrees of freedom."))
     return nothing
 end
+# As on the Jacobian path, a workspace is reused for an H of the same type (which carries the reduced
+# system's storage) and the same (identical) structure.
 SecondOrderOptimization.h_structure_key(H::SchurBlockHessian) = (:schurhessian, typeof(H), H.structure)
 
 # QR elimination on the Jacobian path

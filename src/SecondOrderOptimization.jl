@@ -35,6 +35,9 @@ include("stats.jl")
 include("linearsystem.jl")
 include("linearsolver.jl")
 
+# The rule for a static system, decided from the variables
+include("staticrule.jl")
+
 # Core options, results, and internal data structures
 include("structs.jl")
 include("objectives.jl")

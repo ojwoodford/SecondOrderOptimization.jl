@@ -24,15 +24,12 @@ validatelinsolver(::StaticSymbol{S}) where S = false
 validatelinsolver(s::Symbol) = validatelinsolver(static(s))
 validatelinsolver(s::OptimizationLinearSolver) = true
 
-checkhessiansize(x0, H) = nothing
-function checkhessiansize(x0, H::AbstractMatrix)
-    n = dynamic(nvars(x0))
+# Checks on the Hessian prototype `H` of a system of `n` variables, run before the system is built
+checkhessian(H, n::Integer) = nothing
+function checkhessian(H::AbstractMatrix, n::Integer)
     size(H) == (n, n) || throw(DimensionMismatch("Hessian prototype H has size $(size(H)), but the variables have $n degrees of freedom, so H must be $n×$n."))
     return nothing
 end
-
-# Checks on the Hessian prototype, run before the linear system is built
-checkhessian(x0, H) = checkhessiansize(x0, H)
 
 function checklinsolver(s::Symbol)
     validatelinsolver(s) && return true

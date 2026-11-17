@@ -267,7 +267,7 @@ end
         rng = Xoshiro(5)
         a, c = randn(rng, 15), randn(rng, 15); y = randn(rng, 15)
         objJ, _ = w_objectives(x -> @.(a * (x[1] + x[2]) + c * x[3] - y), x -> hcat(a, a, c), 15, 3)
-        ls = SOO.makelinearsystem(zeros(3), objJ, :auto)
+        ls = SOO.objective_linearsystem(zeros(3), objJ, :auto)
         zero!(ls); SOO.linearizer(objJ)(getb(ls), getA(ls), zeros(3)); dampen!(ls, 0.0)
         @test solve!(ls, :auto) == NotPositiveDefinite
         for ccs in (false, true)
@@ -536,7 +536,7 @@ end
         end
         # the trial system's J starts as a copy of the main one (copy_structure copies, not similar)
         P = fill(7.0, n + 1, n)
-        ls = SOO.makelinearsystem(x0, JacobianObjective(f, banded!, P), :auto)
+        ls = SOO.objective_linearsystem(x0, JacobianObjective(f, banded!, P), :auto)
         @test getA(ls).J === P && P == fill(7.0, n + 1, n)
         itd = SOO.construct(static(it), ls, static(ccs))
         if hasfield(typeof(itd), :trial) && !isnothing(itd.trial)
@@ -759,7 +759,7 @@ q_prototype(c12) = (P = zeros(3, 2); P[1, 2] = c12; P)
 end
 
 @testset "Q4: trialsystem finds the iterator's spare system: :$it, callbackchangesstate = $ccs" for it in (Z_ITERATORS..., :gradientdescent), ccs in (false, true)
-    ls = SOO.makelinearsystem(zeros(2), JacobianObjective(wrosen_cost, wrosen_resjac!, 3), :auto)
+    ls = SOO.objective_linearsystem(zeros(2), JacobianObjective(wrosen_cost, wrosen_resjac!, 3), :auto)
     itd = SOO.construct(static(it), ls, static(ccs))
     t = SOO.trialsystem(itd)
     if !ccs && it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg)
@@ -771,7 +771,7 @@ end
         @test t === nothing
     end
     # on a HessianObjective's systems too
-    lsH = SOO.makelinearsystem(zeros(2), zeros(2, 2), :auto)
+    lsH = SOO.makelinearsystem(zeros(2, 2), :auto)
     tH = SOO.trialsystem(SOO.construct(static(it), lsH, static(ccs)))
     @test (!ccs && it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg)) ? (tH isa SOO.DenseLinearSystem && tH !== lsH) : tH === nothing
 end
@@ -779,8 +779,8 @@ end
 @testset "Q5: the damping floor comes from the linear system" begin
     @testset "dampingfloor and the iterators' floor" begin
         @test SOO.dampingfloor(SOO.DenseLinearSystem(3)) == eps()
-        @test SOO.dampingfloor(SOO.makelinearsystem(zeros(SVector{2}), nothing, :auto)) == eps()
-        @test SOO.dampingfloor(SOO.makelinearsystem(zeros(3), sparse(1.0I, 3, 3), :auto)) == eps()
+        @test SOO.dampingfloor(SOO.makelinearsystem(static(2), :auto)) == eps()
+        @test SOO.dampingfloor(SOO.makelinearsystem(sparse(1.0I, 3, 3), :auto)) == eps()
         tall = SOO.DenseTallLinearSystem(5, 3)
         @test SOO.dampingfloor(tall) == eps()^2
         # Levenberg: relative to the largest diagonal entry, never above the former 1e-12

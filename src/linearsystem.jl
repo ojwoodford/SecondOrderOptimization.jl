@@ -141,7 +141,7 @@ makesparsews(A, ::StaticSymbol{S}) where S = nothing
 makesparsews(A, s::Symbol) = makesparsews(A, static(s))
 makesparsews(A, s::OptimizationLinearSolver) = makesparsews(A, static(linsolver_symbol(s)))
 
-function makelinearsystem(x0, H::SparseMatrixCSC{T}, linsolver) where T
+function makelinearsystem(H::SparseMatrixCSC{T}, linsolver) where T
     T === Float64 || throw(ArgumentError("The Hessian must be Float64; got a sparse prototype with element type $T. Pass a SparseMatrixCSC{Float64}."))
     A, diag_inds = ensure_diag_and_inds(H)
     sym = static(linsolver_symbol(linsolver))
@@ -150,11 +150,11 @@ function makelinearsystem(x0, H::SparseMatrixCSC{T}, linsolver) where T
     return SparseLinearSystem(A, zeros(Float64, size(A, 1)), zeros(Float64, size(A, 1)), diag_inds, ws, diag_cache)
 end
 
-function makelinearsystem(x0, H::MMatrix{N, N, Float64, N2}, linsolver) where {N, N2}
+function makelinearsystem(H::MMatrix{N, N, Float64, N2}, linsolver) where {N, N2}
     return StaticLinearSystem{N, N2, Float64}(H, MVector{N, Float64}(undef), MVector{N, Float64}(undef))
 end
 
-function makelinearsystem(x0, H::StaticMatrix{N, N}, linsolver) where N
+function makelinearsystem(H::StaticMatrix{N, N}, linsolver) where N
     return StaticLinearSystem{N, Float64}()
 end
 
@@ -163,48 +163,20 @@ makedensews(n, s) = makedensews(n, static(linsolver_symbol(s)))
 makedensews(n, ::StaticSymbol{:ldl}) = DenseLDLWorkspace(n)
 makedensews(n, ::StaticSymbol) = nothing
 
-function makelinearsystem(x0, H::Matrix{Float64}, linsolver)
+function makelinearsystem(H::Matrix{Float64}, linsolver)
     n = size(H, 1)
     return DenseLinearSystem{Float64}(H, zeros(Float64, n), zeros(Float64, n); solver_ws=makedensews(n, linsolver))
 end
 
-function makelinearsystem(x0, H::AbstractMatrix, linsolver)
+function makelinearsystem(H::AbstractMatrix, linsolver)
     n = size(H, 1)
     return DenseLinearSystem{Float64}(Matrix{Float64}(H), zeros(Float64, n), zeros(Float64, n); solver_ws=makedensews(n, linsolver))
 end
 
-"""
-    MAX_STATIC_SYSTEM = 16
-
-The largest number of variables for which, without a Hessian prototype, the linear system is
-static (stack-allocated `StaticArrays`). See [`usesstaticsystem`](@ref).
-"""
-const MAX_STATIC_SYSTEM = 16
-
-"""
-    usesstaticsystem(x0) -> Bool
-
-Whether `makelinearsystem(x0, nothing, linsolver)` (so `optimize` with `H = nothing`) builds a
-static linear system: when `nvars(x0)` is a static size (as for a `Number`, a `StaticVector`, or a
-tuple of them) of at most [`MAX_STATIC_SYSTEM`](@ref). Otherwise the system is dense, of size
-`nvars(x0)`. The rule does not depend on `linsolver`.
-"""
-# NLLSModel has its own rule for when to build a static single-variable Hessian. It is deliberately
-# not shared: neither package depends on the other except weakly (decided 2026-11-16). The two rules
-# may differ; when they do, the Hessian is converted to the system's storage, which costs a copy, not
-# correctness.
-usesstaticsystem(x0) = isstaticsize(nvars(x0))
-
-# For a static `nv` this is resolved at compile time, so `makelinearsystem` is type stable
-isstaticsize(nv) = dynamic(is_static(nv)) && nv <= MAX_STATIC_SYSTEM
-
-# Sized by `nvars(x0)`, the number of degrees of freedom (not `length(x0)`, which differs for a
-# vector of multi-dimensional variables)
-function makelinearsystem(x0, ::Nothing, linsolver)
-    nv = nvars(x0)
-    usesstaticsystem(x0) && return StaticLinearSystem{dynamic(nv), Float64}()
-    return DenseLinearSystem{Float64}(dynamic(nv); solver_ws=makedensews(dynamic(nv), linsolver))
-end
+# Without a prototype: a system of `n` variables, static (StaticArrays) when `n` is a `StaticInt`
+# and dense when it is an `Int`. The caller decides which by the type of `n`.
+makelinearsystem(n::StaticInt, linsolver) = StaticLinearSystem{dynamic(n), Float64}()
+makelinearsystem(n::Integer, linsolver) = DenseLinearSystem{Float64}(Int(n); solver_ws=makedensews(Int(n), linsolver))
 
 getA(ls::AbstractLinearSystem) = ls.A
 getb(ls::AbstractLinearSystem) = ls.b

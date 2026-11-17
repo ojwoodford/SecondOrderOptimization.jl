@@ -185,7 +185,7 @@ The rules, for each solver:
 
 # Example
 ```julia
-check_linear_system(s -> makelinearsystem(zeros(5), zeros(5, 5), s); n = 5, linsolvers = (:auto, :cholesky, :ldl, :qr))
+check_linear_system(s -> makelinearsystem(zeros(5, 5), s); n = 5, linsolvers = (:auto, :cholesky, :ldl, :qr))
 check_linear_system(s -> SecondOrderOptimization.DenseTallLinearSystem(8, 5); n = 5, linsolvers = (:auto, :qr))
 ```
 """
