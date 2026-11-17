@@ -1,5 +1,6 @@
 using SecondOrderOptimization, LinearAlgebra, Random
 using SecondOrderOptimization: getx, quadratic_model_change   # internal names
+include(joinpath(@__DIR__, "load.jl")); loadfixtures("lsq_problems.jl")
 
 # Both objectives of a least-squares problem: the HessianObjective forms the normal equations
 # from the same J
@@ -26,15 +27,8 @@ w_opts(it, extra...) = OptimizationOptions(; iterator=it, extra...)
 # with a nonzero residual; n = 30. The J tests' n = 30 problem, M tanh.(x) - y, has no finite
 # minimizer (some variables run off to infinity, where sech² makes JᵀJ singular), so here the
 # nonlinearity is the monotone x + sin(x)/2, which keeps J well conditioned and the minimizer finite.
-function w_problems()
-    t = collect(range(0, 2; length=25)); y = @. 3exp(-1.3t) + 0.05sin(7t)
-    rng = Xoshiro(11); M = randn(rng, 45, 30) ./ sqrt(45) + I(45)[:, 1:30]; yy = randn(rng, 45)
-    return (
-        ("Rosenbrock", x -> [1 - x[1], 10 * (x[2] - x[1]^2)], x -> [-1.0 0.0; -20x[1] 10.0], 2, [-1.2, 1.0]),
-        ("exponential fit", x -> @.(x[1] * exp(x[2] * t) - y), x -> hcat(exp.(x[2] .* t), x[1] .* t .* exp.(x[2] .* t)), 25, [1.0, 0.0]),
-        ("n = 30", x -> M * (x .+ 0.5 .* sin.(x)) .- yy, x -> M * Diagonal(1 .+ 0.5 .* cos.(x)), 45, zeros(30)),
-    )
-end
+# One problem type for the three (lsq_problems.jl), so they share one objective type of each kind.
+w_problems() = lsq_problems(:sin30)
 
 # The degree-13 polynomial fit of the J tests (cond(J) ≈ 4e9), scaled so that the iterators'
 # absolute floors on the damping are far below the smallest squared singular value

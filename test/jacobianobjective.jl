@@ -1,6 +1,6 @@
 using SecondOrderOptimization, StaticArrays, SparseArrays, LinearAlgebra, Static, Random, Test
 using SecondOrderOptimization: LevenbergDataTrial, auto_solver, cholesky_solver, ldl_solver, qr_solver, dampen!, zero!, Success, NotPositiveDefinite   # internal names
-include("fixtures/load.jl"); loadfixtures("termbits.jl")
+include("fixtures/load.jl"); loadfixtures("termbits.jl", "lsq_problems.jl")
 const SOO = SecondOrderOptimization
 using SecondOrderOptimization: getA, getb, getx, solve!   # explicit: Krylov, loaded by other test files, also exports solve!
 
@@ -129,15 +129,9 @@ SOO.update(x::Rot3, dx, start=1) = Rot3(x.R * expso3(SVector(dx[start], dx[start
     end
 
     @testset "Agreement with the normal equations on well-conditioned problems" begin
-        # Rosenbrock as two residuals; an exponential fit with a nonzero residual; n = 30
-        t = collect(range(0, 2; length=25)); y = @. 3exp(-1.3t) + 0.05sin(7t)
-        rng = Xoshiro(11); M = randn(rng, 45, 30) ./ sqrt(45) + I(45)[:, 1:30]; yy = randn(rng, 45)
-        problems = (
-            ("Rosenbrock", x -> [1 - x[1], 10 * (x[2] - x[1]^2)], x -> [-1.0 0.0; -20x[1] 10.0], 2, [-1.2, 1.0]),
-            ("exponential fit", x -> @.(x[1] * exp(x[2] * t) - y), x -> hcat(exp.(x[2] .* t), x[1] .* t .* exp.(x[2] .* t)), 25, [1.0, 0.0]),
-            ("n = 30", x -> M * tanh.(x) .- yy, x -> M * Diagonal(sech.(x) .^ 2), 45, zeros(30)),
-        )
-        for (name, resid, jac, m, x0) in problems
+        # Rosenbrock as two residuals; an exponential fit with a nonzero residual; n = 30, M tanh.(x) - y (one
+        # problem type for the three, so they share one objective type of each kind)
+        for (name, resid, jac, m, x0) in lsq_problems(:tanh30)
             objJ, objH = lsq_objectives(resid, jac, m, length(x0))
             cJ, lJ, cbJ = lambdatrace()
             cH, lH, cbH = lambdatrace()
