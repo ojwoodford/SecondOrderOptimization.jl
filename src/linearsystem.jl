@@ -286,6 +286,21 @@ function damp_marquardt!(ls::SparseLinearSystem, scaling, dlambda)
 end
 damp_marquardt!(ls, scaling, dlambda) = damp_marquardt!(getA(ls), scaling, dlambda)
 
+# The diagonal of the undamped A, written into d
+function getdiag!(d::AbstractVector, ls::AbstractLinearSystem)
+    A = getA(ls)
+    @inbounds for i in axes(A, 1)
+        d[i] = A[i, i]
+    end
+    return d
+end
+function getdiag!(d::AbstractVector, ls::SparseLinearSystem)
+    @inbounds for (i, idx) in enumerate(ls.diag_inds)
+        d[i] = ls.A.nzval[idx]
+    end
+    return d
+end
+
 # The smallest damping the solver resolves, relative to the diagonal: below about eps times the
 # diagonal, Cholesky of A + λD no longer sees the damping. The tall system, solved by QR of J,
 # tolerates about eps² (see tallsystem.jl). The iterators cap the floor at 1e-12 (`lambdafloor`).

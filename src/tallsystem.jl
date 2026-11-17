@@ -425,21 +425,5 @@ end
 # diagonal of JᵀJ still changes the solve
 dampingfloor(ls::AbstractTallLinearSystem) = eps(Float64)^2
 
-# Marquardt scaling (`:levenbergmarquardt_dtd`) from the diagonal of JᵀJ, the squared column norms
-# of J. The rule is the generic method's (in iterators.jl), which reads `A[i, i]`: a running
-# maximum of the diagonal, a non-finite entry counting as 1, then a floor of 1e-8 times the
-# largest scale (and at least 1e-12). The scale is in the units of diag(JᵀJ), as `solve!` expects:
-# it puts √(λ sᵢ) on the diagonal of the stacked matrix, adding λ sᵢ to JᵀJ.
-function updatescaling!(lmd::AnyMarquardtData, ls::AbstractTallLinearSystem)
-    if lmd.lambda == 0
-        lmd.lambda = 1e-6
-    end
-    m = zero(eltype(lmd.scaling))
-    d2 = colnorms2!(ls.A)
-    for i in eachindex(d2)
-        val = abs(d2[i])
-        @inbounds d = lmd.scaling[i] = max(lmd.scaling[i], isfinite(val) ? val : 1.0)
-        m = max(m, d)
-    end
-    lmd.scaling .= max.(lmd.scaling, max(m * 1e-8, 1e-12))
-end
+# The diagonal of JᵀJ, the squared column norms of J (computed once per linearization)
+getdiag!(d::AbstractVector, ls::AbstractTallLinearSystem) = copyto!(d, colnorms2!(ls.A))

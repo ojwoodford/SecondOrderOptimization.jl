@@ -366,7 +366,9 @@ dampen!(ls::AbstractLinearSystem, lmd::AnyLevenbergData) = dampen!(ls, lmd.lambd
 mutable struct MarquardtData{T} <: LevMarData
     lambda::Float64
     scaling::T
+    diag::T               # the undamped diagonal, written by `getdiag!` for `updatescaling!`
 end
+MarquardtData(lambda::Float64, scaling) = MarquardtData(lambda, scaling, similar(scaling))
 iteratorname(::StaticSymbol{:levenbergmarquardt_dtd}) = "Levenberg-Marquardt (D'D scaling)"
 construct(::StaticSymbol{:levenbergmarquardt_dtd}, ls, ::True) = MarquardtData(0.0, zero(getx(ls)))
 reset!(lmd::MarquardtData) = (fill!(lmd.scaling, 0.0); lmd.lambda = 0.0)
@@ -374,36 +376,30 @@ reset!(lmd::MarquardtData) = (fill!(lmd.scaling, 0.0); lmd.lambda = 0.0)
 mutable struct MarquardtDataTrial{T, L} <: LevMarDataTrial
     lambda::Float64
     scaling::T
+    diag::T               # the undamped diagonal, written by `getdiag!` for `updatescaling!`
     trial::L
     trialcost::Float64
     trialready::Bool
 end
+MarquardtDataTrial(lambda::Float64, scaling, trial, trialcost::Float64, trialready::Bool) =
+    MarquardtDataTrial(lambda, scaling, similar(scaling), trial, trialcost, trialready)
 construct(::StaticSymbol{:levenbergmarquardt_dtd}, ls, ::False) = MarquardtDataTrial(0.0, zero(getx(ls)), copy_structure(ls), NaN, false)
 reset!(lmd::MarquardtDataTrial) = (fill!(lmd.scaling, 0.0); lmd.trialready = false; lmd.trialcost = NaN; lmd.lambda = 0.0)
 
 const AnyMarquardtData = Union{MarquardtData, MarquardtDataTrial}
 
-function updatescaling!(lmd::AnyMarquardtData, ls::SparseLinearSystem)
-    if lmd.lambda == 0
-        lmd.lambda = 1e-6
-    end
-    m = zero(eltype(lmd.scaling))
-    for (i, idx) in enumerate(ls.diag_inds)
-        val = abs(ls.A.nzval[idx])
-        @inbounds d = lmd.scaling[i] = max(lmd.scaling[i], isfinite(val) ? val : 1.0)
-        m = max(m, d)
-    end
-    lmd.scaling .= max.(lmd.scaling, max(m * 1e-8, 1e-12))
-end
-
+# Marquardt scaling from the undamped diagonal of A (the squared column norms of J for a tall system), which
+# the system writes (`getdiag!`): a running maximum of its absolute values, a non-finite entry counting as 1,
+# then a floor of 1e-8 times the largest scale (and at least 1e-12). The scale is in the units of diag(A), as
+# `dampen!(ls, λ, s)` expects.
 function updatescaling!(lmd::AnyMarquardtData, ls)
     if lmd.lambda == 0
         lmd.lambda = 1e-6
     end
     m = zero(eltype(lmd.scaling))
-    A = gethessian(ls)
-    for i in axes(A, 1)
-        val = abs(A[i, i])
+    diag = getdiag!(lmd.diag, ls)
+    for i in eachindex(diag)
+        val = abs(diag[i])
         @inbounds d = lmd.scaling[i] = max(lmd.scaling[i], isfinite(val) ? val : 1.0)
         m = max(m, d)
     end
