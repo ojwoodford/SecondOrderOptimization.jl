@@ -35,5 +35,6 @@ end
     timed_include("lsmr.jl")
     timed_include("blocklinearsystems_ext.jl")
     timed_include("qrelimination.jl")
+    timed_include("qrelimination_threaded.jl")
     timed_include("jacobiancombinations.jl")
 end
