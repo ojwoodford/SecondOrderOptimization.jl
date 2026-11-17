@@ -187,7 +187,7 @@ schur_quadform_allocations(H, v) = @allocated SecondOrderOptimization.quadform(H
 @testset "BlockLinearSystemsExt: the type of H selects elimination; linsolver names the reduced solver (A2)" begin
     p = standard_problem()
     Hd, Hs = dense_schur_matrix(p), sparse_schur_matrix(p)
-    mk(H, s) = SecondOrderOptimization.makelinearsystem(H, s)
+    mk(H, s) = SecondOrderOptimization.makehessiansystem(H, s)
     # The enum spellings of a solver reach the systems as the options hold them, as a StaticSymbol
     opt(s) = OptimizationOptions(linsolver = s).linsolver
     # The storage of R picks the dense or sparse system, whatever the reduced-system solver

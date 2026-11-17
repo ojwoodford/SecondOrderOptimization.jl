@@ -39,9 +39,9 @@ checkbuild(x, obj::JacobianObjective) = nothing
 # The linear system for the variables `x`: the optimizer decides its size and whether it is static
 # (`systemsize`), and the prototype its storage
 objective_linearsystem(x, obj::HessianObjective, linsolver) = hessian_linearsystem(x, obj.H, linsolver)
-objective_linearsystem(x, obj::JacobianObjective, linsolver) = maketallsystem(obj.J, systemsize(x), linsolver)
-hessian_linearsystem(x, ::Nothing, linsolver) = makelinearsystem(systemsize(x), linsolver)
-hessian_linearsystem(x, H, linsolver) = makelinearsystem(H, linsolver)
+objective_linearsystem(x, obj::JacobianObjective, linsolver) = makejacobiansystem(obj.J, systemsize(x), linsolver)
+hessian_linearsystem(x, ::Nothing, linsolver) = makehessiansystem(systemsize(x), linsolver)
+hessian_linearsystem(x, H, linsolver) = makehessiansystem(H, linsolver)
 objective_structure(obj::HessianObjective) = obj.H
 objective_structure(obj::JacobianObjective) = jacobian_structure(obj.J)
 jacobian_structure(J::Union{Integer, Matrix}) = JacobianStructureKey(jacobian_nrows(J))
@@ -108,7 +108,7 @@ trialsystem(dd::DoglegData) = dd.trial          # nothing when callbackchangesst
 # prototype: were it the prototype itself, a later run with another prototype would set this one's
 # contents, and a run handed this prototype again would start from the other's.
 workspace_linearsystem(x, obj::HessianObjective, linsolver) = objective_linearsystem(x, obj, linsolver)
-workspace_linearsystem(x, obj::JacobianObjective, linsolver) = maketallsystem(workspace_prototype(obj.J), systemsize(x), linsolver)
+workspace_linearsystem(x, obj::JacobianObjective, linsolver) = makejacobiansystem(workspace_prototype(obj.J), systemsize(x), linsolver)
 workspace_prototype(J) = copy(J)
 workspace_prototype(m::Integer) = m
 

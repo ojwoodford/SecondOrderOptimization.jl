@@ -772,7 +772,7 @@ end
         @test t === nothing
     end
     # on a HessianObjective's systems too
-    lsH = SOO.makelinearsystem(zeros(2, 2), :auto)
+    lsH = SOO.makehessiansystem(zeros(2, 2), :auto)
     tH = SOO.trialsystem(SOO.construct(static(it), lsH, static(ccs)))
     @test (!ccs && it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg)) ? (tH isa DampedLinearSolve.DenseLinearSystem && tH !== lsH) : tH === nothing
 end
@@ -780,8 +780,8 @@ end
 @testset "Q5: the damping floor comes from the linear system" begin
     @testset "dampingfloor and the iterators' floor" begin
         @test SOO.dampingfloor(DampedLinearSolve.DenseLinearSystem(3)) == eps()
-        @test SOO.dampingfloor(SOO.makelinearsystem(static(2), :auto)) == eps()
-        @test SOO.dampingfloor(SOO.makelinearsystem(sparse(1.0I, 3, 3), :auto)) == eps()
+        @test SOO.dampingfloor(SOO.makehessiansystem(static(2), :auto)) == eps()
+        @test SOO.dampingfloor(SOO.makehessiansystem(sparse(1.0I, 3, 3), :auto)) == eps()
         tall = DampedLinearSolve.DenseTallLinearSystem(5, 3)
         @test SOO.dampingfloor(tall) == eps()^2
         # Levenberg: relative to the largest diagonal entry, never above the former 1e-12

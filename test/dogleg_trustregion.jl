@@ -42,7 +42,7 @@ using SecondOrderOptimization: OptimizationInternal, DoglegData   # internal nam
     end
 
     # Test dogleg step interpolation directly
-    ls = SecondOrderOptimization.makelinearsystem(static(2), :auto)
+    ls = SecondOrderOptimization.makehessiansystem(static(2), :auto)
     dd = DoglegData(ls)
     dd.trustradius = 1.2 # Forces alpha (~1.014) < trustradius (1.2) < newton_norm (~1.414)
     data = OptimizationInternal(ls, @SVector([0.0, 0.0]), SecondOrderOptimization.Stats())

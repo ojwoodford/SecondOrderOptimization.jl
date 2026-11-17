@@ -1,7 +1,7 @@
 # Baseline profiling and allocation benchmark script across Static, Dense, and Sparse paths
 import DampedLinearSolve
 using SecondOrderOptimization
-using SecondOrderOptimization: makelinearsystem
+using SecondOrderOptimization: makehessiansystem
 using DampedLinearSolve: StaticLinearSystem, DenseLinearSystem
 using SecondOrderOptimization: solve!   # internal names
 using StaticArrays, SparseArrays, LinearAlgebra, Printf, Static
@@ -76,7 +76,7 @@ begin
     x_sparse = zeros(N)
 
     # Auto / LDL
-    ls_ldl = makelinearsystem(H_sparse, :ldl)
+    ls_ldl = makehessiansystem(H_sparse, :ldl)
     solve!(ls_ldl, :ldl)
     alloc_ldl = @allocated solve!(ls_ldl, :ldl)
     t0 = time_ns()
@@ -88,7 +88,7 @@ begin
     @printf("Sparse N=%-3d | Solver: %-10s | Allocations: %5d bytes | Time: %8.2f ms\n", N, "ldl", alloc_ldl, dt_ldl_ms)
 
     # Cholesky (cached factor)
-    ls_chol = makelinearsystem(H_sparse, :cholesky)
+    ls_chol = makehessiansystem(H_sparse, :cholesky)
     solve!(ls_chol, :cholesky)
     alloc_chol = @allocated solve!(ls_chol, :cholesky)
     t0 = time_ns()
@@ -99,7 +99,7 @@ begin
     @printf("Sparse N=%-3d | Solver: %-10s | Allocations: %5d bytes | Time: %8.2f ms\n", N, "cholesky", alloc_chol, dt_chol_ms)
 
     # QR (SuiteSparse SPQR)
-    ls_qr = makelinearsystem(H_sparse, :qr)
+    ls_qr = makehessiansystem(H_sparse, :qr)
     solve!(ls_qr, :qr)
     alloc_qr = @allocated solve!(ls_qr, :qr)
     t0 = time_ns()
