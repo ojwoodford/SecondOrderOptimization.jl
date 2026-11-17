@@ -9,10 +9,13 @@ Stores configuration options and stopping criteria for second-order optimization
   continue: the run stops, converged (`TERMINATION_REL_DCOST`), when an iteration changes the
   cost by less than `reldcost * abs(bestcost)`, a rise as well as a fall. It is kept tight, since
   a single iteration with a tiny change is not convergence (a run crawling across a flat valley
-  has many); the slower test is `stalltol`.
+  has many); the slower test is `stalltol`. Not tested after a step the iterator restricted (a
+  truncated or shifted dogleg step, a shifted Newton solve, an LM step whose damping outweighs
+  the curvature along it), which is small because of the safeguard, not because of convergence.
 - `absdcost::Float64 = 1e-15`: Minimum absolute change in cost, in either direction, in one
   iteration required to continue (converged, `TERMINATION_ABS_DCOST`).
-- `dstep::Float64 = 1e-15`: Minimum infinity-norm of parameter step vector to continue.
+- `dstep::Float64 = 1e-15`: Minimum infinity-norm of parameter step vector to continue. Like
+  `reldcost`, not tested after a restricted step.
 - `gtol::Float64 = 0.0`: Gradient infinity-norm threshold for termination.
 - `maxstall::Int = 3`: Maximum number of consecutive iterations in which the best cost does not
   improve significantly (by more than `stalltol` relative, counted from the last significant
@@ -373,7 +376,7 @@ storecostscallback
 """
     TERMINATION_REL_DCOST
 
-Bit mask of [`OptimizationResult`](@ref)`.termination`, set when an iteration changed the cost, up or down, by less than `reldcost` relative to the best cost. A convergence criterion.
+Bit mask of [`OptimizationResult`](@ref)`.termination`, set when an iteration changed the cost, up or down, by less than `reldcost` relative to the best cost, after a step the iterator did not restrict (see `reldcost` in [`OptimizationOptions`](@ref)). A convergence criterion.
 Test it with `result.termination & TERMINATION_REL_DCOST != 0`; see [`isconverged`](@ref).
 """
 TERMINATION_REL_DCOST
@@ -389,7 +392,7 @@ TERMINATION_ABS_DCOST
 """
     TERMINATION_STEP_SIZE
 
-Bit mask of [`OptimizationResult`](@ref)`.termination`, set when the step was below `dstep` (infinity norm). A convergence criterion.
+Bit mask of [`OptimizationResult`](@ref)`.termination`, set when the step was below `dstep` (infinity norm) and the iterator did not restrict it (see `reldcost` in [`OptimizationOptions`](@ref)). A convergence criterion.
 Test it with `result.termination & TERMINATION_STEP_SIZE != 0`; see [`isconverged`](@ref).
 """
 TERMINATION_STEP_SIZE

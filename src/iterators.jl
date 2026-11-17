@@ -53,19 +53,29 @@ function initial_shift(ls)
     return isfinite(md) ? max(md * 1e-4, 1e-6) : 1e-6
 end
 
-# Newton optimization
-struct NewtonData
+# Whether the step the iterator last returned was restricted: shortened or damped by the
+# iterator's safeguard rather than taken as its model's minimiser. The loop does not read a small
+# step or a small change in cost after an accepted restricted step as convergence. Each iterator
+# records it for the step it returns; an iterator that records nothing is never restricted.
+restrictedstep(iteratedata) = false
+
+# Newton optimization: a step is restricted when its solve needed a diagonal shift
+mutable struct NewtonData
+    restricted::Bool
 end
 iteratorname(::StaticSymbol{:newton}) = "Newton"
-construct(::StaticSymbol{:newton}, ls, ::True) = NewtonData()
-reset!(::NewtonData) = nothing
+construct(::StaticSymbol{:newton}, ls, ::True) = NewtonData(false)
+reset!(nd::NewtonData) = (nd.restricted = false; nothing)
+restrictedstep(nd::NewtonData) = nd.restricted
 
-@inline function iterate!(::NewtonData, data, f, fdf!, options::OptimizationOptions)::Float64
+@inline function iterate!(nd::NewtonData, data, f, fdf!, options::OptimizationOptions)::Float64
     status = Success
+    nd.restricted = false
     data.solves += @elapsed_ns begin
         status = solve!(data.linsystem, options.linsolver)
         if status == Success
         else
+            nd.restricted = true
             status = probe_shift!(data.linsystem, options.linsolver)
             mu = initial_shift(data.linsystem)
             shift_iters = isfinitesystem(data.linsystem) ? 30 : 0   # damping cannot repair a non-finite matrix
@@ -92,16 +102,20 @@ end
 
 mutable struct NewtonDataRelinearize
     cost::Float64
+    restricted::Bool
 end
-construct(::StaticSymbol{:newton}, ls, ::False) = NewtonDataRelinearize(0.0)
-reset!(::NewtonDataRelinearize) = nothing
+construct(::StaticSymbol{:newton}, ls, ::False) = NewtonDataRelinearize(0.0, false)
+reset!(nd::NewtonDataRelinearize) = (nd.restricted = false; nothing)
+restrictedstep(nd::NewtonDataRelinearize) = nd.restricted
 
 @inline function iterate!(nd::NewtonDataRelinearize, data, f, fdf!, options::OptimizationOptions)::Float64
     status = Success
+    nd.restricted = false
     data.solves += @elapsed_ns begin
         status = solve!(data.linsystem, options.linsolver)
         if status == Success
         else
+            nd.restricted = true
             status = probe_shift!(data.linsystem, options.linsolver)
             mu = initial_shift(data.linsystem)
             shift_iters = isfinitesystem(data.linsystem) ? 30 : 0   # damping cannot repair a non-finite matrix
@@ -138,21 +152,23 @@ mutable struct DoglegData{T,L}
     trial::L              # nothing, or a spare linear system for reusing the trial linearization
     trialcost::Float64
     trialready::Bool
+    restricted::Bool      # the step returned was not the full Newton point of an unshifted solve
 end
 
 DoglegData(trustradius::Float64, maxtrustradius::Float64, cauchy::T, newton::T) where {T} =
-    DoglegData(trustradius, maxtrustradius, cauchy, newton, nothing, NaN, false)
+    DoglegData(trustradius, maxtrustradius, cauchy, newton, nothing, NaN, false, false)
 DoglegData(trustradius::Float64, cauchy::T, newton::T) where {T} =
     DoglegData(trustradius, 1e10, cauchy, newton)
 function DoglegData(ls, maxtrustradius::Float64=1e10; trial=nothing)
     x = getx(ls)
-    return DoglegData(0.0, maxtrustradius, similar(x), similar(x), trial, NaN, false)
+    return DoglegData(0.0, maxtrustradius, similar(x), similar(x), trial, NaN, false, false)
 end
 
 iteratorname(::StaticSymbol{:dogleg}) = "Dogleg"
 construct(::StaticSymbol{:dogleg}, ls, ::True) = DoglegData(ls)
 construct(::StaticSymbol{:dogleg}, ls, ::False) = DoglegData(ls; trial=copy_structure(ls))
-reset!(dd::DoglegData) = (dd.trustradius = 0.0; dd.trialready = false; dd.trialcost = NaN)
+reset!(dd::DoglegData) = (dd.trustradius = 0.0; dd.trialready = false; dd.trialcost = NaN; dd.restricted = false)
+restrictedstep(dd::DoglegData) = dd.restricted
 
 @inline function evaltrial!(dd::DoglegData{T,Nothing}, data, f, fdf!, ::Bool) where {T}
     data.costs += @elapsed_ns cost_ = f(data.varnext)
@@ -185,6 +201,7 @@ end
 
 @inline function iterate!(dd::DoglegData, data, f, fdf!, options::OptimizationOptions)::Float64
     dd.trialready = false
+    dd.restricted = false
     hessian, gradient = gethessgrad(data.linsystem)
 
     gHg = quadform(hessian, gradient)
@@ -219,7 +236,8 @@ end
     status = Success
     data.solves += @elapsed_ns begin
         status = solve!(data.linsystem, options.linsolver)
-        if status != Success
+        shifted = status != Success
+        if shifted
             status = probe_shift!(data.linsystem, options.linsolver)
             mu = initial_shift(data.linsystem)
             shifts = isfinitesystem(data.linsystem) ? 20 : 0
@@ -266,9 +284,11 @@ end
         Δ = dd.trustradius
         step_norm = Δ
         pred_red = NaN
+        fullnewton = false
 
         if newton_valid && newton_norm <= Δ
             # Full Newton step inside the region
+            fullnewton = true
             x .= dd.newton
             step_norm = newton_norm
             pred_red = newton_pred
@@ -323,6 +343,7 @@ end
             elseif rho > 0.75 && step_norm >= 0.9 * Δ
                 dd.trustradius = min(2.0 * Δ, dd.maxtrustradius)
             end
+            dd.restricted = !(fullnewton && !shifted)
             return cost_
         end
 
@@ -343,19 +364,23 @@ abstract type LevMarDataTrial <: LevMarData end
 
 mutable struct LevenbergData <: LevMarData
     lambda::Float64
+    restricted::Bool      # the damping term exceeded the curvature term along the accepted step
 end
+LevenbergData(lambda::Float64) = LevenbergData(lambda, false)
 iteratorname(::StaticSymbol{:levenbergmarquardt}) = "Levenberg-Marquardt"
 construct(::StaticSymbol{:levenbergmarquardt}, ls, ::True) = LevenbergData(0.0)
-reset!(lmd::LevenbergData) = (lmd.lambda = 0.0)
+reset!(lmd::LevenbergData) = (lmd.lambda = 0.0; lmd.restricted = false)
 
 mutable struct LevenbergDataTrial{L} <: LevMarDataTrial
     lambda::Float64
     trial::L
     trialcost::Float64
     trialready::Bool
+    restricted::Bool
 end
+LevenbergDataTrial(lambda::Float64, trial, trialcost::Float64, trialready::Bool) = LevenbergDataTrial(lambda, trial, trialcost, trialready, false)
 construct(::StaticSymbol{:levenbergmarquardt}, ls, ::False) = LevenbergDataTrial(0.0, copy_structure(ls), NaN, false)
-reset!(lmd::LevenbergDataTrial) = (lmd.trialready = false; lmd.trialcost = NaN; lmd.lambda = 0.0)
+reset!(lmd::LevenbergDataTrial) = (lmd.trialready = false; lmd.trialcost = NaN; lmd.lambda = 0.0; lmd.restricted = false)
 
 const AnyLevenbergData = Union{LevenbergData, LevenbergDataTrial}
 
@@ -384,11 +409,12 @@ mutable struct MarquardtData{T} <: LevMarData
     lambda::Float64
     scaling::T
     diag::T               # the undamped diagonal, written by `getdiag!` for `updatescaling!`
+    restricted::Bool
 end
-MarquardtData(lambda::Float64, scaling) = MarquardtData(lambda, scaling, similar(scaling))
+MarquardtData(lambda::Float64, scaling) = MarquardtData(lambda, scaling, similar(scaling), false)
 iteratorname(::StaticSymbol{:levenbergmarquardt_dtd}) = "Levenberg-Marquardt (D'D scaling)"
 construct(::StaticSymbol{:levenbergmarquardt_dtd}, ls, ::True) = MarquardtData(0.0, zero(getx(ls)))
-reset!(lmd::MarquardtData) = (fill!(lmd.scaling, 0.0); lmd.lambda = 0.0)
+reset!(lmd::MarquardtData) = (fill!(lmd.scaling, 0.0); lmd.lambda = 0.0; lmd.restricted = false)
 
 mutable struct MarquardtDataTrial{T, L} <: LevMarDataTrial
     lambda::Float64
@@ -397,11 +423,12 @@ mutable struct MarquardtDataTrial{T, L} <: LevMarDataTrial
     trial::L
     trialcost::Float64
     trialready::Bool
+    restricted::Bool
 end
 MarquardtDataTrial(lambda::Float64, scaling, trial, trialcost::Float64, trialready::Bool) =
-    MarquardtDataTrial(lambda, scaling, similar(scaling), trial, trialcost, trialready)
+    MarquardtDataTrial(lambda, scaling, similar(scaling), trial, trialcost, trialready, false)
 construct(::StaticSymbol{:levenbergmarquardt_dtd}, ls, ::False) = MarquardtDataTrial(0.0, zero(getx(ls)), copy_structure(ls), NaN, false)
-reset!(lmd::MarquardtDataTrial) = (fill!(lmd.scaling, 0.0); lmd.trialready = false; lmd.trialcost = NaN; lmd.lambda = 0.0)
+reset!(lmd::MarquardtDataTrial) = (fill!(lmd.scaling, 0.0); lmd.trialready = false; lmd.trialcost = NaN; lmd.lambda = 0.0; lmd.restricted = false)
 
 const AnyMarquardtData = Union{MarquardtData, MarquardtDataTrial}
 
@@ -438,6 +465,13 @@ function dampingnorm(lmd::AnyMarquardtData, x)
     return total
 end
 
+restrictedstep(lmd::LevMarData) = lmd.restricted
+
+# Whether the damping term exceeds the curvature term along an accepted step s, λ·sᵀDs > sᵀHs.
+# sᵀHs = 2·(predicted − gᵀs), from the undamped predicted change already computed, so this costs
+# one dot product. A non-positive sᵀHs with λ > 0 is restricted.
+lm_restricted(lmd, ls, step, predicted) = lmd.lambda * dampingnorm(lmd, step) > 2 * (predicted - fast_dot(getgrad(ls), step))
+
 function linearize!(lmd::LevMarDataTrial, data, fdf!)
     if !lmd.trialready
         return computelinearization!(data, fdf!, data.variables)
@@ -462,6 +496,7 @@ end
 
 @inline function iterate!(levmardata::LevMarData, data, f, fdf!, options::OptimizationOptions)::Float64
     @assert levmardata.lambda >= 0.0
+    levmardata.restricted = false
     updatescaling!(levmardata, data.linsystem)
     mu = 2.0
     inner_iters = 0
@@ -499,6 +534,7 @@ end
             dampen!(data.linsystem, 0.0)
             if cost_ <= data.bestcost
                 predicted = quadratic_model_change(data.linsystem, getx(data.linsystem))
+                levmardata.restricted = lm_restricted(levmardata, data.linsystem, getx(data.linsystem), predicted)
                 levmardata.lambda = max(levmardata.lambda * lambda_update_factor(cost_ - data.bestcost, predicted), lambdafloor(levmardata, data.linsystem))
             end
             return cost_
@@ -510,6 +546,7 @@ end
 
 @inline function iterate!(levmardata::LevMarDataTrial, data, f, fdf!, options::OptimizationOptions)::Float64
     @assert levmardata.lambda >= 0.0
+    levmardata.restricted = false
     gradient = getgrad(data.linsystem)
     updatescaling!(levmardata, data.linsystem)
     mu = 2.0
@@ -561,6 +598,7 @@ end
             dampen!(data.linsystem, 0.0)
             if cost_ <= data.bestcost
                 predicted = quadratic_model_change(data.linsystem, getx(data.linsystem))
+                levmardata.restricted = lm_restricted(levmardata, data.linsystem, getx(data.linsystem), predicted)
                 levmardata.lambda = max(levmardata.lambda * lambda_update_factor(cost_ - data.bestcost, predicted), lambdafloor(levmardata, data.linsystem))
             end
             return cost_

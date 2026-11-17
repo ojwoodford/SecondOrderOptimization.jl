@@ -44,4 +44,14 @@ end
             @test r.bestcost < 1e-5
         end
     end
+
+    @testset "RS1 on the ODE BVP" begin
+        # At N = 32768 LM's damping stays above the smallest curvature for many iterations; it stopped
+        # on a small damped step at a cost of 1.6e-8
+        _, r = optimize(zeros(32768), odebvp_objective(32768), OptimizationOptions(iterator = :levenbergmarquardt, reldcost = 1e-8, dstep = 1e-8, gtol = 1e-8, maxiters = 500))
+        @test r.bestcost < 1e-8
+        # At N = 65536 dogleg gets past the first iterations (it stopped at iteration 2 before IC1)
+        _, r = optimize(zeros(65536), odebvp_objective(65536), OptimizationOptions(iterator = :dogleg, reldcost = 1e-8, dstep = 1e-8, gtol = 1e-8, maxiters = 500))
+        @test r.niterations > 1 && r.bestcost < r.startcost
+    end
 end

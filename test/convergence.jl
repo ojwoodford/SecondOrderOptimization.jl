@@ -320,3 +320,87 @@ const SCRIPTED_OBJ = JacobianObjective(scost, (r, J, x::Scripted) -> (c = scost(
         STUTTER_PATTERN[] = k -> false
     end
 end
+
+# RS1: after an accepted step that the iterator restricted (dogleg: not the full Newton point of an
+# unshifted solve; Newton: a shifted solve; LM: the damping term exceeds the curvature term along
+# the step), a small step or a small relative change in cost is not convergence (a small absolute
+# change still is: at the rounding floor of a minimum the cost no longer changes)
+@testset "RS1: a small restricted step is not convergence" begin
+    # One direction 1e20 times stiffer than the other: LM's first λ is 1e-6·max_diag = 1e14, so its
+    # first step is about 1e-14, which ended the run at once
+    stiff(x) = 1e20 * x[1]^2 / 2 + x[2]^2 / 2 - x[2]
+    stiff_fdf!(g, H, x) = (g[1] = 1e20 * x[1]; g[2] = x[2] - 1; H[1, 1] = 1e20; H[1, 2] = H[2, 1] = 0.0; H[2, 2] = 1.0; stiff(x))
+    # The same with negative curvature in the soft direction at the start
+    stiffneg(x) = 1e14 * x[1]^2 / 2 + (x[2]^2 - 1)^2 / 4
+    stiffneg_fdf!(g, H, x) = (g[1] = 1e14 * x[1]; g[2] = (x[2]^2 - 1) * x[2]; H[1, 1] = 1e14; H[1, 2] = H[2, 1] = 0.0; H[2, 2] = 3x[2]^2 - 1; stiffneg(x))
+
+    @testset "LM continues past a damped first step" begin
+        x, r = optimize([0.0, 0.0], HessianObjective(stiff, stiff_fdf!), OptimizationOptions(iterator = :levenbergmarquardt, dstep = 1e-8))
+        @test isconverged(r)
+        @test x[2] ≈ 1 rtol = 1e-6
+        x, r = optimize([0.0, 0.1], HessianObjective(stiffneg, stiffneg_fdf!), OptimizationOptions(iterator = :levenbergmarquardt, dstep = 1e-8))
+        @test isconverged(r)
+        @test abs(x[2]) ≈ 1 rtol = 1e-6
+    end
+
+    # The flag each iterator records for the step it returns, read by a callback
+    function flagtrace()
+        rec = NamedTuple{(:restricted, :accepted, :fullnewton), Tuple{Bool, Bool, Bool}}[]
+        cb = (cost, x, data, id) -> begin
+            full = id isa SecondOrderOptimization.DoglegData && SecondOrderOptimization.getx(data.linsystem) == id.newton
+            push!(rec, (restricted = SecondOrderOptimization.restrictedstep(id), accepted = cost <= data.bestcost, fullnewton = full))
+            return cost, 0
+        end
+        return rec, cb
+    end
+
+    @testset "Newton: restricted exactly when the solve was shifted" begin
+        quad(x) = 0.5 * (2x[1]^2 + x[2]^2) - x[1]
+        quad_fdf!(g, H, x) = (g[1] = 2x[1] - 1; g[2] = x[2]; H[1, 1] = 2.0; H[1, 2] = H[2, 1] = 0.0; H[2, 2] = 1.0; quad(x))
+        for ccs in (false, true)
+            rec, cb = flagtrace()
+            optimize([1.0, 1.0], HessianObjective(quad, quad_fdf!), OptimizationOptions(iterator = :newton, callbackchangesstate = ccs); callback = cb)
+            @test !isempty(rec) && !any(r -> r.restricted, rec)
+            rec, cb = flagtrace()
+            optimize([0.0, 0.1], HessianObjective(stiffneg, stiffneg_fdf!), OptimizationOptions(iterator = :newton, dstep = 1e-8, callbackchangesstate = ccs); callback = cb)
+            @test rec[1].restricted          # H₂₂ = −0.97: the solve needs a shift
+        end
+    end
+
+    @testset "Dogleg: restricted unless the full Newton point of an unshifted solve" begin
+        # Σ log cosh: convex, so no solve is shifted, but Newton overshoots far from 0, so the trust
+        # region truncates the first steps
+        lc(x) = sum(xi -> log(cosh(xi)), x)
+        lc_fdf!(g, H, x) = (g .= tanh.(x); fill!(H, 0.0); H[1, 1] = sech(x[1])^2; H[2, 2] = sech(x[2])^2; lc(x))
+        for ccs in (false, true)
+            rec, cb = flagtrace()
+            _, r = optimize([3.0, -2.0], HessianObjective(lc, lc_fdf!), OptimizationOptions(iterator = :dogleg, callbackchangesstate = ccs); callback = cb)
+            acc = filter(r -> r.accepted, rec)
+            # a full Newton point is not restricted; the first, truncated, step is. (The last
+            # iteration may end on a rejected trial or a zero step, which are not restricted either.)
+            @test !any(r -> r.fullnewton && r.restricted, acc)
+            @test any(r -> r.fullnewton, acc)
+            @test acc[1].restricted && !acc[1].fullnewton
+            @test isconverged(r) && r.bestcost < 1e-20
+            # a shifted solve: restricted even if its Newton point is taken whole
+            rec, cb = flagtrace()
+            optimize([0.0, 0.1], HessianObjective(stiffneg, stiffneg_fdf!), OptimizationOptions(iterator = :dogleg, dstep = 1e-8, callbackchangesstate = ccs); callback = cb)
+            @test rec[1].fullnewton && rec[1].restricted
+        end
+    end
+
+    @testset "LM: restricted while the damping term exceeds the curvature term" begin
+        for it in (:levenbergmarquardt, :levenbergmarquardt_dtd), ccs in (false, true)
+            rec, cb = flagtrace()
+            optimize([0.0, 0.0], HessianObjective(stiff, stiff_fdf!), OptimizationOptions(iterator = it, dstep = 1e-8, callbackchangesstate = ccs); callback = cb)
+            it === :levenbergmarquardt && @test rec[1].restricted   # λ = 1e14 against a curvature of 1
+            @test !rec[end].restricted                              # λ has fallen to its floor
+        end
+    end
+
+    @testset "Gradient descent is never restricted" begin
+        rec, cb = flagtrace()
+        optimize([0.0, 0.0], HessianObjective(stiff, stiff_fdf!), OptimizationOptions(iterator = :gradientdescent, maxiters = 5); callback = cb)
+        @test !isempty(rec) && !any(r -> r.restricted, rec)
+    end
+end
