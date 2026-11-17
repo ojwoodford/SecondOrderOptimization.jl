@@ -1,4 +1,5 @@
 using SecondOrderOptimization, SparseArrays, LinearAlgebra, Static, Random, Test
+import DampedLinearSolve
 using Krylov
 using SecondOrderOptimization: dampen!, zero!, Success, NotPositiveDefinite, check_linear_system   # internal names
 using SecondOrderOptimization: getA, getb, getx, solve!
@@ -9,7 +10,7 @@ const SOO = SecondOrderOptimization
 function tp2_set!(ls, r)
     zero!(ls)
     getA(ls).r .= r
-    SOO.jtr!(getb(ls), getA(ls).J, getA(ls).r)
+    DampedLinearSolve.jtr!(getb(ls), getA(ls).J, getA(ls).r)
     return ls
 end
 tp2_solve!(ls, s, lambda, scaling) = (dampen!(ls, lambda, scaling); solve!(ls, static(s)))
@@ -44,41 +45,6 @@ end
 tp2_run(x, obj, opts, ws) = (x .= (1.0, 0.0); @allocated optimize!(x, obj, opts; workspace = ws))
 
 @testset "lsmr.jl" begin
-    @testset "Steps match QR: $kind ($m, $n)" for kind in (:dense, :sparse), (m, n) in ((40, 6), (6, 6), (40, 1), (4, 6))
-        rng = Xoshiro(m + 7n)
-        J = sprandn(rng, m, n, 0.5) + sparse(1:min(m, n), 1:min(m, n), 1.0, m, n)
-        r = randn(rng, m)
-        ll = kind === :dense ? SOO.DenseTallLinearSystem(Matrix(J); linsolver = :lsmr) : SOO.SparseTallLinearSystem(copy(J); linsolver = :lsmr)
-        lq = SOO.DenseTallLinearSystem(Matrix(J))
-        tp2_set!(ll, r); tp2_set!(lq, r)
-        for (lambda, scaling) in ((0.0, nothing), (0.3, nothing), (0.3, 0.5 .+ rand(rng, n)), (1e-8, nothing))
-            a, b = tp2_solve!(ll, :lsmr, lambda, scaling), tp2_solve!(lq, :qr, lambda, scaling)
-            @test a == b
-            # to LSMR's tolerance (√eps), on these well-conditioned J
-            a == Success && @test getx(ll) ≈ getx(lq) rtol = 1e-7
-        end
-        @test tp2_bytes(ll, 0.3) == 0
-        @test tp2_bytes(ll, 0.0) == 0
-        # an LSMR system holds no QR factorization, and a QR system no LSMR workspace
-        @test_throws ArgumentError tp2_solve!(ll, :qr, 0.3, nothing)
-        @test_throws ArgumentError tp2_solve!(lq, :lsmr, 0.3, nothing)
-    end
-
-    @testset "Non-finite J or r" begin
-        for (J, r) in (([1.0 NaN; 0.0 1.0; 1.0 1.0], ones(3)), ([1.0 0.0; 0.0 1.0; 1.0 1.0], [1.0, Inf, 0.0]))
-            for ll in (SOO.DenseTallLinearSystem(copy(J); linsolver = :lsmr), SOO.SparseTallLinearSystem(sparse(J); linsolver = :lsmr))
-                tp2_set!(ll, r)
-                @test tp2_solve!(ll, :lsmr, 1.0, nothing) == NotPositiveDefinite
-                @test all(isnan, getx(ll))
-            end
-        end
-    end
-
-    @testset "Meets the linear-system interface: $kind ($m, $n)" for kind in (:dense, :sparse), (m, n) in ((8, 5), (5, 5), (3, 5), (8, 1))
-        make = kind === :dense ? (s -> SOO.DenseTallLinearSystem(m, n; linsolver = :lsmr)) : (s -> SOO.SparseTallLinearSystem(sparse(ones(m, n)); linsolver = :lsmr))
-        @test isnothing(check_linear_system(make; n, linsolvers = (:lsmr,), rtol = 1e-6))
-    end
-
     @testset "Every Jacobian iterator with :lsmr: :$it, callbackchangesstate = $ccs" for it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton), ccs in (false, true)
         opts = OptimizationOptions(; iterator = it, linsolver = :lsmr, callbackchangesstate = ccs)
         qopts = OptimizationOptions(; iterator = it, callbackchangesstate = ccs)

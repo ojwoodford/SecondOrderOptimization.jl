@@ -1,4 +1,5 @@
 using SecondOrderOptimization, BlockLinearSystems, Krylov, Pardiso, StaticArrays, SparseArrays, LinearAlgebra, Random, Test
+import DampedLinearSolve
 const SOO = SecondOrderOptimization
 const CEXT = Base.get_extension(SecondOrderOptimization, :BlockLinearSystemsExt)
 
@@ -93,8 +94,8 @@ end
         end
     end
     # the static system is the one a static x0 gets with :auto and :qr; :lsmr has no static form
-    @test SOO.objective_linearsystem(zeros(SVector{4}), JacobianObjective(tp5_f, tp5_resjac!, 8), :qr) isa SOO.StaticTallLinearSystem
-    @test SOO.objective_linearsystem(zeros(SVector{4}), JacobianObjective(tp5_f, tp5_resjac!, 8), :lsmr) isa SOO.DenseTallLinearSystem
+    @test SOO.objective_linearsystem(zeros(SVector{4}), JacobianObjective(tp5_f, tp5_resjac!, 8), :qr) isa DampedLinearSolve.StaticTallLinearSystem
+    @test SOO.objective_linearsystem(zeros(SVector{4}), JacobianObjective(tp5_f, tp5_resjac!, 8), :lsmr) isa DampedLinearSolve.DenseTallLinearSystem
 end
 
 # IT2: gradient descent on a JacobianObjective. It uses only the gradient Jᵀr, f and update!, which every

@@ -164,7 +164,7 @@ struct JacobianObjective{F, RJ, JM}
     end
 end
 
-nresiduals(obj::JacobianObjective) = nresiduals_of(obj.J)
+nresiduals(obj::JacobianObjective) = jacobian_nrows(obj.J)
 
 # Everything checked before anything is allocated or any user function called
 function checkobjective(x0, obj::JacobianObjective, options::OptimizationOptions)

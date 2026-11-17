@@ -1,4 +1,5 @@
 using SecondOrderOptimization, StaticArrays, LinearAlgebra, Static, Random, Test
+import DampedLinearSolve
 using SecondOrderOptimization: dampen!, zero!, Success, NotPositiveDefinite, check_linear_system   # internal names
 using SecondOrderOptimization: getA, getb, getx, solve!
 const SOO = SecondOrderOptimization
@@ -8,7 +9,7 @@ const SOO = SecondOrderOptimization
 function tp4_set!(ls, r)
     zero!(ls)
     getA(ls).r .= r
-    SOO.jtr!(getb(ls), getA(ls).J, getA(ls).r)
+    DampedLinearSolve.jtr!(getb(ls), getA(ls).J, getA(ls).r)
     return ls
 end
 tp4_solve!(ls, lambda, scaling) = (dampen!(ls, lambda, scaling); solve!(ls, static(:qr)))
@@ -36,55 +37,21 @@ tp4_run(x0, obj, opts, ws) = optimize(x0, obj, opts; workspace = ws)
 tp4_bytes(x0, obj, opts, ws) = (tp4_run(x0, obj, opts, ws); @allocated tp4_run(x0, obj, opts, ws))
 
 @testset "statictallsystem.jl" begin
-    @testset "Steps equal the dense tall system's: ($m, $n)" for (m, n) in ((8, 3), (3, 3), (12, 1), (2, 5), (6, 6), (24, 2))
-        rng = Xoshiro(m + 10n)
-        J, r = randn(rng, m, n), randn(rng, m)
-        ls, ld = tp4_set!(SOO.StaticTallLinearSystem(copy(J)), r), tp4_set!(SOO.DenseTallLinearSystem(copy(J)), r)
-        @test getb(ls) ≈ getb(ld) rtol = 1e-14
-        v = randn(rng, n)
-        @test SOO.quadform(getA(ls), v) ≈ SOO.quadform(getA(ld), v) rtol = 1e-14
-        @test SOO.max_diag(getA(ls)) == SOO.max_diag(getA(ld))
-        for (lambda, scaling) in ((0.0, nothing), (0.3, nothing), (0.3, 0.5 .+ rand(rng, n)), (1e-10, nothing))
-            a, b = tp4_solve!(ls, lambda, scaling), tp4_solve!(ld, lambda, scaling)
-            @test a == b == (m < n && lambda == 0 ? NotPositiveDefinite : Success)
-            a == Success && @test getx(ls) ≈ getx(ld) rtol = 1e-12
-        end
-        # a duplicated column is rank deficient undamped, as for the dense system
-        Jr = hcat(J, J[:, 1])
-        if m * (n + 1) <= 64
-            lr, lq = tp4_set!(SOO.StaticTallLinearSystem(copy(Jr)), r), tp4_set!(SOO.DenseTallLinearSystem(copy(Jr)), r)
-            @test tp4_solve!(lr, 0.0, nothing) == tp4_solve!(lq, 0.0, nothing)
-        end
-    end
-
-    @testset "Non-finite J or r" begin
-        for (J, r) in (([1.0 NaN; 0.0 1.0; 1.0 1.0], ones(3)), ([1.0 0.0; 0.0 1.0; 1.0 1.0], [1.0, Inf, 0.0]))
-            ls = tp4_set!(SOO.StaticTallLinearSystem(copy(J)), r)
-            @test tp4_solve!(ls, 1.0, nothing) == NotPositiveDefinite
-            @test all(isnan, getx(ls))
-        end
-        @test_throws ArgumentError solve!(SOO.StaticTallLinearSystem(ones(3, 2)), static(:cholesky))
-    end
-
-    @testset "Meets the linear-system interface: ($m, $n)" for (m, n) in ((8, 5), (5, 5), (3, 5), (8, 1))
-        @test isnothing(check_linear_system(s -> SOO.StaticTallLinearSystem(zeros(m, n)); n, linsolvers = (:auto, :qr)))
-    end
-
     @testset "The static choice is made exactly when the rule says" begin
         x2 = SVector(1.0, 0.0)
-        @test SOO.MAX_STATIC_TALL == 48
+        @test DampedLinearSolve.MAX_STATIC_TALL == 48
         mk(x0, P, s = :auto) = SOO.objective_linearsystem(x0, JacobianObjective(tp4_cost, tp4_resjac!, P), static(s))
-        @test mk(x2, 24) isa SOO.StaticTallLinearSystem{24, 2}           # m·n = 48
-        @test mk(x2, 25) isa SOO.DenseTallLinearSystem                   # m·n = 50
-        @test mk(x2, ones(24, 2)) isa SOO.StaticTallLinearSystem{24, 2}
-        @test mk(x2, ones(25, 2)) isa SOO.DenseTallLinearSystem
-        @test mk(x2, 20, :qr) isa SOO.StaticTallLinearSystem
-        @test mk([1.0, 0.0], 20) isa SOO.DenseTallLinearSystem           # not a static number of variables
-        @test mk(1.0, 48) isa SOO.StaticTallLinearSystem{48, 1}
-        @test mk(1.0, 49) isa SOO.DenseTallLinearSystem
-        @test mk(SVector{17}(zeros(17)), 2) isa SOO.DenseTallLinearSystem  # above MAX_STATIC_SYSTEM
+        @test mk(x2, 24) isa DampedLinearSolve.StaticTallLinearSystem{24, 2}           # m·n = 48
+        @test mk(x2, 25) isa DampedLinearSolve.DenseTallLinearSystem                   # m·n = 50
+        @test mk(x2, ones(24, 2)) isa DampedLinearSolve.StaticTallLinearSystem{24, 2}
+        @test mk(x2, ones(25, 2)) isa DampedLinearSolve.DenseTallLinearSystem
+        @test mk(x2, 20, :qr) isa DampedLinearSolve.StaticTallLinearSystem
+        @test mk([1.0, 0.0], 20) isa DampedLinearSolve.DenseTallLinearSystem           # not a static number of variables
+        @test mk(1.0, 48) isa DampedLinearSolve.StaticTallLinearSystem{48, 1}
+        @test mk(1.0, 49) isa DampedLinearSolve.DenseTallLinearSystem
+        @test mk(SVector{17}(zeros(17)), 2) isa DampedLinearSolve.DenseTallLinearSystem  # above MAX_STATIC_SYSTEM
         # the workspace's system follows the same rule
-        @test OptimizationWorkspace(x2, JacobianObjective(tp4_cost, tp4_resjac!, ones(20, 2))).data[1].linsystem isa SOO.StaticTallLinearSystem
+        @test OptimizationWorkspace(x2, JacobianObjective(tp4_cost, tp4_resjac!, ones(20, 2))).data[1].linsystem isa DampedLinearSolve.StaticTallLinearSystem
     end
 
     @testset "Every Jacobian iterator: :$it, callbackchangesstate = $ccs" for it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton), ccs in (false, true)

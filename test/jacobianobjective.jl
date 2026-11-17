@@ -40,7 +40,7 @@ end
             err = try JacobianObjective(jrosen_cost, jrosen_resjac!, J); nothing catch e; e end
             @test err isa ArgumentError
             @test occursin(needle, err.msg)
-            @test occursin("Matrix{Float64}", err.msg) && occursin("every iterator", err.msg)
+            @test occursin("Matrix{Float64}", err.msg) && occursin("linsolver = :auto or :qr", err.msg)
         end
     end
 

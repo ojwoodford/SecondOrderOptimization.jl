@@ -1,6 +1,8 @@
 # The solver can be named in the options by a Symbol, a StaticSymbol or this enum; the options hold it
 # as a StaticSymbol, which is what the linear systems are solved with
 @enum OptimizationLinearSolver auto_solver cholesky_solver ldl_solver qr_solver
+linsolver_symbol(s::Symbol) = s
+linsolver_symbol(s::StaticSymbol) = dynamic(s)
 function linsolver_symbol(s::OptimizationLinearSolver)
     s == auto_solver && return :auto
     s == cholesky_solver && return :cholesky

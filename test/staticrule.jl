@@ -1,4 +1,5 @@
 using SecondOrderOptimization, StaticArrays, Static, Test
+import DampedLinearSolve
 using SecondOrderOptimization: usesstaticsystem, MAX_STATIC_SYSTEM   # internal names
 const SO = SecondOrderOptimization
 
@@ -12,7 +13,7 @@ const SO = SecondOrderOptimization
         @test usesstaticsystem(x0) == expected
         for s in (:auto, :ldl)
             ls = @inferred SO.hessian_linearsystem(x0, nothing, static(s))   # static, as OptimizationOptions passes it
-            @test (ls isa SO.StaticLinearSystem) == usesstaticsystem(x0)
+            @test (ls isa DampedLinearSolve.StaticLinearSystem) == usesstaticsystem(x0)
             @test length(SO.getx(ls)) == SO.dynamic(SO.nvars(x0))   # sized by nvars, not length
         end
     end

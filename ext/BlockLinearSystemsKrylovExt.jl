@@ -5,13 +5,14 @@ module BlockLinearSystemsKrylovExt
 # and `solve_reduced!`, without naming that extension's types.
 
 using SecondOrderOptimization
+using DampedLinearSolve
 using BlockLinearSystems
 using Krylov
 using LinearAlgebra
 using Static
 
-import SecondOrderOptimization: make_reduced, solve_reduced!, builtfor, Success, NotPositiveDefinite
-import SecondOrderOptimization: LSMR_ETOL, LSMR_AXTOL, LSMR_BTOL, LSMR_CONLIM
+import DampedLinearSolve: make_reduced, solve_reduced!, builtfor, Success, NotPositiveDefinite
+import DampedLinearSolve: LSMR_ETOL, LSMR_AXTOL, LSMR_BTOL, LSMR_CONLIM
 import BlockLinearSystems: SchurBlockJacobian, reduced_nrows, reduced_mul!, reduced_tmul!, reduced_residual!
 
 # The reduced problem min ‖J̃ x_r − r̃‖² + λ Σ s_r x_r², as LSMR's regularized problem: λₗ = √λ and

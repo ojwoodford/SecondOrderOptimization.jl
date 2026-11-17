@@ -1,4 +1,5 @@
 using Test, Random, LinearAlgebra, SparseArrays, StaticArrays, Static
+import DampedLinearSolve
 using SecondOrderOptimization, BlockLinearSystems, Polyester   # Polyester: BlockLinearSystems' threaded kernels
 using SecondOrderOptimization: check_linear_system   # internal names
 
@@ -928,7 +929,7 @@ end
             add_schur_diag!(ls.H, d)
             M = SecondOrderOptimization.conformance_matrix(ls.H)
             @test !isfinite(M[k, k])
-            ref = SecondOrderOptimization.DenseLinearSystem{Float64}(M, copy(p.b), zeros(n))
+            ref = DampedLinearSolve.DenseLinearSystem{Float64}(M, copy(p.b), zeros(n))
             for mk in (() -> SecondOrderOptimization.MarquardtData(0.0, zeros(n)),
                        () -> SecondOrderOptimization.MarquardtDataTrial(0.0, zeros(n), nothing, NaN, false))
                 lmd, lmd_ref = mk(), mk()
@@ -954,7 +955,7 @@ function as3_reference(ls, solver)
     bk = bunchkaufman(Symmetric(S, :U); check = false)
     issuccess(bk) || return (SecondOrderOptimization.NotPositiveDefinite, nothing)
     xr = bk \ g
-    return (SecondOrderOptimization.is_indefinite(bk) ? SecondOrderOptimization.Indefinite : SecondOrderOptimization.Success, xr)
+    return (DampedLinearSolve.is_indefinite(bk) ? SecondOrderOptimization.Indefinite : SecondOrderOptimization.Success, xr)
 end
 as3_solve_allocs(ls, s) = @allocated SecondOrderOptimization.solve!(ls, s)
 as3_allocs(x, obj, o, w) = (x .= 0.1; @allocated optimize!(x, obj, o; workspace = w))

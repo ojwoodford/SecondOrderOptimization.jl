@@ -1,5 +1,10 @@
 negate!(x) = @.(x = -x)
 
+# The iterators' names for the linear system's parts: the gradient is b, the Hessian A
+getgrad(ls) = getb(ls)
+gethessian(ls) = getA(ls)
+gethessgrad(ls) = gethessian(ls), getgrad(ls)
+
 # An iterator exists if it has a display name: each iterator defines `iteratorname` beside its
 # `construct`, `reset!` and `iterate!`. The names accepted are found from those methods.
 iteratorname(::StaticSymbol) = nothing

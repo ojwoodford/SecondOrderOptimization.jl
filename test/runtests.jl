@@ -5,13 +5,11 @@ using Test
 @testset "SecondOrderOptimization Tests" begin
     include("publicapi.jl")
     include("imports.jl")
-    include("utils.jl")
     include("stats.jl")
     include("linearsolve.jl")
     include("objectives.jl")
     include("jacobianobjective.jl")
     include("jacobianiterators.jl")
-    include("conformance.jl")
     include("tallsystem.jl")
     include("sparsetallsystem.jl")
     include("statictallsystem.jl")

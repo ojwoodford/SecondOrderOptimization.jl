@@ -1,6 +1,8 @@
 # Baseline profiling and allocation benchmark script across Static, Dense, and Sparse paths
+import DampedLinearSolve
 using SecondOrderOptimization
-using SecondOrderOptimization: StaticLinearSystem, DenseLinearSystem, makelinearsystem
+using SecondOrderOptimization: makelinearsystem
+using DampedLinearSolve: StaticLinearSystem, DenseLinearSystem
 using SecondOrderOptimization: solve!   # internal names
 using StaticArrays, SparseArrays, LinearAlgebra, Printf, Static
 

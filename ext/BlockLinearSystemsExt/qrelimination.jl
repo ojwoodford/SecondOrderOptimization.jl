@@ -31,14 +31,14 @@ end
 SchurJacobianHessian(J::SchurBlockJacobian{Float64}) = SchurJacobianHessian(J, Float64[], zeros(jacobian_ncols(J)), true)
 
 # The prototype: its checks, column count and workspace key
-function SecondOrderOptimization.checkjacobian(J::SchurBlockJacobian{T}) where T
-    T === Float64 || throw(ArgumentError("The Jacobian must be Float64; got a SchurBlockJacobian{$T}. $(SecondOrderOptimization.JACOBIAN_SUPPORT)."))
+function DampedLinearSolve.checkjacobian(J::SchurBlockJacobian{T}) where T
+    T === Float64 || throw(ArgumentError("The Jacobian must be Float64; got a SchurBlockJacobian{$T}. A SchurBlockJacobian prototype is a SchurBlockJacobian{Float64, Matrix{Float64}} or SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}, linsolver = :auto, :qr, :cholesky or :ldl, or :lsmr with Krylov.jl loaded."))
     return nothing
 end
-SecondOrderOptimization.jacobian_ncols(J::SchurBlockJacobian) = jacobian_ncols(J)
-SecondOrderOptimization.nresiduals_of(J::SchurBlockJacobian) = jacobian_nrows(J)
+DampedLinearSolve.jacobian_ncols(J::SchurBlockJacobian) = jacobian_ncols(J)
+DampedLinearSolve.jacobian_nrows(J::SchurBlockJacobian) = jacobian_nrows(J)
 # A workspace is reused for a prototype of the same type and the same (identical) structure
-SecondOrderOptimization.structurekey(J::SchurBlockJacobian) = (typeof(J), J.structure)
+DampedLinearSolve.structurekey(J::SchurBlockJacobian) = (typeof(J), J.structure)
 
 jacobian_ncols(J::SchurBlockJacobian) = J.structure.schur.nr + sum(Int, J.structure.schur.e_dims; init=0)
 jacobian_nrows(J::SchurBlockJacobian) = sum(t -> data_rows(J.structure, t), 1:J.structure.ntables; init=0)
@@ -46,27 +46,27 @@ data_rows(jst, t) = jst.table_nrows[t] - (t <= jst.schur.neblocks ? jst.table_to
 
 Base.size(A::SchurJacobianHessian) = (n = length(A.colnorm2); (n, n))
 Base.size(A::SchurJacobianHessian, d::Integer) = size(A)[d]
-SecondOrderOptimization.markstale!(A::SchurJacobianHessian) = (A.normsstale = true; A)
-SecondOrderOptimization.quadform(A::SchurJacobianHessian, v::AbstractVector) = jtj_quadform(A.J, v)
-function SecondOrderOptimization.colnorms2!(A::SchurJacobianHessian)
+DampedLinearSolve.markstale!(A::SchurJacobianHessian) = (A.normsstale = true; A)
+DampedLinearSolve.quadform(A::SchurJacobianHessian, v::AbstractVector) = jtj_quadform(A.J, v)
+function DampedLinearSolve.colnorms2!(A::SchurJacobianHessian)
     if A.normsstale
         jtj_diag!(A.colnorm2, A.J)
         A.normsstale = false
     end
     return A.colnorm2
 end
-function SecondOrderOptimization.max_diag(A::SchurJacobianHessian)
+function DampedLinearSolve.max_diag(A::SchurJacobianHessian)
     md = 0.0
-    for d in SecondOrderOptimization.colnorms2!(A)
+    for d in DampedLinearSolve.colnorms2!(A)
         md = max(md, d)
     end
     return md
 end
 
 # The storage the linearization writes (the tables, which hold J and r, and an empty r), and the gradient
-SecondOrderOptimization.getJ(A::SchurJacobianHessian) = A.J
-SecondOrderOptimization.getr(A::SchurJacobianHessian) = A.r
-SecondOrderOptimization.gradient!(g::AbstractVector, A::SchurJacobianHessian) = BlockLinearSystems.jtr!(g, A.J)
+DampedLinearSolve.getJ(A::SchurJacobianHessian) = A.J
+DampedLinearSolve.getr(A::SchurJacobianHessian) = A.r
+DampedLinearSolve.gradient!(g::AbstractVector, A::SchurJacobianHessian) = BlockLinearSystems.jtr!(g, A.J)
 
 # The reduced solvers' storage, built once by `make_reduced` (the Krylov extension adds :lsmr's)
 struct DenseQRReduced
@@ -96,23 +96,23 @@ end
 
 const ReducedSym = Union{StaticSymbol{:auto}, StaticSymbol{:qr}, StaticSymbol{:cholesky}, StaticSymbol{:ldl}, StaticSymbol{:lsmr}}
 
-SecondOrderOptimization.make_reduced(J::SchurBlockJacobian, linsolver) = make_reduced(J, static(SecondOrderOptimization.linsolver_symbol(linsolver)))
-function SecondOrderOptimization.make_reduced(J::SchurBlockJacobian{Float64, Matrix{Float64}}, ::Union{StaticSymbol{:auto}, StaticSymbol{:qr}})
+DampedLinearSolve.make_reduced(J::SchurBlockJacobian, linsolver) = make_reduced(J, static(DampedLinearSolve.linsolver_symbol(linsolver)))
+function DampedLinearSolve.make_reduced(J::SchurBlockJacobian{Float64, Matrix{Float64}}, ::Union{StaticSymbol{:auto}, StaticSymbol{:qr}})
     jst = J.structure
     nr, mt = jst.schur.nr, reduced_nrows(jst)
-    lwork = SecondOrderOptimization.geqrf_worksize(mt + nr, nr + 1)
+    lwork = DampedLinearSolve.geqrf_worksize(mt + nr, nr + 1)
     return DenseQRReduced(zeros(mt + nr, nr + 1), zeros(min(mt + nr, nr + 1)), zeros(lwork))
 end
-function SecondOrderOptimization.make_reduced(J::SchurBlockJacobian{Float64, Matrix{Float64}}, ::Union{StaticSymbol{:cholesky}, StaticSymbol{:ldl}})
+function DampedLinearSolve.make_reduced(J::SchurBlockJacobian{Float64, Matrix{Float64}}, ::Union{StaticSymbol{:cholesky}, StaticSymbol{:ldl}})
     nr = J.structure.schur.nr
     return DenseNormalReduced(zeros(nr, nr), zeros(nr), DenseLDLWorkspace(nr))
 end
 # QR whatever the storage: `:auto` is QR of J̃ for a sparse RType too (decided 2026-11-15, TP6)
-function SecondOrderOptimization.make_reduced(J::SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}, ::Union{StaticSymbol{:auto}, StaticSymbol{:qr}})
+function DampedLinearSolve.make_reduced(J::SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}, ::Union{StaticSymbol{:auto}, StaticSymbol{:qr}})
     Jt = build_reduced_jacobian_pattern(J.structure, Float64)
     return SparseQRReduced(Jt, zeros(size(Jt, 1)), SPQRWorkspace(Jt))
 end
-function SecondOrderOptimization.make_reduced(J::SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}, ::Union{StaticSymbol{:cholesky}, StaticSymbol{:ldl}})
+function DampedLinearSolve.make_reduced(J::SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}, ::Union{StaticSymbol{:cholesky}, StaticSymbol{:ldl}})
     jst = J.structure
     pattern = build_schur_pattern(jst.schur, Float64; extra_blocks = free_block_pairs(jst))
     S = copy(pattern.S_sparse)
@@ -121,7 +121,7 @@ function SecondOrderOptimization.make_reduced(J::SchurBlockJacobian{Float64, Spa
     S_factor_ldl = ldl_analyze(Symmetric(S, :U))
     return SparseNormalReduced(S, zeros(jst.schur.nr), pattern, collect(Int, pattern.diag_inds), S_chol, S_factor, S_factor_ldl)
 end
-SecondOrderOptimization.make_reduced(J::SchurBlockJacobian, ::StaticSymbol{S}) where S = throw(ArgumentError(linsolver_message(J, S)))
+DampedLinearSolve.make_reduced(J::SchurBlockJacobian, ::StaticSymbol{S}) where S = throw(ArgumentError(linsolver_message(J, S)))
 
 # The solvers accepted for each reduced storage, checked before anything is built or called
 reduced_linsolvers(::Type{Matrix{Float64}}) = (:auto, :qr, :cholesky, :ldl, :lsmr)
@@ -130,7 +130,7 @@ function linsolver_message(J::SchurBlockJacobian{Float64, RType}, s) where RType
     ok = join((":$x" for x in reduced_linsolvers(RType)), ", ", " or ")
     return "linsolver = :$s is not supported with a SchurBlockJacobian{Float64, $RType} Jacobian prototype; use $ok (:lsmr with Krylov.jl loaded)."
 end
-function SecondOrderOptimization.check_jacobian_linsolver(J::SchurBlockJacobian{Float64, RType}, s::Symbol) where RType
+function DampedLinearSolve.check_jacobian_linsolver(J::SchurBlockJacobian{Float64, RType}, s::Symbol) where RType
     s in reduced_linsolvers(RType) || throw(ArgumentError(linsolver_message(J, s)))
     return nothing
 end
@@ -160,33 +160,33 @@ function QRSchurLinearSystem(J::SchurBlockJacobian{Float64}, linsolver)
     return QRSchurLinearSystem(SchurJacobianHessian(J), zeros(n), zeros(n), QRReductionWorkspace(J), make_reduced(J, linsolver),
                                ones(n), zeros(nr), zeros(n - nr), 0.0, nothing)
 end
-SecondOrderOptimization.isfinitesystem(ls::QRSchurLinearSystem) = all(isfinite, ls.A.J.data)   # the tables hold J and r
+DampedLinearSolve.isfinitesystem(ls::QRSchurLinearSystem) = all(isfinite, ls.A.J.data)   # the tables hold J and r
 
-SecondOrderOptimization.tall_linearsystem(J::SchurBlockJacobian{Float64}, n, linsolver) = QRSchurLinearSystem(J, linsolver)
+DampedLinearSolve.maketallsystem(J::SchurBlockJacobian{Float64}, n, linsolver) = QRSchurLinearSystem(J, linsolver)
 # A workspace's own copy of the prototype
 SecondOrderOptimization.workspace_prototype(J::SchurBlockJacobian{Float64, RType}) where RType = SchurBlockJacobian{Float64, RType}(copy(J.data), J.structure)
 
-SecondOrderOptimization.zero!(ls::QRSchurLinearSystem) = (fill!(ls.b, 0.0); SecondOrderOptimization.markstale!(ls.A); ls)
+DampedLinearSolve.zero!(ls::QRSchurLinearSystem) = (fill!(ls.b, 0.0); DampedLinearSolve.markstale!(ls.A); ls)
 # A reused workspace's tables have the prototype's structure, so only the values are set
 SecondOrderOptimization.copyprototype!(J::SchurBlockJacobian, P::SchurBlockJacobian) = copyto!(J.data, P.data)
 
 # The trial system: its own tables (with the same entries), factored tables and gradient; the reduced solver's
 # storage and the scratch are shared, since only one of the two is solved at a time
-function SecondOrderOptimization.copy_structure(ls::QRSchurLinearSystem{RType}) where RType
+function DampedLinearSolve.copy_structure(ls::QRSchurLinearSystem{RType}) where RType
     J = ls.A.J
     At = SchurJacobianHessian(SchurBlockJacobian{Float64, RType}(copy(J.data), J.structure))
     return QRSchurLinearSystem(At, zeros(length(ls.b)), ls.x, trial_workspace(ls.ws), ls.reduced, ls.unit, ls.xr, ls.xe, ls.lambda, ls.scaling)
 end
-SecondOrderOptimization.sharex(ls::QRSchurLinearSystem, from) = ls.x === from.x ? ls :
+DampedLinearSolve.sharex(ls::QRSchurLinearSystem, from) = ls.x === from.x ? ls :
     QRSchurLinearSystem(ls.A, ls.b, from.x, ls.ws, ls.reduced, ls.unit, ls.xr, ls.xe, ls.lambda, ls.scaling)
 
 # The QR routes resolve a damping down to about eps² of the diagonal (as the tall systems do); those that form
 # S = J̃ᵀJ̃ only to about eps (as Cholesky of the normal equations)
-SecondOrderOptimization.dampingfloor(ls::QRSchurLinearSystem{<:Any, <:Union{DenseNormalReduced, SparseNormalReduced}}) = eps(Float64)
+DampedLinearSolve.dampingfloor(ls::QRSchurLinearSystem{<:Any, <:Union{DenseNormalReduced, SparseNormalReduced}}) = eps(Float64)
 
 scaling_of(ls::QRSchurLinearSystem) = isnothing(ls.scaling) ? ls.unit : ls.scaling
 
-function SecondOrderOptimization.solve!(ls::QRSchurLinearSystem, s::ReducedSym)
+function DampedLinearSolve.solve!(ls::QRSchurLinearSystem, s::ReducedSym)
     J = ls.A.J
     jst = J.structure
     nr = jst.schur.nr
@@ -207,15 +207,15 @@ function SecondOrderOptimization.solve!(ls::QRSchurLinearSystem, s::ReducedSym)
     all(isfinite, ls.x) || return NotPositiveDefinite
     return Success
 end
-SecondOrderOptimization.solve!(ls::QRSchurLinearSystem, ::StaticSymbol{S}) where S = solvermismatch(ls, S)
-SecondOrderOptimization.builtfor(::DenseQRReduced) = ":auto or :qr"
-SecondOrderOptimization.builtfor(::DenseNormalReduced) = ":cholesky or :ldl"
-SecondOrderOptimization.builtfor(::SparseQRReduced) = ":auto or :qr"
-SecondOrderOptimization.builtfor(::SparseNormalReduced) = ":cholesky or :ldl"
-SecondOrderOptimization.solverworkspace(ls::QRSchurLinearSystem) = ls.reduced
+DampedLinearSolve.solve!(ls::QRSchurLinearSystem, ::StaticSymbol{S}) where S = solvermismatch(ls, S)
+DampedLinearSolve.builtfor(::DenseQRReduced) = ":auto or :qr"
+DampedLinearSolve.builtfor(::DenseNormalReduced) = ":cholesky or :ldl"
+DampedLinearSolve.builtfor(::SparseQRReduced) = ":auto or :qr"
+DampedLinearSolve.builtfor(::SparseNormalReduced) = ":cholesky or :ldl"
+DampedLinearSolve.solverworkspace(ls::QRSchurLinearSystem) = ls.reduced
 
 # Dense QR of [J̃ r̃; √(λ s_r) 0], then R x_r = q
-function SecondOrderOptimization.solve_reduced!(ls::QRSchurLinearSystem, red::DenseQRReduced, ::Union{StaticSymbol{:auto}, StaticSymbol{:qr}}, lambda, s_r)
+function DampedLinearSolve.solve_reduced!(ls::QRSchurLinearSystem, red::DenseQRReduced, ::Union{StaticSymbol{:auto}, StaticSymbol{:qr}}, lambda, s_r)
     nr = length(ls.xr)
     Aug = red.Aug
     mt = size(Aug, 1) - nr
@@ -227,17 +227,17 @@ function SecondOrderOptimization.solve_reduced!(ls::QRSchurLinearSystem, red::De
         Aug[mt + i, i] = sqrt(lambda * s_r[i])
     end
     all(isfinite, Aug) || return NotPositiveDefinite
-    SecondOrderOptimization.geqrf_ws!(Aug, red.tau, red.work)
-    (mt + nr >= nr && SecondOrderOptimization.fullrank_upper(Aug, nr)) || return NotPositiveDefinite
+    DampedLinearSolve.geqrf_ws!(Aug, red.tau, red.work)
+    (mt + nr >= nr && DampedLinearSolve.fullrank_upper(Aug, nr)) || return NotPositiveDefinite
     @inbounds for i in 1:nr
         ls.xr[i] = Aug[i, nr + 1]
     end
-    SecondOrderOptimization.backsubstitute!(ls.xr, Aug, nr)
+    DampedLinearSolve.backsubstitute!(ls.xr, Aug, nr)
     return Success
 end
 
 # Sparse J̃ and r̃, then the damped least-squares problem by SPQR, as for a sparse Jacobian
-function SecondOrderOptimization.solve_reduced!(ls::QRSchurLinearSystem, red::SparseQRReduced, ::Union{StaticSymbol{:auto}, StaticSymbol{:qr}}, lambda, s_r)
+function DampedLinearSolve.solve_reduced!(ls::QRSchurLinearSystem, red::SparseQRReduced, ::Union{StaticSymbol{:auto}, StaticSymbol{:qr}}, lambda, s_r)
     reduced_jacobian!(red.Jt, red.rt, ls.ws)
     (all(isfinite, nonzeros(red.Jt)) && all(isfinite, red.rt)) || return NotPositiveDefinite
     return spqr_solve!(ls.xr, red.spqr, red.Jt, red.rt, lambda, s_r)
@@ -252,7 +252,7 @@ function build_normal!(red::DenseNormalReduced, ws, lambda, s_r)
     end
     return red
 end
-function SecondOrderOptimization.solve_reduced!(ls::QRSchurLinearSystem, red::DenseNormalReduced, s::Union{StaticSymbol{:cholesky}, StaticSymbol{:ldl}}, lambda, s_r)
+function DampedLinearSolve.solve_reduced!(ls::QRSchurLinearSystem, red::DenseNormalReduced, s::Union{StaticSymbol{:cholesky}, StaticSymbol{:ldl}}, lambda, s_r)
     build_normal!(red, ls.ws, lambda, s_r)
     all(isfinite, red.S) || return NotPositiveDefinite
     if s isa StaticSymbol{:cholesky}
@@ -263,14 +263,14 @@ function SecondOrderOptimization.solve_reduced!(ls::QRSchurLinearSystem, red::De
         end
         build_normal!(red, ls.ws, lambda, s_r)   # Cholesky overwrote S
     end
-    SecondOrderOptimization.sytrf_ws!(red.S, red.ldl) == 0 || return NotPositiveDefinite
+    DampedLinearSolve.sytrf_ws!(red.S, red.ldl) == 0 || return NotPositiveDefinite
     copyto!(ls.xr, red.g)
     LinearAlgebra.LAPACK.sytrs!('U', red.S, red.ldl.ipiv, ls.xr)
     return is_indefinite_packed(red.S, red.ldl.ipiv, 'U') ? Indefinite : Success
 end
 
 # Sparse S, then CHOLMOD Cholesky falling back to LDLᵀ, or LDLᵀ for :ldl: the sparse Schur system's rule
-function SecondOrderOptimization.solve_reduced!(ls::QRSchurLinearSystem, red::SparseNormalReduced, s::Union{StaticSymbol{:cholesky}, StaticSymbol{:ldl}}, lambda, s_r)
+function DampedLinearSolve.solve_reduced!(ls::QRSchurLinearSystem, red::SparseNormalReduced, s::Union{StaticSymbol{:cholesky}, StaticSymbol{:ldl}}, lambda, s_r)
     reduced_normal_sparse!(red.S, red.g, ls.ws, red.pattern)
     nz = nonzeros(red.S)
     @inbounds for i in eachindex(s_r)
@@ -333,7 +333,7 @@ function dense_residual(J::SchurBlockJacobian)
     return reduce(vcat, [table_view(J, t)[1:data_rows(jst, t), end] for t in 1:jst.ntables])
 end
 
-SecondOrderOptimization.conformance_matrix(A::SchurJacobianHessian) = SecondOrderOptimization.conformance_gram(dense_jacobian(A.J))
+DampedLinearSolve.conformance_matrix(A::SchurJacobianHessian) = DampedLinearSolve.conformance_gram(dense_jacobian(A.J))
 # A factor Jd with JᵀJ = M that the tables can hold exactly, when M has the pattern of JᵀJ and is positive
 # definite: the Cholesky factor U of M with the eliminated variables first. Its rows for eliminated block e are
 # [coupling | U_e], nonzero only in e's coupled retained blocks, and go in the first d_e rows of e's table; its
@@ -367,9 +367,9 @@ function exact_factor(J::SchurBlockJacobian, M::AbstractMatrix)
     return Jd
 end
 
-function SecondOrderOptimization.conformance_fill!(A::SchurJacobianHessian, M::AbstractMatrix)
+function DampedLinearSolve.conformance_fill!(A::SchurJacobianHessian, M::AbstractMatrix)
     J = A.J
-    Jd = something(exact_factor(J, M), SecondOrderOptimization.conformance_factor(M, jacobian_nrows(J), jacobian_ncols(J)))
+    Jd = something(exact_factor(J, M), DampedLinearSolve.conformance_factor(M, jacobian_nrows(J), jacobian_ncols(J)))
     foreach_table_block(J) do t, rows, cols, tcols
         table_view(J, t)[1:length(rows), tcols] .= Jd[rows, cols]
     end
@@ -385,7 +385,7 @@ function SecondOrderOptimization.conformance_fill!(A::SchurJacobianHessian, M::A
     end
     return A
 end
-function SecondOrderOptimization.conformance_fillb!(ls::QRSchurLinearSystem, b::AbstractVector)
+function DampedLinearSolve.conformance_fillb!(ls::QRSchurLinearSystem, b::AbstractVector)
     J = ls.A.J
     Jd = dense_jacobian(J)
     ls.b .= b
@@ -399,4 +399,4 @@ function SecondOrderOptimization.conformance_fillb!(ls::QRSchurLinearSystem, b::
     end
     return ls
 end
-SecondOrderOptimization.conformance_traits(A::SchurJacobianHessian) = (exact = false, maxrank = min(jacobian_nrows(A.J), size(A, 1)), indefinite = false, accumulates = false)
+DampedLinearSolve.conformance_traits(A::SchurJacobianHessian) = (exact = false, maxrank = min(jacobian_nrows(A.J), size(A, 1)), indefinite = false, accumulates = false)
