@@ -1,6 +1,6 @@
 using SecondOrderOptimization, BlockLinearSystems, Krylov, Pardiso, StaticArrays, SparseArrays, LinearAlgebra, Random, Test
 import DampedLinearSolve
-include("fixtures/load.jl"); loadfixtures("tp5.jl")
+include("fixtures/load.jl"); loadfixtures("tp5.jl", "tp3.jl")
 const SOO = SecondOrderOptimization
 
 # TP5: the supported-combinations table of the JacobianObjective docstring and the Jacobian tutorial. Every
@@ -20,13 +20,28 @@ const TP5_ALL_ITERATORS = TP5_ITERATORS   # every iterator (IT2)
 
 @testset "jacobiancombinations.jl" begin
     xref = TP5_V \ TP5_Y
+    # The Schur rows' supported cells run qrelimination.jl's TP3 problem, with its objective and option types, so
+    # that the two files compile the same specializations; they are compared on cost against the dense run of
+    # the same problem (rules.md 31)
+    tp3 = TP3Problem(tp3_structure())
+    tp3_reference = Dict(it => optimize(fill(0.1, tp3.lay.n), tp3_dense_objective(tp3), OptimizationOptions(; iterator = it, maxiters = 200))[2]
+        for it in TP5_ITERATORS if it !== :gradientdescent)
     @testset "$kind$(static ? " (static x0)" : ""), :$s, :$it" for kind in keys(TP5_TABLE), static in (false, true), s in TP5_ALL_SOLVERS, it in TP5_ALL_ITERATORS
         static && kind !== :integer && kind !== :matrix && continue
         x0 = static ? zeros(SVector{4, Float64}) : zeros(4)
         obj = JacobianObjective(tp5_f, tp5_resjac!, tp5_prototype(kind))
         opts = OptimizationOptions(; iterator = it, linsolver = s, maxiters = 100)
         TP5_CALLED[] = false
-        if s in TP5_TABLE[kind] && it in TP5_ITERATORS
+        if s in TP5_TABLE[kind] && it in TP5_ITERATORS && kind in (:schur_dense, :schur_sparse)
+            RT = kind === :schur_dense ? Matrix{Float64} : SparseMatrixCSC{Float64, Int}
+            _, res = optimize(fill(0.1, tp3.lay.n), tp3_objective(tp3, RT), OptimizationOptions(; iterator = it, linsolver = s, maxiters = 200))
+            if it === :gradientdescent
+                @test res.bestcost < res.startcost
+            else
+                @test isconverged(res)
+                @test res.bestcost ≈ tp3_reference[it].bestcost rtol = 1e-8
+            end
+        elseif s in TP5_TABLE[kind] && it in TP5_ITERATORS
             x, res = optimize(x0, obj, opts)
             if it === :gradientdescent
                 # linear convergence: its accuracy is tested against the HessianObjective run below
