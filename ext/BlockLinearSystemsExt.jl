@@ -67,7 +67,7 @@ function DenseSchurLinearSystem(
     S = zeros(T, nr, nr)
 
     K = nchunks > 0 ? nchunks : (isempty(H.structure.chunks) ? 1 : length(H.structure.chunks[1]))
-    ws = SchurReductionWorkspace{T}(H.structure, K; is_dense=true)
+    ws = SchurReductionWorkspace{T}(H.structure, K)
 
     return DenseSchurLinearSystem{T}(
         H, b, x, b_r, b_e, x_r, x_e, g_S, S, DenseLDLWorkspace(nr), zero(T), scaling, scaling_r, scaling_e, ws
@@ -150,7 +150,7 @@ function SparseSchurLinearSystem(
     g_S = zeros(T, nr)
 
     K = nchunks > 0 ? nchunks : (isempty(H.structure.chunks) ? 1 : length(H.structure.chunks[1]))
-    ws = SchurReductionWorkspace{T}(H.structure, K; is_dense=false, nnz_S=nnz(S))
+    ws = SchurReductionWorkspace{T}(H.structure, K)
 
     return SparseSchurLinearSystem{T, Ti, typeof(S_factor_ldl), typeof(S_factor), typeof(S_chol)}(
         H, b, x, b_r, b_e, x_r, x_e, g_S, S, S_factor, S_factor_ldl, S_chol,
