@@ -2,6 +2,22 @@
 
 using Test
 
+# Test groups, chosen by the arguments (`julia test/runtests.jl threaded`, or `Pkg.test(test_args = ["threaded"])`);
+# every group when there are none. `threaded`: the tests whose behaviour depends on `Threads.nthreads()`;
+# `serial`: everything else. Full check before a push: every group on 1 thread, then `threaded` on 4.
+const TEST_GROUPS = (
+    serial = ["publicapi.jl", "imports.jl", "stats.jl", "linearsolve.jl", "objectives.jl", "jacobianobjective.jl",
+        "jacobianiterators.jl", "tallsystem.jl", "sparsetallsystem.jl", "statictallsystem.jl", "staticrule.jl",
+        "functional.jl", "convergence.jl", "nantrial.jl", "trialreuse.jl", "OptimizationWorkspace.jl",
+        "general_objectives.jl", "dogleg_trustregion.jl", "illconditioned.jl", "extensions.jl", "lsmr.jl",
+        "blocklinearsystems_ext.jl", "qrelimination.jl", "jacobiancombinations.jl"],
+    threaded = ["qrelimination_threaded.jl"],
+)
+const SELECTED_GROUPS = isempty(ARGS) ? collect(keys(TEST_GROUPS)) : Symbol.(ARGS)
+for g in SELECTED_GROUPS
+    g in keys(TEST_GROUPS) || error("Unknown test group :$g; the groups are $(join(keys(TEST_GROUPS), ", "))")
+end
+
 # Includes a test file and logs its wall time and compile time. `compile_time` is reported by `@timed` from
 # Julia 1.11; before that it is logged as NaN.
 function timed_include(file)
@@ -12,29 +28,7 @@ function timed_include(file)
 end
 
 @testset verbose = true "SecondOrderOptimization Tests" begin
-    timed_include("publicapi.jl")
-    timed_include("imports.jl")
-    timed_include("stats.jl")
-    timed_include("linearsolve.jl")
-    timed_include("objectives.jl")
-    timed_include("jacobianobjective.jl")
-    timed_include("jacobianiterators.jl")
-    timed_include("tallsystem.jl")
-    timed_include("sparsetallsystem.jl")
-    timed_include("statictallsystem.jl")
-    timed_include("staticrule.jl")
-    timed_include("functional.jl")
-    timed_include("convergence.jl")
-    timed_include("nantrial.jl")
-    timed_include("trialreuse.jl")
-    timed_include("OptimizationWorkspace.jl")
-    timed_include("general_objectives.jl")
-    timed_include("dogleg_trustregion.jl")
-    timed_include("illconditioned.jl")
-    timed_include("extensions.jl")
-    timed_include("lsmr.jl")
-    timed_include("blocklinearsystems_ext.jl")
-    timed_include("qrelimination.jl")
-    timed_include("qrelimination_threaded.jl")
-    timed_include("jacobiancombinations.jl")
+    for g in SELECTED_GROUPS, file in TEST_GROUPS[g]
+        timed_include(file)
+    end
 end
