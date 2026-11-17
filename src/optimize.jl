@@ -198,7 +198,7 @@ end
         # tested. The absolute change still is: at the rounding floor of a minimum the step an
         # iterator takes is often restricted (a Cauchy step, a shifted solve, LM's damping), and
         # there the cost no longer changes
-        restricted = dcost >= 0 && restrictedstep(iteratedata)
+        unrestricted = !(dcost >= 0 && restrictedstep(iteratedata))
         if dcost >= 0
             data.bestcost = cost
             rose = false
@@ -236,11 +236,11 @@ end
         maxstep = maximum(abs, getx(data.linsystem))::Float64
         converged |= isinf(cost)                                         << 0
         converged |= isnan(cost)                                         << 1
-        converged |= (!restricted && dcost < abs(data.bestcost) * options.reldcost) << 2
+        converged |= (unrestricted && dcost < abs(data.bestcost) * options.reldcost) << 2
         converged |= (dcost < options.absdcost)                          << 3
         converged |= isinf(maxstep)                                      << 4
         converged |= isnan(maxstep)                                      << 5
-        converged |= (!restricted && maxstep < options.dstep)                       << 6
+        converged |= (unrestricted && maxstep < options.dstep)           << 6
         if stalls > options.maxstall
             # Stalled (converged) if the cost has settled: some iteration since the last significant
             # improvement stayed within the stall band above refcost, and none rose by more than
