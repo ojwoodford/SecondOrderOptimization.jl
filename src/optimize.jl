@@ -50,7 +50,7 @@ jacobian_structure(J) = JacobianPrototypeKey(structurekey(J))
 linearizer(obj::HessianObjective) = obj.fdf!
 linearizer(obj::JacobianObjective) = JacobianLinearize(obj.resjac!)
 
-# How the iterators and the outer loop drive a tall system unchanged: they call
+# How the iterators and the outer loop drive a Jacobian system unchanged: they call
 # `fdf!(getb(ls), getA(ls), x)`, and this wrapper turns that into `resjac!(r, J, x)` on the storage's
 # J and r, then has the storage form g = Jᵀr and invalidate what it computed from the old J and r
 struct JacobianLinearize{RJ}

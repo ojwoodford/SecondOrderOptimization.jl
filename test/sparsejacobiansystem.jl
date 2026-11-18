@@ -5,8 +5,8 @@ using SecondOrderOptimization: getA, getb, getx, solve!   # explicit: Krylov, lo
 include("fixtures/load.jl"); loadfixtures("termbits.jl")
 const SOO = SecondOrderOptimization
 
-# TP1: the sparse tall system (a SparseMatrixCSC{Float64, Int} Jacobian, solved by SPQR) against
-# the dense tall system on the same J
+# TP1: the sparse Jacobian system (a SparseMatrixCSC{Float64, Int} Jacobian, solved by SPQR) against
+# the dense Jacobian system on the same J
 
 # Both systems set to J and r as a linearization leaves them (b = Jᵀr)
 function tp1_pair(J::SparseMatrixCSC, r)

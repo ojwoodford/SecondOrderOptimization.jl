@@ -64,7 +64,7 @@ const TP5_ALL_ITERATORS = TP5_ITERATORS   # every iterator (IT2)
 end
 
 # IT2: gradient descent on a JacobianObjective. It uses only the gradient Jᵀr, f and update!, which every
-# tall system provides, so it runs with every prototype kind and every solver its row lists, and follows
+# Jacobian system provides, so it runs with every prototype kind and every solver its row lists, and follows
 # the HessianObjective run of the same problem. resjac! and f here write preallocated storage, so the
 # allocation count is the optimizer's own.
 

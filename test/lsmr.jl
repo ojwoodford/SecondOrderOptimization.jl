@@ -5,7 +5,7 @@ using SecondOrderOptimization: dampen!, zero!, Success, NotPositiveDefinite, che
 using SecondOrderOptimization: getA, getb, getx, solve!
 const SOO = SecondOrderOptimization
 
-# TP2: LSMR on the Jacobian of the dense and sparse tall systems (KrylovExt), against their QR solve
+# TP2: LSMR on the Jacobian of the dense and sparse Jacobian systems (KrylovExt), against their QR solve
 
 function tp2_set!(ls, r)
     zero!(ls)

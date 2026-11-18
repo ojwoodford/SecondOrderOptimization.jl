@@ -1,7 +1,7 @@
 using SecondOrderOptimization, BlockLinearSystems, SparseArrays, LinearAlgebra, Static, Random
 using SecondOrderOptimization: dampen!, zero!, getA, getb, solve!   # internal names
 
-# TP3: QR elimination on the Jacobian path (a SchurBlockJacobian prototype), against the normal path's Schur
+# TP3: QR elimination on the Jacobian path (a SchurBlockJacobian prototype), against the Hessian path's Schur
 # system and a dense least-squares solve of the same problem
 
 const TP3_SOLVERS = Dict(Matrix{Float64} => (:auto, :qr, :cholesky, :ldl, :lsmr),
@@ -145,7 +145,7 @@ function tp3_system(p, ::Type{RT}, s, x) where RT
     return ls
 end
 
-# The normal path's dense Schur system for the same JᵀJ and Jᵀr
+# The Hessian path's dense Schur system for the same JᵀJ and Jᵀr
 function tp3_schur(p, x)
     Jd = zeros(p.lay.m, p.lay.n); rd = zeros(p.lay.m)
     tp3_dense!(p, rd, Jd, x)

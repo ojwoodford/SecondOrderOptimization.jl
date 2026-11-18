@@ -4,7 +4,7 @@ using SecondOrderOptimization: dampen!, zero!, Success, NotPositiveDefinite, che
 using SecondOrderOptimization: getA, getb, getx, solve!
 const SOO = SecondOrderOptimization
 
-# TP4: the static tall system for small problems, against the dense tall system
+# TP4: the static Jacobian system for small problems, against the dense Jacobian system
 
 function tp4_set!(ls, r)
     zero!(ls)

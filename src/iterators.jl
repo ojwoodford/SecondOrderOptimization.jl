@@ -432,7 +432,7 @@ reset!(lmd::MarquardtDataTrial) = (fill!(lmd.scaling, 0.0); lmd.trialready = fal
 
 const AnyMarquardtData = Union{MarquardtData, MarquardtDataTrial}
 
-# Marquardt scaling from the undamped diagonal of A (the squared column norms of J for a tall system), which
+# Marquardt scaling from the undamped diagonal of A (the squared column norms of J for a Jacobian system), which
 # the system writes (`getdiag!`): a running maximum of its absolute values, a non-finite entry counting as 1,
 # then a floor of 1e-8 times the largest scale (and at least 1e-12). The scale is in the units of diag(A), as
 # `dampen!(ls, λ, s)` expects.

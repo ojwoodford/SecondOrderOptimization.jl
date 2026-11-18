@@ -156,7 +156,7 @@ SOO.update(x::Rot3, dx, start=1) = Rot3(x.R * expso3(SVector(dx[start], dx[start
         end
     end
 
-    @testset "Ill-conditioned problem: the tall path reaches the least-squares minimum" begin
+    @testset "Ill-conditioned problem: the Jacobian path reaches the least-squares minimum" begin
         # A degree-13 polynomial fit (cond(J) ≈ 4e9), scaled so that the iterator's floor on the
         # damping (1e-12) is far below the smallest squared singular value
         tt = collect(range(0, 1; length=60))

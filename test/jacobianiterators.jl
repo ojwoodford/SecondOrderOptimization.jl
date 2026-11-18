@@ -5,7 +5,7 @@ include("fixtures/load.jl"); loadfixtures("termbits.jl", "w_problems.jl")
 const SOO = SecondOrderOptimization
 using SecondOrderOptimization: getA, getb, getx, solve!   # explicit: Krylov, loaded by other test files, also exports solve!
 
-# W: the iterators other than :levenbergmarquardt on a JacobianObjective (the dense tall system),
+# W: the iterators other than :levenbergmarquardt on a JacobianObjective (the dense Jacobian system),
 # against the normal equations built from the same J
 
 # The iterators widened to in section W, each tested in both variants
@@ -193,7 +193,7 @@ const W_ITERATORS = (:levenbergmarquardt_dtd, :dogleg, :newton)
         end
     end
 
-    @testset "The tall system tolerates x being overwritten between solves" begin
+    @testset "The Jacobian system tolerates x being overwritten between solves" begin
         # dogleg writes its own step into getx(ls) between solves, and its trial system shares x
         rng = Xoshiro(23)
         J = randn(rng, 9, 4); r = randn(rng, 9)
@@ -229,7 +229,7 @@ const W_ITERATORS = (:levenbergmarquardt_dtd, :dogleg, :newton)
         end
     end
 
-    @testset "Newton's diagonal shift on the tall system, and dampen!(ls, 0.0) restoring it" begin
+    @testset "Newton's diagonal shift on the Jacobian system, and dampen!(ls, 0.0) restoring it" begin
         rng = Xoshiro(29)
         # full rank: undamped, shifted, then undamped again gives the identical x
         J = randn(rng, 10, 4); r = randn(rng, 10)
@@ -358,7 +358,7 @@ const W_ITERATORS = (:levenbergmarquardt_dtd, :dogleg, :newton)
         @test !hasbits(resJ, TERMINATION_LINSOLVER_FAILED)
         @test resJ.bestcost < resJ.startcost && resH.bestcost < resH.startcost
         # Marquardt's damping floor is the solver's (Q5): eps² times the scaled diagonal for QR of J,
-        # so the tall path resolves the small singular directions (cond(J)² ≈ 1.5e19). Before Q5 the
+        # so the Jacobian path resolves the small singular directions (cond(J)² ≈ 1.5e19). Before Q5 the
         # floor was 1e-12 and both forms stalled at 81 times the minimum. The normal equations'
         # floor is eps, and they stay above it (measured: 5.0e-4 on Julia 1.13, 1.2e-2 on 1.10).
         if it === :levenbergmarquardt_dtd
@@ -367,8 +367,8 @@ const W_ITERATORS = (:levenbergmarquardt_dtd, :dogleg, :newton)
         end
         # The Gauss-Newton step of dogleg and Newton is undamped: from QR it reaches the minimum
         # in a few iterations; from Cholesky of the normal equations it does not. Measured on
-        # Julia 1.13 / 1.10: dogleg tall 1.8e-14 in 8 iterations / 4.2e-15 in 6, normal 6.5e4 at
-        # maxiters / 1.8e-3 in 396; Newton tall 1.3e-14 in 7 / 2.5e-15 in 8, normal 6.5e4 / 2.2e-4,
+        # Julia 1.13 / 1.10: dogleg Jacobian 1.8e-14 in 8 iterations / 4.2e-15 in 6, Hessian 6.5e4 at
+        # maxiters / 1.8e-3 in 396; Newton Jacobian 1.3e-14 in 7 / 2.5e-15 in 8, Hessian 6.5e4 / 2.2e-4,
         # both at maxiters. (Measured before Q6, when Newton stopped on max_fails at the minimum: it
         # rejects no step, and the cost's rounding noise counted as failures. With the default
         # reldcost of Q6 it ends on rel_dcost in 3 iterations, at the same cost.)
@@ -385,7 +385,7 @@ end
 # Every iterator accepted with a JacobianObjective
 const Z_ITERATORS = (:levenbergmarquardt, W_ITERATORS...)
 
-# A tall system whose zero! forgets to invalidate the factorization, for the checker
+# A Jacobian system whose zero! forgets to invalidate the factorization, for the checker
 struct LazyZeroJacobian <: AbstractLinearSystem
     inner::DampedLinearSolve.DenseJacobianLinearSystem
 end
@@ -713,7 +713,7 @@ end
         @test lmd.lambda == 4e-6
     end
 
-    @testset "The ill-conditioned problem, unscaled: the tall path with :levenbergmarquardt reaches the minimum" begin
+    @testset "The ill-conditioned problem, unscaled: the Jacobian path with :levenbergmarquardt reaches the minimum" begin
         # Before Q5 the absolute floor 1e-12 was above the smallest squared singular value (about
         # 4e-18 unscaled), and both forms stopped at 20 times the minimum after 500 iterations
         tt = collect(range(0, 1; length=60))
@@ -791,7 +791,7 @@ end
         x, res = optimize(zeros(14), JacobianObjective(f_rows, resjac_cols!, 60), opts)
         excess = (exactcost(x) - costmin) / costmin
         disagreement = abs(f_rows(x) - resjac_cols!(zeros(60), zeros(60, 14), x)) / f_rows(x)
-        @info "P6: tall Levenberg-Marquardt on the ill-conditioned fit, f and resjac! rounded differently" excess disagreement iterations=res.niterations termination=termnames(res)
+        @info "P6: Jacobian Levenberg-Marquardt on the ill-conditioned fit, f and resjac! rounded differently" excess disagreement iterations=res.niterations termination=termnames(res)
         @test disagreement > 1e-9     # the two costs differ by far more than eps (measured: 1.7e-8 on 1.13, 2.4e-8 on 1.10)
         @test isconverged(res)
         @test excess < 1e-13          # at the minimum
