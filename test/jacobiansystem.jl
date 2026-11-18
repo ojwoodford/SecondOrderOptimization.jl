@@ -2,7 +2,7 @@ using SecondOrderOptimization, Test
 
 # The memory a workspace of the tall system takes, which needs the optimizer's workspace (the
 # solve-level tests of the tall system are DampedLinearSolve's)
-@testset "tallsystem.jl" begin
+@testset "jacobiansystem.jl" begin
     @testset "Memory: J, one scratch copy, and one more J for the trial system (Q3)" begin
         m, n = 20_000, 50
         sz = 8 * m * (n + 1)

@@ -7,7 +7,7 @@ using Test
 # `serial`: everything else. Full check before a push: every group on 1 thread, then `threaded` on 4.
 const TEST_GROUPS = (
     serial = ["publicapi.jl", "imports.jl", "stats.jl", "linearsolve.jl", "objectives.jl", "jacobianobjective.jl",
-        "jacobianiterators.jl", "tallsystem.jl", "sparsetallsystem.jl", "statictallsystem.jl", "staticrule.jl",
+        "jacobianiterators.jl", "jacobiansystem.jl", "sparsejacobiansystem.jl", "staticjacobiansystem.jl", "staticrule.jl",
         "functional.jl", "convergence.jl", "nantrial.jl", "trialreuse.jl", "OptimizationWorkspace.jl",
         "general_objectives.jl", "dogleg_trustregion.jl", "illconditioned.jl", "extensions.jl", "lsmr.jl",
         "blocklinearsystems_ext.jl", "qrelimination.jl", "jacobiancombinations.jl"],

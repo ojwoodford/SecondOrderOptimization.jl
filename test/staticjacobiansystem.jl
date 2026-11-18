@@ -36,7 +36,7 @@ end
 tp4_run(x0, obj, opts, ws) = optimize(x0, obj, opts; workspace = ws)
 tp4_bytes(x0, obj, opts, ws) = (tp4_run(x0, obj, opts, ws); @allocated tp4_run(x0, obj, opts, ws))
 
-@testset "statictallsystem.jl" begin
+@testset "staticjacobiansystem.jl" begin
     @testset "The static choice is made exactly when the rule says" begin
         x2 = SVector(1.0, 0.0)
         @test DampedLinearSolve.MAX_STATIC_TALL == 48

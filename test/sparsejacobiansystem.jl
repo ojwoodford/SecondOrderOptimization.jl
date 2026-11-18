@@ -51,7 +51,7 @@ function tp1_resjac!(r, J, x)
 end
 tp1_run(x, obj, opts, ws) = (x .= (1.0, 0.0); optimize!(x, obj, opts; workspace = ws))
 
-@testset "sparsetallsystem.jl" begin
+@testset "sparsejacobiansystem.jl" begin
     @testset "Every Jacobian iterator: :$it, callbackchangesstate = $ccs" for it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton), ccs in (false, true)
         opts = OptimizationOptions(; iterator = it, callbackchangesstate = ccs)
         xs, rs = optimize([1.0, 0.0], JacobianObjective(tp1_cost, tp1_resjac!, sparse(ones(20, 2))), opts)
