@@ -85,8 +85,8 @@ dense Householder QR for a dense `J`, and SuiteSparse's sparse QR (SPQR) for a s
   linear-system contract, such as a `SchurBlockJacobian{Float64, RType}`: the variables are
   partitioned into retained and eliminated blocks, and each step eliminates the eliminated blocks by
   QR, solves the reduced problem in the retained variables and back-substitutes. `resjac!` writes
-  the Jacobian blocks and the residuals into `J`'s tables (through that package's
-  `coupling_block`, `eliminated_block` and `residual_block`); its `r` argument is then an empty
+  the Jacobian blocks and the residuals into `J` by row block (through that package's `blockentry`,
+  `block(J, k, entry, nrows, ncols)` and `residual_block(J, k)`); its `r` argument is then an empty
   vector. `RType`, `Matrix{Float64}` or
   `SparseMatrixCSC{Float64, Int}`, is the storage of the reduced system. A prototype is the matrix `resjac!` writes
   into, with its values (a trial system, for `callbackchangesstate = false`, works on a copy
