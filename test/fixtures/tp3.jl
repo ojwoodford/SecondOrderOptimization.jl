@@ -1,6 +1,5 @@
 using SecondOrderOptimization, BlockLinearSystems, SparseArrays, LinearAlgebra, Static, Random
 using SecondOrderOptimization: dampen!, zero!, getA, getb, solve!   # internal names
-const QREXT = Base.get_extension(BlockLinearSystems, :DampedLinearSolveExt)
 
 # TP3: QR elimination on the Jacobian path (a SchurBlockJacobian prototype), against the normal path's Schur
 # system and a dense least-squares solve of the same problem
@@ -9,42 +8,42 @@ const TP3_SOLVERS = Dict(Matrix{Float64} => (:auto, :qr, :cholesky, :ldl, :lsmr)
                          SparseMatrixCSC{Float64, Int} => (:auto, :qr, :cholesky, :ldl, :lsmr))
 
 # Three retained blocks; six eliminated blocks, one above D_STATIC (9) and, with `under`, one with fewer rows
-# than dimensions; a free group of rows coupled to every retained block
-function tp3_structure(; under = false, nchunks = 1)
-    r_dims, e_dims = [6, 6, 6], [3, 3, 3, 9, 2, 1]
-    couplings = [[1, 2], [1, 2, 3], [2, 3], [1, 3], [1, 2], [3]]
+# than dimensions; a free group of rows coupled to every retained block. Described in this problem's own numbering:
+# column blocks 1–3 retained, 4–9 eliminated; row block e (1–6) the rows of eliminated block e and its couplings, row
+# block 7 the free rows.
+const TP3_R_DIMS, TP3_E_DIMS = [6, 6, 6], [3, 3, 3, 9, 2, 1]
+const TP3_COUPLINGS = [[1, 2], [1, 2, 3], [2, 3], [1, 3], [1, 2], [3]]
+function tp3_description(; under = false)
     e_rows = [8, 10, 6, 12, under ? 1 : 4, 3]
-    return SchurJacobianStructure(r_dims, e_dims, couplings, e_rows; free_rows = [20], free_retained = [[1, 2, 3]], nchunks)
+    rowblocks = [[[c; 3 + e] for (e, c) in enumerate(TP3_COUPLINGS)]; [[1, 2, 3]]]
+    return (blocksizes = [TP3_R_DIMS; TP3_E_DIMS], rowblocks, rowblocksizes = [e_rows; 20],
+            eliminated = [falses(3); trues(6)])
+end
+function tp3_structure(; under = false, nchunks = 1)
+    d = tp3_description(; under)
+    return SchurJacobianStructure(d.blocksizes, d.rowblocks, d.rowblocksizes; eliminated = d.eliminated, nchunks)
 end
 
-# Where each Jacobian entry and residual of the dense problem lives in the tables: (table index, dense row, dense
-# column) for J, (table index, dense row) for r
+# The dense problem's rows are the row blocks' in order, and its columns the layout's. For each row block: its dense
+# rows, and for each column block it touches the handle to write through and the dense columns. (The row counts are
+# read back through the public views, so that a structure of either variant gives its own.)
 function tp3_layout(jst)
-    st = jst.schur
-    jidx, jrow, jcol, ridx, rrow = Int[], Int[], Int[], Int[], Int[]
+    probe = SchurBlockJacobian{Float64, Matrix{Float64}}(jst)
+    d0 = tp3_description()
+    d = merge(d0, (; rowblocksizes = [length(residual_block(probe, k)) for k in eachindex(d0.rowblocks)]))
+    sizes = blocksizes(jst)
+    off = computestartindices(sizes)
+    lay_of = invperm(blockorder(jst))   # layout block of each column block of the description
+    rows = UnitRange{Int}[]
+    entries = Vector{Tuple{Int, UnitRange{Int}}}[]
     row0 = 0
-    for t in 1:jst.ntables
-        M, C, off = jst.table_nrows[t], jst.table_ncols[t], jst.table_offsets[t]
-        m = M - (t <= st.neblocks ? jst.table_top[t] : 0)
-        blocks = Tuple{Vector{Int}, Vector{Int}}[]
-        for u in jst.table_ptr[t]:jst.table_ptr[t+1]-1
-            r = jst.entry_retained[u]
-            dr = Int(st.r_dims[r])
-            push!(blocks, (collect(st.boffsets_r[r] .+ (0:dr-1)), collect(jst.entry_col[u] .+ (0:dr-1))))
-        end
-        if t <= st.neblocks
-            de = Int(st.e_dims[t])
-            push!(blocks, (collect(st.nr .+ st.boffsets_e[t] .+ (0:de-1)), collect((C - de):(C - 1))))
-        end
-        for i in 1:m
-            for (cols, tcols) in blocks, (c, tc) in zip(cols, tcols)
-                push!(jidx, off + (tc - 1) * M + i - 1); push!(jrow, row0 + i); push!(jcol, c)
-            end
-            push!(ridx, off + (C - 1) * M + i - 1); push!(rrow, row0 + i)
-        end
+    for (k, rb) in enumerate(d.rowblocks)
+        m = d.rowblocksizes[k]
+        push!(rows, row0 .+ (1:m))
+        push!(entries, [(blockentry(jst, k, lay_of[b]), off[lay_of[b]] .+ (0:sizes[lay_of[b]] - 1)) for b in rb])
         row0 += m
     end
-    return (; jidx, jrow, jcol, ridx, rrow, m = row0, n = st.nr + sum(st.e_dims))
+    return (; rows, entries, m = row0, n = sum(sizes), d, lay_of, sizes, off)
 end
 
 # The problem r(x) = V (x + 0.3 sin x) − y, with V random inside the pattern: its Jacobian keeps the pattern
@@ -56,14 +55,24 @@ struct TP3Problem{L <: NamedTuple}
     u::Vector{Float64}
     rv::Vector{Float64}
 end
+# V is drawn as before the front door, entry by entry, in the description's own block order (each row in turn; in
+# a row, the retained blocks of its row block in ascending order, then its eliminated block), then its columns are
+# put in the layout's order
 function TP3Problem(jst; seed = 1)
     rng = Xoshiro(seed)
     lay = tp3_layout(jst)
-    V = zeros(lay.m, lay.n)
-    for k in eachindex(lay.jidx)
-        V[lay.jrow[k], lay.jcol[k]] = randn(rng)
+    d = lay.d
+    own_off = computestartindices(d.blocksizes)                      # the description's own column offsets
+    own_cols(b) = own_off[b] .+ (0:d.blocksizes[b] - 1)
+    V0 = zeros(lay.m, lay.n)
+    for (k, rb) in enumerate(d.rowblocks)
+        blocks = sort(rb; by = b -> (d.eliminated[b], b))
+        for i in lay.rows[k], b in blocks, c in own_cols(b)
+            V0[i, c] = randn(rng)
+        end
     end
-    return TP3Problem(jst, lay, V, randn(rng, lay.m), zeros(lay.n), zeros(lay.m))
+    perm = reduce(vcat, [own_cols(b) for b in blockorder(jst)])        # own column of each layout column
+    return TP3Problem(jst, lay, V0[:, perm], randn(rng, lay.m), zeros(lay.n), zeros(lay.m))
 end
 function tp3_residual!(p::TP3Problem, x)
     @inbounds for j in eachindex(p.u)
@@ -88,13 +97,19 @@ end
 # resjac! for the tables, and for a dense J
 function tp3_tables!(p::TP3Problem, J::SchurBlockJacobian, x)
     r = tp3_residual!(p, x)
-    lay, D = p.lay, J.data
-    @inbounds for k in eachindex(lay.jidx)
-        c = lay.jcol[k]
-        D[lay.jidx[k]] = p.V[lay.jrow[k], c] * (1 + 0.3 * cos(x[c]))
-    end
-    @inbounds for k in eachindex(lay.ridx)
-        D[lay.ridx[k]] = r[lay.rrow[k]]
+    lay = p.lay
+    for k in eachindex(lay.rows)
+        rows = lay.rows[k]
+        for (entry, cols) in lay.entries[k]
+            B = block(J, k, entry, length(rows), length(cols))
+            @inbounds for (jj, c) in enumerate(cols), (ii, i) in enumerate(rows)
+                B[ii, jj] = p.V[i, c] * (1 + 0.3 * cos(x[c]))
+            end
+        end
+        R = residual_block(J, k, length(rows))
+        @inbounds for (ii, i) in enumerate(rows)
+            R[ii] = r[i]
+        end
     end
     return tp3_cost(p, x)
 end
@@ -123,7 +138,7 @@ tp3_dense_objective(p) = JacobianObjective(TP3Cost(p), TP3Dense(p), p.lay.m)
 
 # A system linearized at x
 function tp3_system(p, ::Type{RT}, s, x) where RT
-    ls = QREXT.QRSchurLinearSystem(SchurBlockJacobian{Float64, RT}(p.jst), s)
+    ls = SecondOrderOptimization.makejacobiansystem(SchurBlockJacobian{Float64, RT}(p.jst), p.lay.n, s)
     zero!(ls)
     SecondOrderOptimization.TallLinearize(TP3Tables(p))(getb(ls), getA(ls), x)
     return ls
@@ -131,11 +146,9 @@ end
 
 # The normal path's dense Schur system for the same JᵀJ and Jᵀr
 function tp3_schur(p, x)
-    st = p.jst.schur
     Jd = zeros(p.lay.m, p.lay.n); rd = zeros(p.lay.m)
     tp3_dense!(p, rd, Jd, x)
-    clen = st.coffsets[end] + Int(st.r_dims[st.entry_retained[end]]) * Int(st.e_dims[end]) - 1
-    H = SchurBlockHessian(st, zeros(st.nr, st.nr), zeros(sum(abs2, st.e_dims)), zeros(clen))
+    H = SchurBlockHessian{Float64, Matrix{Float64}}(SchurStructure(p.jst))
     SecondOrderOptimization.conformance_fill!(H, Jd' * Jd)
     ls = SecondOrderOptimization.makehessiansystem(H, static(:cholesky))
     getb(ls) .= Jd' * rd
@@ -156,7 +169,6 @@ tp3_run(x, obj, opts, ws) = (x .= 0.1; @allocated optimize!(x, obj, opts; worksp
 # (a literal static(:qr): `static(s)` of a Symbol variable is a dynamic call, which allocates once)
 tp6_solve!(ls, lambda, scaling) = (dampen!(ls, lambda, scaling); solve!(ls, static(:qr)))
 tp6_allocations(ls, lambda, scaling) = (tp6_solve!(ls, lambda, scaling); Base.@allocations tp6_solve!(ls, lambda, scaling))
-tp6_fill_bytes(red, ws) = (reduced_jacobian!(red.Jt, red.rt, ws); @allocated reduced_jacobian!(red.Jt, red.rt, ws))
 # Bytes allocated by a warm run with a workspace, behind a function barrier (Julia 1.10 boxes variables
 # captured at testset top level)
 function tp3_warm_bytes(p, ::Type{RT}, opts) where RT
@@ -171,11 +183,10 @@ end
 # LP1: the TP3 problem with the retained columns of each block scaled by powers of ten from 1e-2 to 1e2
 function tp3_scaled_problem(; seed = 1)
     p = TP3Problem(tp3_structure(); seed)
-    st = p.jst.schur
-    for r in 1:st.nrblocks
-        dr = Int(st.r_dims[r])
+    for r in 1:nretained(p.jst)
+        dr = p.lay.sizes[r]
         for k in 1:dr
-            p.V[:, st.boffsets_r[r] + k - 1] .*= exp10(-2 + 4 * (k - 1) / (dr - 1))
+            p.V[:, p.lay.off[r] + k - 1] .*= exp10(-2 + 4 * (k - 1) / (dr - 1))
         end
     end
     return p

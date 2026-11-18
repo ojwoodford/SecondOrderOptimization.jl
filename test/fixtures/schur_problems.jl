@@ -1,6 +1,8 @@
 using Random, LinearAlgebra, SparseArrays, SecondOrderOptimization, BlockLinearSystems
 
-const SOOExt = Base.get_extension(BlockLinearSystems, :DampedLinearSolveExt)
+# The test problems are built through BlockLinearSystems' public API only: each is described (block sizes, row blocks,
+# eliminated blocks), laid out by `SchurStructure`, allocated by `SchurBlockHessian{T, RType}(structure)` and filled
+# with `addblock!`; the systems are DampedLinearSolve's, from `makehessiansystem`.
 
 # rules.md 21: a warm kernel call allocates nothing, except that on Julia 1.10 a threaded call may allocate up to
 # 3 072 bytes per thread. BlockLinearSystems R2 set 2 048 (2026-11-15); from its R10 the mixed-dims reduction takes
@@ -55,68 +57,72 @@ end
 
 nr(p::SchurTestProblem) = sum(p.r_dims)
 
+# The problem as a description, in its own block numbering (retained blocks, then eliminated ones): one row block for
+# each eliminated block alone, one for each coupling and one for each retained-retained pair
+function schur_description(p::SchurTestProblem)
+    nrb = length(p.r_dims)
+    rowblocks = Vector{Int}[]
+    for (e, coupled) in enumerate(p.couplings)
+        push!(rowblocks, [nrb + e])
+        foreach(r -> push!(rowblocks, [r, nrb + e]), coupled)
+    end
+    foreach(((r1, r2),) -> push!(rowblocks, [r1, r2]), p.rr_pairs)
+    return (blocksizes = [p.r_dims; p.e_dims], rowblocks, eliminated = [falses(nrb); trues(length(p.e_dims))])
+end
+
 function schur_structure(p::SchurTestProblem; nchunks=1)
-    return SchurStructure(p.r_dims, p.e_dims, p.couplings; nchunks)
+    d = schur_description(p)
+    return SchurStructure(d.blocksizes, d.rowblocks; eliminated=d.eliminated, nchunks)
 end
 
-function fill_ce!(p::SchurTestProblem, structure::SchurStructure, E_data, C_data)
-    nr_ = nr(p)
-    for e in eachindex(p.e_dims)
-        de = p.e_dims[e]
-        eo = structure.eoffsets[e]
-        eoff = nr_ + structure.boffsets_e[e]
-        E_data[eo:eo+de^2-1] .= vec(p.H[eoff:eoff+de-1, eoff:eoff+de-1])
-        for c in structure.eliminated_ptr[e]:structure.eliminated_ptr[e+1]-1
-            r = structure.entry_retained[c]
-            dr = p.r_dims[r]
-            ro = structure.boffsets_r[r]
-            co = structure.coffsets[c]
-            # Stored as de x dr column-major: C_data[co + (r-1)*de + i-1] = H[c_r, p_i]
-            C_data[co:co+dr*de-1] .= vec(p.H[ro:ro+dr-1, eoff:eoff+de-1]')
-        end
+# The same problem with its blocks in the layout's order, which BlockLinearSystems chooses: H and b permuted, the
+# couplings and the retained pairs renumbered. Applied until the layout keeps the order (at most twice: a second pass
+# reorders the eliminated blocks by the retained blocks' new numbers).
+function in_layout(p::SchurTestProblem)
+    while true
+        order = blockorder(schur_structure(p))
+        order == eachindex(order) && return p
+        nrb = length(p.r_dims)
+        sizes = [p.r_dims; p.e_dims]
+        off = computestartindices(sizes)
+        perm = reduce(vcat, [off[b] .+ (0:sizes[b]-1) for b in order])
+        pos = invperm(order)
+        couplings = [sort([pos[r] for r in p.couplings[order[q] - nrb]]) for q in nrb+1:length(order)]
+        rr_pairs = [(max(pos[a], pos[b]), min(pos[a], pos[b])) for (a, b) in p.rr_pairs]
+        p = SchurTestProblem(p.H[perm, perm], p.b[perm], sizes[order[1:nrb]], sizes[order[nrb+1:end]], couplings, rr_pairs)
     end
-    return nothing
 end
 
-function dense_schur_matrix(p::SchurTestProblem; nchunks=1)
-    structure = schur_structure(p; nchunks)
-    n_r = nr(p)
-    R = p.H[1:n_r, 1:n_r]
-    E_data = zeros(sum(abs2, p.e_dims))
-    C_data = zeros(structure.coffsets[end] + Int(structure.r_dims[structure.entry_retained[end]]) * Int(structure.e_dims[end]) - 1)
-    fill_ce!(p, structure, E_data, C_data)
-    return SchurBlockHessian(structure, R, E_data, C_data)
+# The scalar range of each layout block of a system
+function block_ranges(H::SchurBlockHessian)
+    sizes = blocksizes(H.structure)
+    off = computestartindices(sizes)
+    return [off[b]:off[b] + sizes[b] - 1 for b in eachindex(sizes)]
 end
 
-function sparse_schur_matrix(p::SchurTestProblem; nchunks=1)
-    structure = schur_structure(p; nchunks)
-    pattern = build_schur_pattern(structure)
-    coords = Tuple{Int, Int}[]
-    cb = pattern.block_colptr
-    for r2 in 1:structure.nrblocks, k in cb[r2]:cb[r2+1]-1
-        r1 = pattern.block_rowval[k]       # r1 <= r2 in the upper-triangle pattern
-        push!(coords, (r2, r1))            # store lower-triangle block (row = r2, col = r1)
+# Add p.H to a system laid out by schur_structure(p) (p in layout order): every block it has storage for
+function fill_schur!(H::SchurBlockHessian, p::SchurTestProblem)
+    rg = block_ranges(H)
+    nrb = nretained(H.structure)
+    foreach(b -> addblock!(H, b, b, p.H, rg[b], rg[b]), eachindex(rg))
+    for (e, coupled) in enumerate(p.couplings), r in coupled
+        addblock!(H, r, nrb + e, p.H, rg[r], rg[nrb + e])
     end
-    append!(coords, p.rr_pairs)
-    unique!(coords)
-    R = SparseBlockLinearSystem{Float64}(coords, p.r_dims)
-    roff = structure.boffsets_r
-    for (r1, r2) in coords
-        block(R, r1, r2) .= p.H[roff[r1]:roff[r1]+p.r_dims[r1]-1, roff[r2]:roff[r2]+p.r_dims[r2]-1]
-    end
-    E_data = zeros(sum(abs2, p.e_dims))
-    C_data = zeros(structure.coffsets[end] + Int(structure.r_dims[structure.entry_retained[end]]) * Int(structure.e_dims[end]) - 1)
-    fill_ce!(p, structure, E_data, C_data)
-    return SchurBlockHessian(structure, R, E_data, C_data)
+    foreach(((r1, r2),) -> addblock!(H, r1, r2, p.H, rg[r1], rg[r2]), p.rr_pairs)
+    return H
 end
 
-function make_schur_ls(kind::Symbol, p::SchurTestProblem, scaling=ones(length(p.b)); nchunks=1)
-    n = length(p.b)
-    if kind === :dense
-        return SOOExt.DenseSchurLinearSystem(dense_schur_matrix(p; nchunks), copy(p.b), zeros(n), copy(scaling))
-    else
-        return SOOExt.SparseSchurLinearSystem(sparse_schur_matrix(p; nchunks), copy(p.b), zeros(n), copy(scaling))
-    end
+dense_schur_matrix(p::SchurTestProblem; nchunks=1) =
+    fill_schur!(SchurBlockHessian{Float64, Matrix{Float64}}(schur_structure(p; nchunks)), p)
+sparse_schur_matrix(p::SchurTestProblem; nchunks=1) =
+    fill_schur!(SchurBlockHessian{Float64, SparseBlockLinearSystem{Float64}}(schur_structure(p; nchunks)), p)
+
+# The system of p through DampedLinearSolve's contract, built for `linsolver`, with b = p.b
+function make_schur_ls(kind::Symbol, p::SchurTestProblem; linsolver=:auto, nchunks=1)
+    H = kind === :dense ? dense_schur_matrix(p; nchunks) : sparse_schur_matrix(p; nchunks)
+    ls = SecondOrderOptimization.makehessiansystem(H, linsolver)
+    SecondOrderOptimization.getb(ls) .= p.b
+    return ls
 end
 
 "Reference solution: dense Cholesky of the full system with `lambda * diag(damping)` added to the diagonal."
@@ -135,7 +141,7 @@ function standard_problem(seed=1; rr_pairs=Tuple{Int, Int}[])
         [1, 2], [2, 3], [3, 4], [1, 2, 3, 4], [4],
         [1], [2], [3], [4], [1, 2], [3, 4], [2, 3], [1, 4],
     ]
-    return SchurTestProblem(rng, r_dims, e_dims, couplings; rr_pairs)
+    return in_layout(SchurTestProblem(rng, r_dims, e_dims, couplings; rr_pairs))
 end
 
 # Eliminated blocks of every size class: tiny closed forms (1-3), the generic static tier (4..D_STATIC)
@@ -146,11 +152,11 @@ function mixed_dims_problem(seed=11)
     e_dims = [12, 12, 9, 9, 8, 8, 5, 5, 4, 4, 3, 3, 2, 2, 1, 1]
     coupled = 1:4
     couplings = [sort(unique([rand(rng, coupled) for _ in 1:3])) for _ in e_dims]
-    return SchurTestProblem(rng, r_dims, e_dims, couplings)
+    return in_layout(SchurTestProblem(rng, r_dims, e_dims, couplings))
 end
 
 
-# Copy the numerical content of `src` (a SchurBlockHessian) into `dst`
+# Copy the numerical content of `src` (a SchurBlockHessian) into `dst`, of the same structure: whole parts
 function copy_content!(dst::SchurBlockHessian, src::SchurBlockHessian)
     dst.R isa Matrix ? copyto!(dst.R, src.R) : copyto!(dst.R.data, src.R.data)
     copyto!(dst.E_data, src.E_data)
@@ -166,7 +172,7 @@ function coupled_groups_problem(seed=3)
     r_dims = [6, 6, 6, 6]
     e_dims = [3, 3, 3, 3, 2, 2, 1, 1]
     couplings = [[1, 2], [1, 2], [3, 4], [3, 4], [1], [4], [2, 1], [3, 4]]
-    return SchurTestProblem(rng, r_dims, e_dims, couplings; rr_pairs=[(3, 1), (4, 2), (2, 1)])
+    return in_layout(SchurTestProblem(rng, r_dims, e_dims, couplings; rr_pairs=[(3, 1), (4, 2), (2, 1)]))
 end
 
 
