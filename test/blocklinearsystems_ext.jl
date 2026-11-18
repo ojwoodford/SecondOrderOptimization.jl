@@ -1,11 +1,13 @@
 using Test, Random, LinearAlgebra, SparseArrays, StaticArrays, Static
 import DampedLinearSolve
 using SecondOrderOptimization, BlockLinearSystems, Polyester   # Polyester: BlockLinearSystems' threaded kernels
-using SecondOrderOptimization: check_linear_system   # internal names
+using SecondOrderOptimization: check_linear_system, getA, getx   # DampedLinearSolve's names, through SecondOrderOptimization
 include("fixtures/load.jl"); loadfixtures("schur_problems.jl")
 
-# The Schur-complement systems of a SchurBlockHessian (BlockLinearSystems' DampedLinearSolveExt) under the
-# iterators and the workspace. Their solve-level tests are BlockLinearSystems'.
+# The Schur-complement systems of a SchurBlockHessian (BlockLinearSystems' implementation of DampedLinearSolve's
+# contract) under the iterators and the workspace, through BlockLinearSystems' public API and the contract only.
+# Their solve-level tests, and what only BlockLinearSystems can see (which system a prototype builds, its reduced
+# system), are BlockLinearSystems'.
 # Every Schur solve is compared against a dense Cholesky solve of the full damped system.
 
 
@@ -15,11 +17,12 @@ include("fixtures/load.jl"); loadfixtures("schur_problems.jl")
     mk(H, s) = SecondOrderOptimization.makehessiansystem(H, s)
     # The enum spellings of a solver reach the systems as the options hold them, as a StaticSymbol
     opt(s) = OptimizationOptions(linsolver = s).linsolver
-    # The storage of R picks the dense or sparse system, whatever the reduced-system solver
+    # Every spelling of a reduced-system solver builds a system, dense or sparse (which system the storage of R picks
+    # is BlockLinearSystems' to test)
     for s in (:auto, :cholesky, :ldl, static(:auto), static(:ldl), opt(SecondOrderOptimization.auto_solver),
               opt(SecondOrderOptimization.cholesky_solver), opt(SecondOrderOptimization.ldl_solver))
-        @test mk(Hd, s) isa SOOExt.DenseSchurLinearSystem
-        @test mk(Hs, s) isa SOOExt.SparseSchurLinearSystem
+        @test mk(Hd, s) isa SecondOrderOptimization.AbstractLinearSystem
+        @test mk(Hs, s) isa SecondOrderOptimization.AbstractLinearSystem
     end
     # Solvers not implemented for the reduced system are rejected when it is built (not treated as :auto)
     sq(x) = sum(abs2, x)
@@ -54,22 +57,21 @@ include("fixtures/load.jl"); loadfixtures("schur_problems.jl")
     x_ref = reference_solve(p, 0.3, ones(n))
     for kind in (:dense, :sparse), s in (:auto, :cholesky, :ldl, static(:auto), static(:ldl),
                                         opt(SecondOrderOptimization.auto_solver), opt(SecondOrderOptimization.cholesky_solver), opt(SecondOrderOptimization.ldl_solver))
-        ls = make_schur_ls(kind, p)
+        ls = make_schur_ls(kind, p; linsolver = s)
         SecondOrderOptimization.dampen!(ls, 0.3)
         @test SecondOrderOptimization.solve!(ls, s) == SecondOrderOptimization.Success
-        @test norm(ls.x - x_ref) <= 1e-10 * norm(x_ref)
+        @test norm(getx(ls) - x_ref) <= 1e-10 * norm(x_ref)
     end
 end
 
 
+# The same system in Float32: built from the same structure, its parts copied whole
 function to_float32(H::SchurBlockHessian)
-    R = if H.R isa Matrix
-        Float32.(H.R)
-    else
-        S = H.R
-        SparseBlockLinearSystem{Float32}(Float32.(S.data), S.indices, S.indicestransposed, S.rowblocksizes, S.columnblocksizes, S.m, S.n)
-    end
-    return SchurBlockHessian(H.structure, R, Float32.(H.E_data), Float32.(H.C_data))
+    H32 = SchurBlockHessian{Float32, H.R isa Matrix ? Matrix{Float32} : SparseBlockLinearSystem{Float32}}(H.structure)
+    H.R isa Matrix ? (H32.R .= H.R) : (H32.R.data .= H.R.data)
+    H32.E_data .= H.E_data
+    H32.C_data .= H.C_data
+    return H32
 end
 
 @testset "A SchurBlockHessian must be Float64; Float32 is rejected up front" begin
@@ -87,16 +89,6 @@ end
         err = try optimize(x0, obj, OptimizationOptions()) catch e; e end
         @test occursin("SchurBlockHessian{Float32", sprint(showerror, err))
     end
-    # The sparse system's factor type is concrete
-    ls = SOOExt.SparseSchurLinearSystem(sparse_schur_matrix(p), copy(p.b), zeros(n))
-    @test isconcretetype(typeof(ls.S_factor))
-    @test isconcretetype(fieldtype(typeof(ls), :S_factor))
-
-    # Singularity tolerance scales with the precision: a block that is singular to Float32 precision is rejected
-    H2 = SMatrix{2, 2, Float32, 4}(1, 1, 1, 1 + 1f-6)
-    @test !BlockLinearSystems.inv_sym_block(H2, 0f0, SVector{2, Float32}(1, 1)).success
-    H2d = SMatrix{2, 2, Float64, 4}(1, 1, 1, 1 + 1e-6)
-    @test BlockLinearSystems.inv_sym_block(H2d, 0.0, SVector{2, Float64}(1, 1)).success
 end
 
 
@@ -131,22 +123,12 @@ end
 
 
 
-# Add d to the diagonal of the full matrix a SchurBlockHessian represents
-function add_schur_diag!(H::SchurBlockHessian, d)
-    st = H.structure
-    for r in 1:st.nrblocks, i in 1:Int(st.r_dims[r])
-        k = st.boffsets_r[r] + i - 1
-        if H.R isa Matrix
-            H.R[k, k] += d[k]
-        else
-            block(H.R, r, r)[i, i] += d[k]
-        end
-    end
-    for e in 1:st.neblocks
-        de = Int(st.e_dims[e])
-        for i in 1:de
-            H.E_data[st.eoffsets[e] + (i - 1) * (de + 1)] += d[st.nr + st.boffsets_e[e] + i - 1]
-        end
+# Add d to the diagonal of the full matrix a SchurBlockHessian represents: Diagonal(d)'s block of each layout block,
+# whose scalar ranges `ranges` are (block_ranges(H), computed once where the call must not allocate)
+function add_schur_diag!(H::SchurBlockHessian, d, ranges = block_ranges(H))
+    D = Diagonal(d)
+    for (b, r) in enumerate(ranges)
+        addblock!(H, b, b, D, r, r)
     end
     return H
 end
@@ -193,13 +175,14 @@ end
 # AS1: a workspace for a SchurBlockHessian. The quartic of `quartic_run`, evaluated without allocating
 function as1_objective(p, Href)
     d = similar(p.b)
+    ranges = block_ranges(Href)
     cost(x) = 0.5 * dot(x, p.H, x) - dot(p.b, x) + 0.25 * sum(xi -> xi^4, x)
     function fdf!(g, H, x)
         mul!(g, p.H, x)
         g .+= x .^ 3 .- p.b
         copy_content!(H, Href)
         d .= 3 .* x .^ 2
-        add_schur_diag!(H, d)
+        add_schur_diag!(H, d, ranges)
         return cost(x)
     end
     return cost, fdf!
@@ -278,8 +261,8 @@ end
             ls = make_schur_ls(kind, p)
             d = zeros(n)
             d[k] = bad
-            add_schur_diag!(ls.H, d)
-            M = SecondOrderOptimization.conformance_matrix(ls.H)
+            add_schur_diag!(getA(ls), d)
+            M = SecondOrderOptimization.conformance_matrix(getA(ls))
             @test !isfinite(M[k, k])
             ref = DampedLinearSolve.DenseLinearSystem{Float64}(M, copy(p.b), zeros(n))
             for mk in (() -> SecondOrderOptimization.MarquardtData(0.0, zeros(n)),
@@ -295,19 +278,18 @@ end
     end
 end
 
-# AS3: the dense Schur system's Bunch-Kaufman solve, for :ldl and as :auto's fallback. The reference is
-# the solve as it was written before: Cholesky (for :auto), then LinearAlgebra's bunchkaufman
-function as3_reference(ls, solver)
-    SOOExt.build_reduced!(ls) || return (SecondOrderOptimization.NotPositiveDefinite, nothing)
-    S, g = copy(ls.S), copy(ls.g_S)
+# AS3: the dense Schur system's Bunch-Kaufman solve, for :ldl and as :auto's fallback, through the contract: the
+# status, the retained part of the solution (the first nr entries, in the layout order of the vectors) against a
+# factorization of the full matrix, and no allocation. (That it equals the solve of the reduced system as written
+# before, Cholesky then LinearAlgebra's bunchkaufman, is BlockLinearSystems' test.) Only the retained part is
+# compared, as before: after an Indefinite solve the eliminated part is not back-substituted.
+function as3_reference(p, solver)
+    Hs = Symmetric(p.H)
     if solver === :auto
-        F = cholesky(Symmetric(copy(S), :U); check = false)
-        issuccess(F) && return (SecondOrderOptimization.Success, F \ g)
+        F = cholesky(Hs; check = false)
+        issuccess(F) && return F \ p.b
     end
-    bk = bunchkaufman(Symmetric(S, :U); check = false)
-    issuccess(bk) || return (SecondOrderOptimization.NotPositiveDefinite, nothing)
-    xr = bk \ g
-    return (DampedLinearSolve.is_indefinite(bk) ? SecondOrderOptimization.Indefinite : SecondOrderOptimization.Success, xr)
+    return bunchkaufman(Hs) \ p.b
 end
 as3_solve_allocs(ls, s) = @allocated SecondOrderOptimization.solve!(ls, s)
 as3_allocs(x, obj, o, w) = (x .= 0.1; @allocated optimize!(x, obj, o; workspace = w))
@@ -317,19 +299,20 @@ as3_allocs(x, obj, o, w) = (x .= 0.1; @allocated optimize!(x, obj, o; workspace 
     n = length(p.b)
     q = standard_problem()
     q.H[1, 1] = -50.0                        # S indefinite, so Cholesky fails (B5)
-    zeroS(ls) = (ls.H.R .= 0; ls.H.C_data .= 0; ls)   # S = 0: Bunch-Kaufman finds an exactly zero pivot
-    for (name, mk, expected) in (("positive definite", () -> make_schur_ls(:dense, p), Dict(:auto => :Success, :ldl => :Success)),
-                                 ("indefinite", () -> make_schur_ls(:dense, q), Dict(:auto => :Indefinite, :ldl => :Indefinite)),
-                                 ("singular", () -> zeroS(make_schur_ls(:dense, p)), Dict(:auto => :NotPositiveDefinite, :ldl => :NotPositiveDefinite)))
+    zeroS(ls) = (getA(ls).R .= 0; getA(ls).C_data .= 0; ls)   # S = 0: Bunch-Kaufman finds an exactly zero pivot
+    for (name, prob, mk, expected) in (("positive definite", p, s -> make_schur_ls(:dense, p; linsolver = s), Dict(:auto => :Success, :ldl => :Success)),
+                                       ("indefinite", q, s -> make_schur_ls(:dense, q; linsolver = s), Dict(:auto => :Indefinite, :ldl => :Indefinite)),
+                                       ("singular", nothing, s -> zeroS(make_schur_ls(:dense, p; linsolver = s)), Dict(:auto => :NotPositiveDefinite, :ldl => :NotPositiveDefinite)))
         for s in (:auto, :ldl)
             @testset "$name, $s" begin
-                ls = mk()
+                ls = mk(s)
                 SecondOrderOptimization.dampen!(ls, 0.0)
-                st_ref, xr_ref = as3_reference(ls, s)
-                @test Symbol(st_ref) === expected[s]
                 st = SecondOrderOptimization.solve!(ls, static(s))
-                @test st == st_ref
-                isnothing(xr_ref) || @test norm(ls.x_r - xr_ref) <= 1e-12 * norm(xr_ref)
+                @test Symbol(st) === expected[s]
+                if prob !== nothing
+                    xr_ref = as3_reference(prob, s)[1:nr(prob)]
+                    @test norm(getx(ls)[1:nr(prob)] - xr_ref) <= 1e-12 * norm(xr_ref)
+                end
                 # Warm: a solve allocates nothing (the system is serial here: one chunk)
                 as3_solve_allocs(ls, static(s))
                 @test as3_solve_allocs(ls, static(s)) == 0

@@ -19,19 +19,12 @@ const SOO = SecondOrderOptimization
             aD == Success || continue
             @test getx(lsP) ≈ getx(lsD) rtol = 1e-12
         end
-        # The fill and the factorization: J̃ and r̃ are the dense path's, entry for entry
-        red = lsP.reduced
-        @test red isa QREXT.SparseQRReduced
-        tp3_solve!(lsP, :qr, 0.3, nothing); tp3_solve!(lsD, :qr, 0.3, nothing)
-        mt = size(red.Jt, 1)
-        Jd, rtd = zeros(mt, size(red.Jt, 2)), zeros(mt)
-        reduced_jacobian!(Jd, rtd, lsP.ws)
-        @test Matrix(red.Jt) == Jd && red.rt == rtd
+        # (That the sparse reduced system's J̃ and r̃ are the dense path's, entry for entry, and that filling them
+        # allocates nothing, is BlockLinearSystems' test: they are its reduced system's internals.)
         # SPQR allocates the same per solve whatever the damping; nothing else does (rules.md 21's exception)
         k = tp6_allocations(lsP, 0.3, sc)
         @test k > 0
         @test tp6_allocations(lsP, 1e-3, sc) == tp6_allocations(lsP, 3.0, nothing) == k
-        @test tp6_fill_bytes(red, lsP.ws) == 0
         # a warm run with a workspace allocates exactly SPQR's allocations for each solve
         for it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton), ccs in (false, true)
             under && continue
