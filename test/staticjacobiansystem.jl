@@ -39,19 +39,19 @@ tp4_bytes(x0, obj, opts, ws) = (tp4_run(x0, obj, opts, ws); @allocated tp4_run(x
 @testset "staticjacobiansystem.jl" begin
     @testset "The static choice is made exactly when the rule says" begin
         x2 = SVector(1.0, 0.0)
-        @test DampedLinearSolve.MAX_STATIC_TALL == 48
+        @test DampedLinearSolve.MAX_STATIC_JACOBIAN == 48
         mk(x0, P, s = :auto) = SOO.objective_linearsystem(x0, JacobianObjective(tp4_cost, tp4_resjac!, P), static(s))
-        @test mk(x2, 24) isa DampedLinearSolve.StaticTallLinearSystem{24, 2}           # m·n = 48
-        @test mk(x2, 25) isa DampedLinearSolve.DenseTallLinearSystem                   # m·n = 50
-        @test mk(x2, ones(24, 2)) isa DampedLinearSolve.StaticTallLinearSystem{24, 2}
-        @test mk(x2, ones(25, 2)) isa DampedLinearSolve.DenseTallLinearSystem
-        @test mk(x2, 20, :qr) isa DampedLinearSolve.StaticTallLinearSystem
-        @test mk([1.0, 0.0], 20) isa DampedLinearSolve.DenseTallLinearSystem           # not a static number of variables
-        @test mk(1.0, 48) isa DampedLinearSolve.StaticTallLinearSystem{48, 1}
-        @test mk(1.0, 49) isa DampedLinearSolve.DenseTallLinearSystem
-        @test mk(SVector{17}(zeros(17)), 2) isa DampedLinearSolve.DenseTallLinearSystem  # above MAX_STATIC_SYSTEM
+        @test mk(x2, 24) isa DampedLinearSolve.StaticJacobianLinearSystem{24, 2}           # m·n = 48
+        @test mk(x2, 25) isa DampedLinearSolve.DenseJacobianLinearSystem                   # m·n = 50
+        @test mk(x2, ones(24, 2)) isa DampedLinearSolve.StaticJacobianLinearSystem{24, 2}
+        @test mk(x2, ones(25, 2)) isa DampedLinearSolve.DenseJacobianLinearSystem
+        @test mk(x2, 20, :qr) isa DampedLinearSolve.StaticJacobianLinearSystem
+        @test mk([1.0, 0.0], 20) isa DampedLinearSolve.DenseJacobianLinearSystem           # not a static number of variables
+        @test mk(1.0, 48) isa DampedLinearSolve.StaticJacobianLinearSystem{48, 1}
+        @test mk(1.0, 49) isa DampedLinearSolve.DenseJacobianLinearSystem
+        @test mk(SVector{17}(zeros(17)), 2) isa DampedLinearSolve.DenseJacobianLinearSystem  # above MAX_STATIC_SYSTEM
         # the workspace's system follows the same rule
-        @test OptimizationWorkspace(x2, JacobianObjective(tp4_cost, tp4_resjac!, ones(20, 2))).data[1].linsystem isa DampedLinearSolve.StaticTallLinearSystem
+        @test OptimizationWorkspace(x2, JacobianObjective(tp4_cost, tp4_resjac!, ones(20, 2))).data[1].linsystem isa DampedLinearSolve.StaticJacobianLinearSystem
     end
 
     @testset "Every Jacobian iterator: :$it, callbackchangesstate = $ccs" for it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton), ccs in (false, true)

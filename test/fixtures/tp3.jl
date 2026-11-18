@@ -141,7 +141,7 @@ tp3_dense_objective(p) = JacobianObjective(TP3Cost(p), TP3Dense(p), p.lay.m)
 function tp3_system(p, ::Type{RT}, s, x) where RT
     ls = SecondOrderOptimization.makejacobiansystem(SchurBlockJacobian{Float64, RT}(p.jst), p.lay.n, s)
     zero!(ls)
-    SecondOrderOptimization.TallLinearize(TP3Tables(p))(getb(ls), getA(ls), x)
+    SecondOrderOptimization.JacobianLinearize(TP3Tables(p))(getb(ls), getA(ls), x)
     return ls
 end
 

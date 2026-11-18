@@ -10,7 +10,7 @@ const SOO = SecondOrderOptimization
 
 # Both systems set to J and r as a linearization leaves them (b = Jᵀr)
 function tp1_pair(J::SparseMatrixCSC, r)
-    ls, ld = DampedLinearSolve.SparseTallLinearSystem(copy(J)), DampedLinearSolve.DenseTallLinearSystem(Matrix(J))
+    ls, ld = DampedLinearSolve.SparseJacobianLinearSystem(copy(J)), DampedLinearSolve.DenseJacobianLinearSystem(Matrix(J))
     for s in (ls, ld)
         zero!(s)
         getA(s).r .= r
@@ -109,7 +109,7 @@ tp1_run(x, obj, opts, ws) = (x .= (1.0, 0.0); optimize!(x, obj, opts; workspace 
         # (an untyped workspace, which can hold either)
         wsany = OptimizationWorkspace()
         optimize([1.0, 2.0], JacobianObjective(f, rj!, sparse(1.0I, 2, 2)), opts; workspace = wsany)
-        @test wsany.data[1].linsystem isa DampedLinearSolve.SparseTallLinearSystem
+        @test wsany.data[1].linsystem isa DampedLinearSolve.SparseJacobianLinearSystem
         fdf!(gr, H, x) = (gr .= x; H[1, 1] = H[2, 2] = 1.0; f(x))
         x, res = optimize([1.0, 2.0], HessianObjective(f, fdf!; H = sparse(1.0I, 2, 2)), opts; workspace = wsany)
         @test wsany.data[1].linsystem isa DampedLinearSolve.SparseLinearSystem && isconverged(res)

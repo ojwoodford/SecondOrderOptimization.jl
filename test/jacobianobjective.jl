@@ -173,7 +173,7 @@ SOO.update(x::Rot3, dx, start=1) = Rot3(x.R * expso3(SVector(dx[start], dx[start
         costmin = exactcost(big.(V) \ big.(yv))
         gJ = norm(V' * (V * xJ - yv), Inf)
         gH = norm(V' * (V * xH - yv), Inf)
-        @info "Ill-conditioned fit (cond(J) = $(round(cond(V), sigdigits=2)), least-squares minimum $costmin)" tall_cost=resJ.bestcost tall_excess=exactcost(xJ)-costmin tall_gradnorm=gJ tall_iterations=resJ.niterations normal_cost=resH.bestcost normal_excess=exactcost(xH)-costmin normal_gradnorm=gH normal_iterations=resH.niterations
+        @info "Ill-conditioned fit (cond(J) = $(round(cond(V), sigdigits=2)), least-squares minimum $costmin)" jacobian_cost=resJ.bestcost jacobian_excess=exactcost(xJ)-costmin jacobian_gradnorm=gJ jacobian_iterations=resJ.niterations hessian_cost=resH.bestcost hessian_excess=exactcost(xH)-costmin hessian_gradnorm=gH hessian_iterations=resH.niterations
         @test resJ.bestcost <= resH.bestcost
         @test exactcost(xJ) - costmin <= 1e-12 * costmin
         @test exactcost(xH) - costmin > 1e-6 * costmin

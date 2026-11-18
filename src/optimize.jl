@@ -48,15 +48,15 @@ jacobian_structure(J::Union{Integer, Matrix}) = JacobianStructureKey(jacobian_nr
 jacobian_structure(J::SparseMatrixCSC) = SparseJacobianPattern(J)
 jacobian_structure(J) = JacobianPrototypeKey(structurekey(J))
 linearizer(obj::HessianObjective) = obj.fdf!
-linearizer(obj::JacobianObjective) = TallLinearize(obj.resjac!)
+linearizer(obj::JacobianObjective) = JacobianLinearize(obj.resjac!)
 
 # How the iterators and the outer loop drive a tall system unchanged: they call
 # `fdf!(getb(ls), getA(ls), x)`, and this wrapper turns that into `resjac!(r, J, x)` on the storage's
 # J and r, then has the storage form g = Jᵀr and invalidate what it computed from the old J and r
-struct TallLinearize{RJ}
+struct JacobianLinearize{RJ}
     resjac!::RJ
 end
-function (t::TallLinearize)(g::AbstractVector, A, x)
+function (t::JacobianLinearize)(g::AbstractVector, A, x)
     cost = t.resjac!(getr(A), getJ(A), x)
     gradient!(g, A)
     markstale!(A)
