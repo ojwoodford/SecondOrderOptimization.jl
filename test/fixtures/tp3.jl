@@ -19,9 +19,10 @@ function tp3_description(; under = false)
     return (blocksizes = [TP3_R_DIMS; TP3_E_DIMS], rowblocks, rowblocksizes = [e_rows; 20],
             eliminated = [falses(3); trues(6)])
 end
-function tp3_structure(; under = false, nchunks = 1)
+# `nchunks` and `min_work` set BlockLinearSystems' threading (`min_work = 0`: thread however small the problem)
+function tp3_structure(; under = false, nchunks = 1, min_work = 4096)
     d = tp3_description(; under)
-    return SchurJacobianStructure(d.blocksizes, d.rowblocks, d.rowblocksizes; eliminated = d.eliminated, nchunks)
+    return SchurJacobianStructure(d.blocksizes, d.rowblocks, d.rowblocksizes; eliminated = d.eliminated, nchunks, min_work)
 end
 
 # The dense problem's rows are the row blocks' in order, and its columns the layout's. For each row block: its dense
@@ -157,9 +158,11 @@ end
 
 # A warm threaded run allocates nothing, except on Julia 1.10, where each threaded BlockLinearSystems kernel call
 # may allocate a few KB per thread (rules.md 21; `threaded_allocs_ok` in blocklinearsystems_ext.jl). A run makes many such calls, so
-# on 1.10 the bound is per run: 48 KB per thread, a starting value above the largest measured (2026-11-15, 4
-# threads, nchunks = 4: 140 640 bytes for :lsmr, 35 160 per thread). 1.11 and later, and every serial run: zero.
-const TP3_110_RUN_BYTES_PER_THREAD = 48 * 1024
+# on 1.10 the bound is per run: 64 KB per thread, a starting value above the largest measured. Measured on 4 threads,
+# nchunks = 4, for :lsmr: 35 160 bytes per thread on 2026-11-15; 48 808 at BlockLinearSystems 328b4f7 (2026-11-18), which
+# had reached the earlier bound of 48 KB; 52 336 at 9f7d9cf, where the structure carries its threading (each threaded call
+# allocates 96-384 bytes more on 1.10, within rules.md 21's 3 072 per thread). 1.11 and later, and every serial run: zero.
+const TP3_110_RUN_BYTES_PER_THREAD = 64 * 1024
 tp3_threaded_run_ok(bytes) = bytes == 0 ||
     (VERSION < v"1.11" && Threads.nthreads() > 1 && bytes <= TP3_110_RUN_BYTES_PER_THREAD * Threads.nthreads())
 

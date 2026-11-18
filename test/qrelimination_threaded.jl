@@ -7,12 +7,10 @@ const SOO = SecondOrderOptimization
 
     @testset "Threaded elimination: the same steps; allocation" begin
         @test Base.get_extension(BlockLinearSystems, :PolyesterExt) !== nothing
-        old = BlockLinearSystems.SCHUR_THREAD_MIN_WORK[]
-        try
-            # One chunk per thread and no threshold, so that on more than one thread the kernels run threaded
+        begin
+            # One chunk per thread and no work floor, so that on more than one thread the kernels run threaded
             # (rules.md 30)
-            BlockLinearSystems.SCHUR_THREAD_MIN_WORK[] = 0
-            p = TP3Problem(tp3_structure(; nchunks = Threads.nthreads()))
+            p = TP3Problem(tp3_structure(; nchunks = Threads.nthreads(), min_work = 0))
             x = 0.1 .* randn(Xoshiro(2), p.lay.n)
             lsS, Jd, rd = tp3_schur(p, x)
             # Every threaded run once before any is measured: @allocated counts every thread, and Polyester's idle
@@ -31,7 +29,5 @@ const SOO = SecondOrderOptimization
                     @test tp3_threaded_run_ok(tp3_warm_bytes(p, RT, OptimizationOptions(; iterator = it, linsolver = s)))
                 end
             end
-        finally
-            BlockLinearSystems.SCHUR_THREAD_MIN_WORK[] = old
         end
     end
