@@ -800,3 +800,72 @@ end
     x, res = optimize(zeros(14), JacobianObjective(f_rows, (r, J, x) -> (for i in axes(V, 1); ri = 0.0; for k in axes(V, 2); ri += V[i, k] * x[k]; end; r[i] = ri - yv[i]; end; J .= V; f_rows(x)), 60), OptimizationOptions(iterator = :levenbergmarquardt))
     @test isconverged(res)
 end
+
+# S1: the normal equations on the Jacobian path (`linsolver = :cholesky` or `:ldl` with a dense J: JᵀJ formed
+# from J once per linearization and factored), against the HessianObjective of the same problem with the same
+# solver. The iterators must behave as on the other paths, apart from rounding (rules.md 31, 33).
+const S1_ITERATORS = (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton, :gradientdescent)
+
+@testset "S1: the normal equations of the Jacobian path" begin
+    @testset "Against the HessianObjective with the same solver: :$it, :$s, callbackchangesstate = $ccs" for it in S1_ITERATORS, s in (:cholesky, :ldl), ccs in (false, true)
+        for (name, resid, jac, m, x0) in w_problems()
+            objJ, objH = w_objectives(resid, jac, m, length(x0))
+            cJ, sJ, _, cbJ = w_trace()
+            cH, sH, _, cbH = w_trace()
+            _, resJ = optimize(x0, objJ, w_opts(it, :callbackchangesstate => ccs, :linsolver => s); callback=cbJ)
+            _, resH = optimize(x0, objH, w_opts(it, :callbackchangesstate => ccs, :linsolver => s); callback=cbH)
+            if it === :newton
+                # as in "Each iterator against the normal equations": undamped Newton rejects no step
+                allowed = TERMINATION_REL_DCOST | TERMINATION_ABS_DCOST | TERMINATION_STEP_SIZE | TERMINATION_MAX_FAILS | TERMINATION_GRAD_TOL
+                @test onlybits(resJ, allowed)
+                @test onlybits(resH, allowed)
+            elseif it === :gradientdescent
+                # linear convergence: the two stop alike, converged or not
+                @test isconverged(resJ) == isconverged(resH)
+                @test resJ.bestcost < resJ.startcost
+            else
+                @test isconverged(resJ) && isconverged(resH)
+            end
+            k = min(length(cJ), length(cH))
+            @test k >= 2
+            @test all(isapprox.(cJ[1:k], cH[1:k]; rtol=1e-8, atol=1e-8 * abs(resH.startcost) * eps()))
+            @test abs(length(cJ) - length(cH)) <= 3
+            prev = [resJ.startcost; cJ[1:k-1]]
+            lead = something(findfirst(prev .- cH[1:k] .<= 1e-6 .* abs.(cH[1:k])), k + 1) - 1
+            it in (:newton, :gradientdescent) || @test lead >= 1
+            @test all(isapprox.(sJ[1:lead], sH[1:lead]; rtol=1e-8))
+            @test resJ.bestcost ≈ resH.bestcost rtol=1e-8 atol=1e-20
+        end
+    end
+
+    @testset "A static x0 runs the dense system: :$s" for s in (:cholesky, :ldl)
+        (name, resid, jac, m, x0) = first(w_problems())    # Rosenbrock, two variables
+        objJ, _ = w_objectives(resid, jac, m, length(x0))
+        @test SOO.objective_linearsystem(SVector{2}(x0), objJ, s) isa DampedLinearSolve.DenseJacobianLinearSystem
+        xs, ress = optimize(SVector{2}(x0), objJ, OptimizationOptions(linsolver=s))
+        xd, resd = optimize(copy(x0), objJ, OptimizationOptions(linsolver=s))
+        @test xs isa SVector{2, Float64}
+        @test isconverged(ress) && isconverged(resd)
+        @test ress.bestcost ≈ resd.bestcost rtol=1e-8 atol=1e-20
+        @test xs ≈ xd rtol=1e-8
+        @test xs ≈ [1.0, 1.0] rtol=1e-6
+    end
+
+    @testset "Workspace reuse and no allocation per iteration: :$it, :$s" for it in S1_ITERATORS, s in (:cholesky, :ldl), ccs in (false, true)
+        for obj in (JacobianObjective(wrosen_cost, wrosen_resjac!, 2), JacobianObjective(wrosen_cost, wrosen_resjac!, zeros(2, 2)))
+            opts = w_opts(it, :callbackchangesstate => ccs, :gtol => 1e-10, :linsolver => s, :maxiters => it === :gradientdescent ? 50 : 100)
+            ws = OptimizationWorkspace([-1.2, 1.0], obj, opts)
+            x = [-1.2, 1.0]
+            r1 = optimize!(x, obj, opts; workspace=ws)
+            x1 = copy(x)
+            x .= (-1.2, 1.0)
+            r2 = optimize!(x, obj, opts; workspace=ws)     # the same workspace, a second run
+            @test x == x1 && r2.bestcost == r1.bestcost && r2.niterations == r1.niterations
+            it === :gradientdescent || @test x ≈ [1.0, 1.0]
+            @test w_allocs(x, obj, opts, ws) == 0
+            res = optimize!(it === :newton ? [0.9, 0.8] : [-1.2, 1.0], obj, opts)
+            @test res.optimizeallocations == 0
+            it === :gradientdescent || @test isconverged(res)
+        end
+    end
+end

@@ -7,7 +7,8 @@ problem to [`optimize`](@ref) in two ways:
   Gauss-Newton Hessian $J^\top J$ itself; or
 - as a [`JacobianObjective`](@ref), whose `resjac!` writes only the residual $r$ and the
   Jacobian $J$. The optimizer then solves each step by a QR factorization of $J$ and never forms
-  $J^\top J$.
+  $J^\top J$ (unless asked to, with `linsolver = :cholesky` or `:ldl`: see "The normal equations
+  from $J$" below).
 
 Both give the same iterations, with any iterator. They differ in how
 accurately each step is solved, and in what that accuracy costs. With a `JacobianObjective` the
@@ -118,7 +119,7 @@ shift the diagonal.
 
 | Jacobian prototype `J` | Linear system | `linsolver` |
 |:---|:---|:---|
-| integer `m ≥ 1`, or `Matrix{Float64}` (`m × n`) | dense QR of `J`; static QR when `x0` has a static size and `m·n ≤ 48` | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
+| integer `m ≥ 1`, or `Matrix{Float64}` (`m × n`) | dense QR of `J`; static QR when `x0` has a static size and `m·n ≤ 48` | `:auto`, `:qr`; `:cholesky`, `:ldl` (form `JᵀJ` once per linearization and factor it; always the dense system, never the static one); `:lsmr` (with Krylov.jl) |
 | `SparseMatrixCSC{Float64, Int}` | sparse QR of `J` (SPQR) | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
 | `SchurBlockJacobian{Float64, Matrix{Float64}}` (with BlockLinearSystems.jl) | QR elimination, dense reduced system | `:auto`, `:qr` (QR of the reduced Jacobian); `:cholesky`, `:ldl` (factor its normal equations); `:lsmr` (with Krylov.jl) |
 | `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}` (with BlockLinearSystems.jl) | QR elimination, sparse reduced system | `:auto`, `:qr` (sparse QR of the reduced Jacobian, SPQR); `:cholesky` (sparse Cholesky of the reduced normal equations, falling back to LDLᵀ), `:ldl`; `:lsmr` (with Krylov.jl) |
@@ -135,6 +136,16 @@ tolerances are Krylov's defaults, starting values that have not been measured. I
 $J$ whose QR factorization is too expensive; it does not detect a numerically rank-deficient $J$.
 A `HessianObjective` rejects `:lsmr`: on the normal equations it would square their condition
 number again.
+
+### The normal equations from $J$
+
+With a dense `J`, `linsolver = :cholesky` or `:ldl` makes the Jacobian system solve the normal
+equations itself: `resjac!` writes $r$ and $J$ as before, the system forms $J^\top J$ from $J$ once
+per linearization (one BLAS `syrk`, about $mn^2/2$ multiply-adds, against about $2mn^2$ for QR) and
+factors $J^\top J + \lambda D$ for each damping value tried, by Cholesky or Bunch–Kaufman, as a
+`HessianObjective` with the same solver would. It is cheaper than QR when $m$ is well above $n$, and
+squares the condition number of $J$ as the `HessianObjective` does, so it suits a well-conditioned
+$J$; `:auto` stays QR. It is always the dense system, also for a small problem with a static size.
 
 ## Small problems
 

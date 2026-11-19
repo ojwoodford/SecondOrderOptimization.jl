@@ -8,8 +8,8 @@ const SOO = SecondOrderOptimization
 # is called. The table, as data:
 const TP5_ITERATORS = (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton, :gradientdescent)
 const TP5_TABLE = Dict(
-    :integer => (:auto, :qr, :lsmr),                # also with a static x0 (the static system)
-    :matrix => (:auto, :qr, :lsmr),
+    :integer => (:auto, :qr, :cholesky, :ldl, :lsmr),   # also with a static x0 (the static system for :auto and :qr)
+    :matrix => (:auto, :qr, :cholesky, :ldl, :lsmr),
     :sparse => (:auto, :qr, :lsmr),
     :schur_dense => (:auto, :qr, :cholesky, :ldl, :lsmr),
     :schur_sparse => (:auto, :qr, :cholesky, :ldl, :lsmr),
@@ -58,9 +58,11 @@ const TP5_ALL_ITERATORS = TP5_ITERATORS   # every iterator (IT2)
             @test !TP5_CALLED[]
         end
     end
-    # the static system is the one a static x0 gets with :auto and :qr; :lsmr has no static form
+    # the static system is the one a static x0 gets with :auto and :qr; :lsmr and the normal equations have no static form
     @test SOO.objective_linearsystem(zeros(SVector{4}), JacobianObjective(tp5_f, tp5_resjac!, 8), :qr) isa DampedLinearSolve.StaticJacobianLinearSystem
-    @test SOO.objective_linearsystem(zeros(SVector{4}), JacobianObjective(tp5_f, tp5_resjac!, 8), :lsmr) isa DampedLinearSolve.DenseJacobianLinearSystem
+    for s in (:lsmr, :cholesky, :ldl)
+        @test SOO.objective_linearsystem(zeros(SVector{4}), JacobianObjective(tp5_f, tp5_resjac!, 8), s) isa DampedLinearSolve.DenseJacobianLinearSystem
+    end
 end
 
 # IT2: gradient descent on a JacobianObjective. It uses only the gradient Jᵀr, f and update!, which every

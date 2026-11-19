@@ -50,12 +50,17 @@ end
         for it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton, :gradientdescent)
             @test SOO.checkobjective([0.0, 0.0], obj, OptimizationOptions(iterator=it)) === nothing
         end
-        for s in (:cholesky, :ldl)
-            err = try SOO.checkobjective([0.0, 0.0], obj, OptimizationOptions(linsolver=s)); nothing catch e; e end
-            @test err isa ArgumentError && occursin(":$s", err.msg) && occursin(":auto or :qr", err.msg)
+        # the normal equations (:cholesky, :ldl) are for a dense J only: refused for a sparse prototype
+        sobj = JacobianObjective(jrosen_cost, jrosen_resjac!, sparse(ones(2, 2)))
+        for s in (:cholesky, :ldl, cholesky_solver, ldl_solver)
+            err = try SOO.checkobjective([0.0, 0.0], sobj, OptimizationOptions(linsolver=s)); nothing catch e; e end
+            name = s isa Symbol ? s : Symbol(s === cholesky_solver ? :cholesky : :ldl)
+            @test err isa ArgumentError && occursin(":$name", err.msg) && occursin(":auto or :qr", err.msg)
+            @test occursin("a Matrix{Float64} prototype or an integer m also takes :cholesky or :ldl", err.msg)
         end
-        for s in (:auto, :qr, auto_solver, qr_solver)
+        for s in (:auto, :qr, :cholesky, :ldl, auto_solver, qr_solver, cholesky_solver, ldl_solver)
             @test SOO.checkobjective([0.0, 0.0], obj, OptimizationOptions(linsolver=s)) === nothing
+            @test SOO.checkobjective([0.0, 0.0], JacobianObjective(jrosen_cost, jrosen_resjac!, zeros(2, 2)), OptimizationOptions(linsolver=s)) === nothing
         end
         err = try SOO.checkobjective([0.0, 0.0, 0.0], JacobianObjective(jrosen_cost, jrosen_resjac!, zeros(2, 2)), OptimizationOptions()); nothing catch e; e end
         @test err isa DimensionMismatch && occursin("3 columns", err.msg)
@@ -68,7 +73,8 @@ end
     @testset "Every rejection throws before f or resjac! is called" begin
         obj = JacobianObjective(jrosen_cost, jrosen_resjac!, 2)
         bad = Any[]
-        append!(bad, [(obj, OptimizationOptions(linsolver=s), ArgumentError) for s in (:cholesky, :ldl, cholesky_solver, ldl_solver)])
+        sobj = JacobianObjective(jrosen_cost, jrosen_resjac!, sparse(ones(2, 2)))
+        append!(bad, [(sobj, OptimizationOptions(linsolver=s), ArgumentError) for s in (:cholesky, :ldl, cholesky_solver, ldl_solver)])
         push!(bad, (JacobianObjective(jrosen_cost, jrosen_resjac!, zeros(2, 3)), OptimizationOptions(), DimensionMismatch))
         for (o, opts, E) in bad
             JCALLS[] = 0

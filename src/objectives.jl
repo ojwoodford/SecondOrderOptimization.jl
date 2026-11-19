@@ -58,9 +58,10 @@ HessianObjective(f, fdf!; H = nothing) = HessianObjective(f, fdf!, H)
     JacobianObjective(f, resjac!, J)
 
 A least-squares objective given by its cost and by its residual and Jacobian, for
-[`optimize`](@ref) and [`optimize!`](@ref). The linear systems are solved by a QR factorization
-of the Jacobian, never by forming `JᵀJ`, which is more accurate when `J` is ill conditioned: a
-dense Householder QR for a dense `J`, and SuiteSparse's sparse QR (SPQR) for a sparse one.
+[`optimize`](@ref) and [`optimize!`](@ref). By default the linear systems are solved by a QR
+factorization of the Jacobian, never by forming `JᵀJ`, which is more accurate when `J` is ill
+conditioned: a dense Householder QR for a dense `J`, and SuiteSparse's sparse QR (SPQR) for a sparse
+one. For a dense `J`, `linsolver = :cholesky` or `:ldl` solves the normal equations instead (below).
 
 - `f(x) -> cost` returns the true scalar cost at `x`. Trial points are scored with `f`: the
   optimizer never derives the cost from the residual, so the cost need not be `½‖r‖²` (with robust
@@ -102,7 +103,7 @@ that this holds.
 # Supported combinations
 | Jacobian prototype `J` | Linear system | `linsolver` |
 |:---|:---|:---|
-| integer `m ≥ 1`, or `Matrix{Float64}` (`m × n`) | dense QR of `J`; static QR when `x0` has a static size and `m·n ≤ 48` | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
+| integer `m ≥ 1`, or `Matrix{Float64}` (`m × n`) | dense QR of `J`; static QR when `x0` has a static size and `m·n ≤ 48` | `:auto`, `:qr`; `:cholesky`, `:ldl` (form `JᵀJ` once per linearization and factor it; always the dense system, never the static one); `:lsmr` (with Krylov.jl) |
 | `SparseMatrixCSC{Float64, Int}` | sparse QR of `J` (SPQR) | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
 | `SchurBlockJacobian{Float64, Matrix{Float64}}` (another package's) | QR elimination, dense reduced system | `:auto`, `:qr` (QR of the reduced Jacobian); `:cholesky`, `:ldl` (factor its normal equations); `:lsmr` (with Krylov.jl) |
 | `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}` (another package's) | QR elimination, sparse reduced system | `:auto`, `:qr` (sparse QR of the reduced Jacobian, SPQR); `:cholesky` (sparse Cholesky of the reduced normal equations, falling back to LDLᵀ), `:ldl`; `:lsmr` (with Krylov.jl) |
@@ -113,7 +114,8 @@ system. Everything else is rejected with an `ArgumentError` before `f` or `resja
 other prototype type, element type or index type, and any other `linsolver`.
 
 The model Hessian is `JᵀJ`, so `iterator = :newton` is Gauss-Newton: each step solves
-`JᵀJ dx = -Jᵀr` by QR of `J`, with Newton's diagonal shift if `J` is numerically rank deficient.
+`JᵀJ dx = -Jᵀr` by the system's solver, with Newton's diagonal shift if the solve reports `J`
+numerically rank deficient.
 `:levenbergmarquardt_dtd` scales the damping by the running maximum of the squared column norms
 of `J` (the diagonal of `JᵀJ`).
 
@@ -131,6 +133,14 @@ allocates. Its tolerances are Krylov's defaults (`etol`, `axtol`, `btol` = √ep
 at most `m + n` iterations), starting values that have not been measured. LSMR does not detect a
 numerically rank-deficient `J`, except `m < n` undamped, which is reported as the QR solve reports
 it.
+
+`linsolver = :cholesky` or `:ldl`, with a dense `J`, solves the normal equations: the upper
+triangle of `JᵀJ` is formed from `J` once per linearization (BLAS `syrk`, about `mn²/2`
+multiply-adds), and each damping value tried factors `JᵀJ + λD` (`n³/3`, independent of `m`) by
+Cholesky or Bunch–Kaufman, as for a [`HessianObjective`](@ref). That costs less than QR (about
+`2mn²`) when `m` is well above `n`, but squares the condition number of `J`, so it suits a
+well-conditioned `J`; `:auto` stays QR. The product and the factorization are BLAS and LAPACK calls.
+See DampedLinearSolve's page on solvers for the costs and the damping floor.
 
 For a small problem with a static number of variables (`x0` a `Number`, a `StaticVector` or a tuple of
 them, with at most `MAX_STATIC_SYSTEM` variables) and a dense `J` with `m·n ≤ 48`, the optimizer uses a
