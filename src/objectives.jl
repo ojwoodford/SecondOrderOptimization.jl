@@ -8,7 +8,8 @@ An objective given by its cost and by its gradient and Hessian, for [`optimize`]
 - `fdf!(g, H, x) -> cost` writes the gradient into `g` and the Hessian into `H` (both arrive
   zeroed), and returns the cost at `x`.
 - `H` is the Hessian prototype: `nothing` (a static or dense system sized from `x0`), a `Matrix`,
-  an `MMatrix`, a `SparseMatrixCSC`, or, with BlockLinearSystems.jl loaded, a `SchurBlockHessian`.
+  an `MMatrix`, a `SparseMatrixCSC`, or another package's prototype for which that package implements
+  DampedLinearSolve's linear-system contract (a `SchurBlockHessian`, for Schur-complement elimination).
   The type of `H` selects the linear system, including elimination for a `SchurBlockHessian`; the
   `linsolver` option then names the solver for that system.
 
@@ -57,9 +58,10 @@ HessianObjective(f, fdf!; H = nothing) = HessianObjective(f, fdf!, H)
     JacobianObjective(f, resjac!, J)
 
 A least-squares objective given by its cost and by its residual and Jacobian, for
-[`optimize`](@ref) and [`optimize!`](@ref). The linear systems are solved by a QR factorization
-of the Jacobian, never by forming `JᵀJ`, which is more accurate when `J` is ill conditioned: a
-dense Householder QR for a dense `J`, and SuiteSparse's sparse QR (SPQR) for a sparse one.
+[`optimize`](@ref) and [`optimize!`](@ref). By default the linear systems are solved by a QR
+factorization of the Jacobian, never by forming `JᵀJ`, which is more accurate when `J` is ill
+conditioned: a dense Householder QR for a dense `J`, and SuiteSparse's sparse QR (SPQR) for a sparse
+one. For a dense `J`, `linsolver = :cholesky` or `:ldl` solves the normal equations instead (below).
 
 - `f(x) -> cost` returns the true scalar cost at `x`. Trial points are scored with `f`: the
   optimizer never derives the cost from the residual, so the cost need not be `½‖r‖²` (with robust
@@ -80,12 +82,13 @@ dense Householder QR for a dense `J`, and SuiteSparse's sparse QR (SPQR) for a s
   matrix. A sparse prototype's stored entries are its pattern: `resjac!` must write only stored
   entries (through `nonzeros(J)`, or `J[i, j]` for a stored `(i, j)`). Writing any other entry
   inserts it, which changes the pattern, and the run throws an `ArgumentError`.
-- With BlockLinearSystems.jl loaded, `J` may also be a `SchurBlockJacobian{Float64, RType}`: the
-  variables are partitioned into retained and eliminated blocks, and each step eliminates the
-  eliminated blocks by QR (BlockLinearSystems' `reduce_qr!`), solves the reduced problem in the
-  retained variables and back-substitutes. `resjac!` writes the Jacobian blocks and the residuals
-  into `J`'s tables (BlockLinearSystems' `coupling_block`, `eliminated_block` and
-  `residual_block`); its `r` argument is then an empty vector. `RType`, `Matrix{Float64}` or
+- `J` may also be another package's prototype for which that package implements DampedLinearSolve's
+  linear-system contract, such as a `SchurBlockJacobian{Float64, RType}`: the variables are
+  partitioned into retained and eliminated blocks, and each step eliminates the eliminated blocks by
+  QR, solves the reduced problem in the retained variables and back-substitutes. `resjac!` writes
+  the Jacobian blocks and the residuals into `J` by row block (through that package's `blockentry`,
+  `block(J, k, entry, nrows, ncols)` and `residual_block(J, k)`); its `r` argument is then an empty
+  vector. `RType`, `Matrix{Float64}` or
   `SparseMatrixCSC{Float64, Int}`, is the storage of the reduced system. A prototype is the matrix `resjac!` writes
   into, with its values (a trial system, for `callbackchangesstate = false`, works on a copy
   made at the start of the run), except with an [`OptimizationWorkspace`](@ref): a workspace owns
@@ -100,10 +103,10 @@ that this holds.
 # Supported combinations
 | Jacobian prototype `J` | Linear system | `linsolver` |
 |:---|:---|:---|
-| integer `m ≥ 1`, or `Matrix{Float64}` (`m × n`) | dense QR of `J`; static QR when `x0` has a static size and `m·n ≤ 48` | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
+| integer `m ≥ 1`, or `Matrix{Float64}` (`m × n`) | dense QR of `J`; static QR when `x0` has a static size and `m·n ≤ 48` | `:auto`, `:qr`; `:cholesky`, `:ldl` (form `JᵀJ` once per linearization and factor it; always the dense system, never the static one); `:lsmr` (with Krylov.jl) |
 | `SparseMatrixCSC{Float64, Int}` | sparse QR of `J` (SPQR) | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
-| `SchurBlockJacobian{Float64, Matrix{Float64}}` (with BlockLinearSystems.jl) | QR elimination, dense reduced system | `:auto`, `:qr` (QR of the reduced Jacobian); `:cholesky`, `:ldl` (factor its normal equations); `:lsmr` (with Krylov.jl) |
-| `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}` (with BlockLinearSystems.jl) | QR elimination, sparse reduced system | `:auto`, `:qr` (sparse QR of the reduced Jacobian, SPQR); `:cholesky` (sparse Cholesky of the reduced normal equations, falling back to LDLᵀ), `:ldl`; `:lsmr` (with Krylov.jl) |
+| `SchurBlockJacobian{Float64, Matrix{Float64}}` (another package's) | QR elimination, dense reduced system | `:auto`, `:qr` (QR of the reduced Jacobian); `:cholesky`, `:ldl` (factor its normal equations); `:lsmr` (with Krylov.jl) |
+| `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}` (another package's) | QR elimination, sparse reduced system | `:auto`, `:qr` (sparse QR of the reduced Jacobian, SPQR); `:cholesky` (sparse Cholesky of the reduced normal equations, falling back to LDLᵀ), `:ldl`; `:lsmr` (with Krylov.jl) |
 
 Every row takes every iterator: `:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg`, `:newton`
 (Gauss-Newton) and `:gradientdescent`, which uses only the gradient `Jᵀr` and never solves the linear
@@ -111,7 +114,8 @@ system. Everything else is rejected with an `ArgumentError` before `f` or `resja
 other prototype type, element type or index type, and any other `linsolver`.
 
 The model Hessian is `JᵀJ`, so `iterator = :newton` is Gauss-Newton: each step solves
-`JᵀJ dx = -Jᵀr` by QR of `J`, with Newton's diagonal shift if `J` is numerically rank deficient.
+`JᵀJ dx = -Jᵀr` by the system's solver, with Newton's diagonal shift if the solve reports `J`
+numerically rank deficient.
 `:levenbergmarquardt_dtd` scales the damping by the running maximum of the squared column norms
 of `J` (the diagonal of `JᵀJ`).
 
@@ -129,6 +133,14 @@ allocates. Its tolerances are Krylov's defaults (`etol`, `axtol`, `btol` = √ep
 at most `m + n` iterations), starting values that have not been measured. LSMR does not detect a
 numerically rank-deficient `J`, except `m < n` undamped, which is reported as the QR solve reports
 it.
+
+`linsolver = :cholesky` or `:ldl`, with a dense `J`, solves the normal equations: the upper
+triangle of `JᵀJ` is formed from `J` once per linearization (BLAS `syrk`, about `mn²/2`
+multiply-adds), and each damping value tried factors `JᵀJ + λD` (`n³/3`, independent of `m`) by
+Cholesky or Bunch–Kaufman, as for a [`HessianObjective`](@ref). That costs less than QR (about
+`2mn²`) when `m` is well above `n`, but squares the condition number of `J`, so it suits a
+well-conditioned `J`; `:auto` stays QR. The product and the factorization are BLAS and LAPACK calls.
+See DampedLinearSolve's page on solvers for the costs and the damping floor.
 
 For a small problem with a static number of variables (`x0` a `Number`, a `StaticVector` or a tuple of
 them, with at most `MAX_STATIC_SYSTEM` variables) and a dense `J` with `m·n ≤ 48`, the optimizer uses a
@@ -164,30 +176,7 @@ struct JacobianObjective{F, RJ, JM}
     end
 end
 
-const JACOBIAN_SUPPORT = "JacobianObjective supports every iterator, with a Matrix{Float64} or SparseMatrixCSC{Float64, Int} Jacobian prototype or an integer number of residuals m, and linsolver = :auto or :qr;" *
-    " or, with BlockLinearSystems.jl loaded, a SchurBlockJacobian{Float64, Matrix{Float64}} or SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}, linsolver = :auto, :qr, :cholesky or :ldl." *
-    " Every prototype also takes linsolver = :lsmr, with Krylov.jl loaded"
-
-# The Jacobian prototype: a Matrix{Float64} with at least one row, or an integer m >= 1
-function checkjacobian(J)
-    if J isa Integer && !(J isa Bool)
-        J >= 1 || throw(ArgumentError("The number of residuals m must be at least 1; got $J. $JACOBIAN_SUPPORT."))
-    elseif J isa Matrix{Float64}
-        size(J, 1) >= 1 || throw(ArgumentError("The Jacobian prototype has no rows (size $(size(J))): it needs one row per residual. $JACOBIAN_SUPPORT."))
-    elseif J isa SparseMatrixCSC{Float64, Int}
-        size(J, 1) >= 1 || throw(ArgumentError("The Jacobian prototype has no rows (size $(size(J))): it needs one row per residual. $JACOBIAN_SUPPORT."))
-    elseif J isa AbstractSparseMatrix
-        throw(ArgumentError("A sparse Jacobian prototype of type $(typeof(J)) is not supported. $JACOBIAN_SUPPORT."))
-    elseif J isa AbstractMatrix && eltype(J) !== Float64
-        throw(ArgumentError("The Jacobian must be Float64; got a prototype with element type $(eltype(J)). $JACOBIAN_SUPPORT."))
-    else
-        throw(ArgumentError("A Jacobian prototype of type $(typeof(J)) is not supported. $JACOBIAN_SUPPORT."))
-    end
-    return nothing
-end
-
-nresiduals(obj::JacobianObjective) = nresiduals_of(obj.J)
-nresiduals_of(J) = J isa Integer ? Int(J) : size(J, 1)
+nresiduals(obj::JacobianObjective) = jacobian_nrows(obj.J)
 
 # Everything checked before anything is allocated or any user function called
 function checkobjective(x0, obj::JacobianObjective, options::OptimizationOptions)
@@ -198,14 +187,5 @@ function checkobjective(x0, obj::JacobianObjective, options::OptimizationOptions
         throw(DimensionMismatch("Jacobian prototype J has $nc columns, but the variables have $n degrees of freedom, so J must have $n columns."))
     end
     check_jacobian_linsolver(obj.J, linsolver_symbol(options.linsolver))
-    return nothing
-end
-
-# The prototype's column count (nothing for an integer m, whose J is sized from x0), and the solvers it
-# accepts. An extension adds methods for its prototype types.
-jacobian_ncols(J::AbstractMatrix) = size(J, 2)
-jacobian_ncols(J) = nothing
-function check_jacobian_linsolver(J, s::Symbol)
-    s in (:auto, :qr, :lsmr) || throw(ArgumentError("linsolver = :$s is not supported with a JacobianObjective. $JACOBIAN_SUPPORT."))
     return nothing
 end

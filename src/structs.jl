@@ -1,3 +1,15 @@
+# The solver can be named in the options by a Symbol, a StaticSymbol or this enum; the options hold it
+# as a StaticSymbol, which is what the linear systems are solved with
+@enum OptimizationLinearSolver auto_solver cholesky_solver ldl_solver qr_solver
+linsolver_symbol(s::Symbol) = s
+linsolver_symbol(s::StaticSymbol) = dynamic(s)
+function linsolver_symbol(s::OptimizationLinearSolver)
+    s == auto_solver && return :auto
+    s == cholesky_solver && return :cholesky
+    s == ldl_solver && return :ldl
+    return :qr
+end
+
 struct OptimizationOptions{S, L, B <: StaticBool}
     reldcost::Float64           # Minimum relative change in cost (either direction) required to avoid termination
     absdcost::Float64           # Minimum absolute change in cost (either direction) required to avoid termination
@@ -19,8 +31,6 @@ struct OptimizationOptions{S, L, B <: StaticBool}
 end
 
 makestaticbool(x::Union{Bool, StaticBool}) = static(x)
-makestaticbool(::Type{True}) = True()
-makestaticbool(::Type{False}) = False()
 
 # Termination bitmask constants
 const TERMINATION_COST_INF          = 1 << 0

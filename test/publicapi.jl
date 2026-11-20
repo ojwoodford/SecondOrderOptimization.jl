@@ -49,7 +49,7 @@ const PUBLIC_API = sort([
             :iteratorname, :knowniterators, :checkiterator,
             :OptimizationLinearSolver, :auto_solver, :cholesky_solver, :ldl_solver, :qr_solver,
             :LINSOLVER_FAILED, :fast_dot,
-            :AbstractLinearSystem, :solve!, :dampen!, :zero!, :makelinearsystem, :copy_structure,
+            :AbstractLinearSystem, :solve!, :dampen!, :zero!, :makehessiansystem, :copy_structure,
             :sharex, :quadform, :quadratic_model_change, :validatelinsolver,
             :SolveStatus, :Success, :NotPositiveDefinite, :Indefinite,
             :check_linear_system, :usesstaticsystem, :MAX_STATIC_SYSTEM)

@@ -26,7 +26,8 @@ struct JacobianStructureKey
     m::Int
 end
 h_structure_key(k::JacobianStructureKey) = k
-h_structure_key(H::AbstractMatrix) = (typeof(H), size(H))
+# Any other prototype: the system's own structure key (for a matrix, its type and size)
+h_structure_key(H) = structurekey(H)
 
 # The structure of a sparse Hessian. It keeps the arrays it was built from so that a later call
 # passing the same `H` (or one sharing its `colptr` and `rowval`) matches without rehashing the
@@ -66,6 +67,15 @@ h_structure_key(p::SparseJacobianPattern) = (JacobianStructureKey(size(p.J, 1)),
 hkeyvalid(key::Tuple{JacobianStructureKey, SparseStructureKey}, p::SparseJacobianPattern) =
     key[1] == JacobianStructureKey(size(p.J, 1)) && hkeyvalid(key[2], p.J)
 
+# The structure of a Jacobian prototype of another kind (not a matrix or a number of residuals): its
+# system's structure key, wrapped so that it never equals the key of a Hessian prototype
+struct JacobianPrototypeKey{K}
+    key::K
+end
+Base.:(==)(a::JacobianPrototypeKey, b::JacobianPrototypeKey) = a.key == b.key
+Base.hash(k::JacobianPrototypeKey, h::UInt) = hash((JacobianPrototypeKey, k.key), h)
+h_structure_key(k::JacobianPrototypeKey) = k
+
 # A `Vector` of variable blocks of one type and total dimension can still differ in the number
 # and sizes of its blocks (e.g. two 3-vectors versus three 2-vectors), so key on those too.
 blocklayout_key(x0) = nothing
@@ -83,7 +93,7 @@ function cachekey(x0, options::OptimizationOptions, H)
 end
 
 workspacevalid(ws::OptimizationWorkspace, x0, options::OptimizationOptions, H) = keyvalid(ws.key, x0, options, H)
-keyvalid(key, x0, options::OptimizationOptions, H) = false
+keyvalid(key, x0, options::OptimizationOptions, H) = false   # COV_EXCL_LINE: runs (test/edgepaths.jl), but a constant-result method is called without running its body, so coverage never counts it
 function keyvalid(key::Tuple, x0, options::OptimizationOptions, H)
     key[1] === typeof(x0) || return false
     key[2] == dynamic(nvars(x0)) || return false

@@ -9,7 +9,10 @@ by [`OptimizationOptions`](@ref).
 module SecondOrderOptimization
 
 using FastNorm
-using LinearAlgebra, SparseArrays, StaticArrays, Static, LDLFactorizations
+using LinearAlgebra, SparseArrays, StaticArrays, Static
+using DampedLinearSolve
+# The linear-system contract (DampedLinearSolve's exports) is extended here, for the iterators' own data
+import DampedLinearSolve: dampen!
 using Printf: @printf, @sprintf
 using OptimizationVariableInterface
 import OptimizationVariableInterface: nvars, update, update!, copyvars, syncvars!, ismutablevar
@@ -31,9 +34,8 @@ export TERMINATION_LINSOLVER_FAILED, TERMINATION_STALLED
 include("utils.jl")
 include("stats.jl")
 
-# Linear systems and solvers
-include("linearsystem.jl")
-include("linearsolver.jl")
+# The rule for a static system, decided from the variables (the systems are DampedLinearSolve's)
+include("staticrule.jl")
 
 # Core options, results, and internal data structures
 include("structs.jl")
@@ -46,17 +48,8 @@ include("callbacks.jl")
 # Iterators
 include("iterators.jl")
 
-# The residual-and-Jacobian linear systems, dense and sparse (after the iterators, for their
-# Marquardt scaling method)
-include("tallsystem.jl")
-include("sparsetallsystem.jl")
-include("statictallsystem.jl")
-
 # Optimization driver and loop
 include("optimize.jl")
-
-# Conformance check for linear systems
-include("conformance.jl")
 
 # API docstrings
 include("docstrings.jl")

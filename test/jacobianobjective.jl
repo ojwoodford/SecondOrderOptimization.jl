@@ -1,6 +1,6 @@
 using SecondOrderOptimization, StaticArrays, SparseArrays, LinearAlgebra, Static, Random, Test
 using SecondOrderOptimization: LevenbergDataTrial, auto_solver, cholesky_solver, ldl_solver, qr_solver, dampen!, zero!, Success, NotPositiveDefinite   # internal names
-include("termbits.jl")
+include("fixtures/load.jl"); loadfixtures("termbits.jl", "lsq_problems.jl")
 const SOO = SecondOrderOptimization
 using SecondOrderOptimization: getA, getb, getx, solve!   # explicit: Krylov, loaded by other test files, also exports solve!
 
@@ -40,7 +40,7 @@ end
             err = try JacobianObjective(jrosen_cost, jrosen_resjac!, J); nothing catch e; e end
             @test err isa ArgumentError
             @test occursin(needle, err.msg)
-            @test occursin("Matrix{Float64}", err.msg) && occursin("every iterator", err.msg)
+            @test occursin("Matrix{Float64}", err.msg) && occursin("linsolver = :auto or :qr", err.msg)
         end
     end
 
@@ -50,12 +50,17 @@ end
         for it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton, :gradientdescent)
             @test SOO.checkobjective([0.0, 0.0], obj, OptimizationOptions(iterator=it)) === nothing
         end
-        for s in (:cholesky, :ldl)
-            err = try SOO.checkobjective([0.0, 0.0], obj, OptimizationOptions(linsolver=s)); nothing catch e; e end
-            @test err isa ArgumentError && occursin(":$s", err.msg) && occursin(":auto or :qr", err.msg)
+        # the normal equations (:cholesky, :ldl) are for a dense J only: refused for a sparse prototype
+        sobj = JacobianObjective(jrosen_cost, jrosen_resjac!, sparse(ones(2, 2)))
+        for s in (:cholesky, :ldl, cholesky_solver, ldl_solver)
+            err = try SOO.checkobjective([0.0, 0.0], sobj, OptimizationOptions(linsolver=s)); nothing catch e; e end
+            name = s isa Symbol ? s : Symbol(s === cholesky_solver ? :cholesky : :ldl)
+            @test err isa ArgumentError && occursin(":$name", err.msg) && occursin(":auto or :qr", err.msg)
+            @test occursin("a Matrix{Float64} prototype or an integer m also takes :cholesky or :ldl", err.msg)
         end
-        for s in (:auto, :qr, auto_solver, qr_solver)
+        for s in (:auto, :qr, :cholesky, :ldl, auto_solver, qr_solver, cholesky_solver, ldl_solver)
             @test SOO.checkobjective([0.0, 0.0], obj, OptimizationOptions(linsolver=s)) === nothing
+            @test SOO.checkobjective([0.0, 0.0], JacobianObjective(jrosen_cost, jrosen_resjac!, zeros(2, 2)), OptimizationOptions(linsolver=s)) === nothing
         end
         err = try SOO.checkobjective([0.0, 0.0, 0.0], JacobianObjective(jrosen_cost, jrosen_resjac!, zeros(2, 2)), OptimizationOptions()); nothing catch e; e end
         @test err isa DimensionMismatch && occursin("3 columns", err.msg)
@@ -68,7 +73,8 @@ end
     @testset "Every rejection throws before f or resjac! is called" begin
         obj = JacobianObjective(jrosen_cost, jrosen_resjac!, 2)
         bad = Any[]
-        append!(bad, [(obj, OptimizationOptions(linsolver=s), ArgumentError) for s in (:cholesky, :ldl, cholesky_solver, ldl_solver)])
+        sobj = JacobianObjective(jrosen_cost, jrosen_resjac!, sparse(ones(2, 2)))
+        append!(bad, [(sobj, OptimizationOptions(linsolver=s), ArgumentError) for s in (:cholesky, :ldl, cholesky_solver, ldl_solver)])
         push!(bad, (JacobianObjective(jrosen_cost, jrosen_resjac!, zeros(2, 3)), OptimizationOptions(), DimensionMismatch))
         for (o, opts, E) in bad
             JCALLS[] = 0
@@ -116,7 +122,7 @@ SOO.update(x::Rot3, dx, start=1) = Rot3(x.R * expso3(SVector(dx[start], dx[start
         A = randn(rng, 12, 4); b = randn(rng, 12)
         obj = JacobianObjective(x -> 0.5 * sum(abs2, A * x - b), (r, J, x) -> (r .= A * x - b; J .= A; 0.5 * sum(abs2, r)), 12)
         for x0 in (zeros(4), randn(rng, 4), 1e3 * randn(rng, 4))
-            ls = SOO.makelinearsystem(x0, obj, :auto)
+            ls = SOO.objective_linearsystem(x0, obj, :auto)
             zero!(ls)
             SOO.linearizer(obj)(getb(ls), getA(ls), x0)
             dampen!(ls, 0.0)
@@ -129,15 +135,9 @@ SOO.update(x::Rot3, dx, start=1) = Rot3(x.R * expso3(SVector(dx[start], dx[start
     end
 
     @testset "Agreement with the normal equations on well-conditioned problems" begin
-        # Rosenbrock as two residuals; an exponential fit with a nonzero residual; n = 30
-        t = collect(range(0, 2; length=25)); y = @. 3exp(-1.3t) + 0.05sin(7t)
-        rng = Xoshiro(11); M = randn(rng, 45, 30) ./ sqrt(45) + I(45)[:, 1:30]; yy = randn(rng, 45)
-        problems = (
-            ("Rosenbrock", x -> [1 - x[1], 10 * (x[2] - x[1]^2)], x -> [-1.0 0.0; -20x[1] 10.0], 2, [-1.2, 1.0]),
-            ("exponential fit", x -> @.(x[1] * exp(x[2] * t) - y), x -> hcat(exp.(x[2] .* t), x[1] .* t .* exp.(x[2] .* t)), 25, [1.0, 0.0]),
-            ("n = 30", x -> M * tanh.(x) .- yy, x -> M * Diagonal(sech.(x) .^ 2), 45, zeros(30)),
-        )
-        for (name, resid, jac, m, x0) in problems
+        # Rosenbrock as two residuals; an exponential fit with a nonzero residual; n = 30, M tanh.(x) - y (one
+        # problem type for the three, so they share one objective type of each kind)
+        for (name, resid, jac, m, x0) in lsq_problems(:tanh30)
             objJ, objH = lsq_objectives(resid, jac, m, length(x0))
             cJ, lJ, cbJ = lambdatrace()
             cH, lH, cbH = lambdatrace()
@@ -162,7 +162,7 @@ SOO.update(x::Rot3, dx, start=1) = Rot3(x.R * expso3(SVector(dx[start], dx[start
         end
     end
 
-    @testset "Ill-conditioned problem: the tall path reaches the least-squares minimum" begin
+    @testset "Ill-conditioned problem: the Jacobian path reaches the least-squares minimum" begin
         # A degree-13 polynomial fit (cond(J) ≈ 4e9), scaled so that the iterator's floor on the
         # damping (1e-12) is far below the smallest squared singular value
         tt = collect(range(0, 1; length=60))
@@ -179,11 +179,12 @@ SOO.update(x::Rot3, dx, start=1) = Rot3(x.R * expso3(SVector(dx[start], dx[start
         costmin = exactcost(big.(V) \ big.(yv))
         gJ = norm(V' * (V * xJ - yv), Inf)
         gH = norm(V' * (V * xH - yv), Inf)
-        @info "Ill-conditioned fit (cond(J) = $(round(cond(V), sigdigits=2)), least-squares minimum $costmin)" tall_cost=resJ.bestcost tall_excess=exactcost(xJ)-costmin tall_gradnorm=gJ tall_iterations=resJ.niterations normal_cost=resH.bestcost normal_excess=exactcost(xH)-costmin normal_gradnorm=gH normal_iterations=resH.niterations
-        @test resJ.bestcost <= resH.bestcost
+        @info "Ill-conditioned fit (cond(J) = $(round(cond(V), sigdigits=2)), least-squares minimum $costmin)" jacobian_cost=resJ.bestcost jacobian_excess=exactcost(xJ)-costmin jacobian_gradnorm=gJ jacobian_iterations=resJ.niterations hessian_cost=resH.bestcost hessian_excess=exactcost(xH)-costmin hessian_gradnorm=gH hessian_iterations=resH.niterations
+        # Only the Jacobian path's result is tested against the minimum: the normal equations' is the
+        # rounding of a Cholesky factorization at cond² ≈ 1.5e19, and depends on the platform (measured
+        # relative excess: 2.8e-3 in 500 iterations on x86-64 with Julia 1.10, 2.3e-7 in 176 with 1.13)
         @test exactcost(xJ) - costmin <= 1e-12 * costmin
-        @test exactcost(xH) - costmin > 1e-6 * costmin
-        @test resJ.niterations < resH.niterations
+        @test exactcost(xJ) <= exactcost(xH) + 1e-12 * costmin
         # Compared on cost only. The gradient norm (as the optimizer computes it, in Float64) is at
         # the level of its own rounding here: the gradient at the exact minimizer, rounded to Float64,
         # is of the same order, so gJ < gH (asserted before Q5) depends on the platform and on the
@@ -220,7 +221,7 @@ SOO.update(x::Rot3, dx, start=1) = Rot3(x.R * expso3(SVector(dx[start], dx[start
         resid(x) = @. a * (x[1] + x[2]) + c * x[3] - y
         jac(x) = hcat(a, a, c)
         objJ, _ = lsq_objectives(resid, jac, 15, 3)
-        ls = SOO.makelinearsystem(zeros(3), objJ, :auto)
+        ls = SOO.objective_linearsystem(zeros(3), objJ, :auto)
         zero!(ls); SOO.linearizer(objJ)(getb(ls), getA(ls), zeros(3)); dampen!(ls, 0.0)
         @test solve!(ls, :auto) == NotPositiveDefinite
         x, res = optimize(zeros(3), objJ, OptimizationOptions())
@@ -318,7 +319,7 @@ SOO.update(x::Rot3, dx, start=1) = Rot3(x.R * expso3(SVector(dx[start], dx[start
         # the trial variant reuses the trial linearization, so it needs fewer cost evaluations
         @test res_trial.costcomputations < res_plain.costcomputations
         @test res_trial.niterations == res_plain.niterations
-        @test SOO.construct(static(:levenbergmarquardt), SOO.makelinearsystem([0.0, 0.0], objJ, :auto), False()) isa LevenbergDataTrial
+        @test SOO.construct(static(:levenbergmarquardt), SOO.objective_linearsystem([0.0, 0.0], objJ, :auto), False()) isa LevenbergDataTrial
     end
 
     @testset "Non-finite residuals or Jacobians stop the run" begin

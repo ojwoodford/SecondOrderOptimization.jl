@@ -9,10 +9,13 @@ Stores configuration options and stopping criteria for second-order optimization
   continue: the run stops, converged (`TERMINATION_REL_DCOST`), when an iteration changes the
   cost by less than `reldcost * abs(bestcost)`, a rise as well as a fall. It is kept tight, since
   a single iteration with a tiny change is not convergence (a run crawling across a flat valley
-  has many); the slower test is `stalltol`.
+  has many); the slower test is `stalltol`. Not tested after a step the iterator restricted (a
+  truncated or shifted dogleg step, a shifted Newton solve, an LM step whose damping outweighs
+  the curvature along it), which is small because of the safeguard, not because of convergence.
 - `absdcost::Float64 = 1e-15`: Minimum absolute change in cost, in either direction, in one
   iteration required to continue (converged, `TERMINATION_ABS_DCOST`).
-- `dstep::Float64 = 1e-15`: Minimum infinity-norm of parameter step vector to continue.
+- `dstep::Float64 = 1e-15`: Minimum infinity-norm of parameter step vector to continue. Like
+  `reldcost`, not tested after a restricted step.
 - `gtol::Float64 = 0.0`: Gradient infinity-norm threshold for termination.
 - `maxstall::Int = 3`: Maximum number of consecutive iterations in which the best cost does not
   improve significantly (by more than `stalltol` relative, counted from the last significant
@@ -31,7 +34,7 @@ Stores configuration options and stopping criteria for second-order optimization
   known only to the iterator. Check the gradient (`gtol`) when that matters.
 - `maxtime::Float64 = 30.0`: Maximum wall-clock optimization runtime in seconds.
 - `iterator::Symbol = :levenbergmarquardt`: Iterator algorithm (`:newton`, `:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg`, `:gradientdescent`).
-- `linsolver::Symbol = :auto`: Linear solver method: `:auto`, `:cholesky`, `:ldl` or `:qr`; `:cg` or `:minres` (Krylov solvers for a Hessian) and `:lsmr` (for a [`JacobianObjective`](@ref) only), via `Krylov.jl`; or `:pardiso`, via `Pardiso.jl`. Which of these an objective accepts is set by its prototype: see [`HessianObjective`](@ref) and [`JacobianObjective`](@ref).
+- `linsolver::Symbol = :auto`: Linear solver method: `:auto`, `:cholesky`, `:ldl` or `:qr`; `:cg` or `:minres` (Krylov solvers for a Hessian) and `:lsmr` (for a [`JacobianObjective`](@ref) only), via `Krylov.jl`; or `:pardiso`, via `Pardiso.jl`. Which of these an objective accepts is set by its prototype: see [`HessianObjective`](@ref) and the table of supported combinations in [`JacobianObjective`](@ref) (a dense Jacobian takes `:auto`, `:qr`, `:cholesky`, `:ldl` and `:lsmr`; a sparse one `:auto`, `:qr` and `:lsmr`).
 - `callbackchangesstate::Union{Bool, StaticBool} = false`: Set `true` if callback modifies problem state.
 
 # Example
@@ -237,36 +240,9 @@ ldl_solver
 """
 qr_solver
 
-"""
-    SolveStatus
 
-Enum returned by [`solve!`](@ref) indicating the status of the linear system solution:
-- [`Success`](@ref): The linear system was solved successfully.
-- [`NotPositiveDefinite`](@ref): The matrix was found not to be positive definite during Cholesky or LDL factorization.
-- [`Indefinite`](@ref): The matrix was detected to be indefinite or negative curvature was encountered during solving.
-"""
-SolveStatus
 
-"""
-    Success
 
-[`SolveStatus`](@ref) indicating that the linear system was solved successfully.
-"""
-Success
-
-"""
-    NotPositiveDefinite
-
-[`SolveStatus`](@ref) indicating that the matrix failed a positive-definiteness test (e.g. non-positive pivot in Cholesky).
-"""
-NotPositiveDefinite
-
-"""
-    Indefinite
-
-[`SolveStatus`](@ref) indicating that the matrix was detected to be indefinite or negative curvature was encountered.
-"""
-Indefinite
 
 """
     CostTrajectory()
@@ -353,53 +329,8 @@ x_opt, res = optimize(x0, JacobianObjective(x -> 0.5 * f(x), resjac!, 2))
 """
 optimize
 
-"""
-    zero!(ls)
 
-Prepares the linear system `ls` for a fresh linearization: zeroes the gradient vector and the
-Hessian matrix that `fdf!` accumulates into. For the tall system of a
-[`JacobianObjective`](@ref), whose `resjac!` sets `J` and `r` rather than adding to them, it
-only invalidates the cached factorization and column norms, and zeroes the gradient.
 
-# Example
-```julia
-ls = SecondOrderOptimization.DenseLinearSystem(3)
-zero!(ls)
-```
-"""
-zero!
-
-"""
-    solve!(ls, solver=static(:auto)) -> SolveStatus
-    solve!(x, A, b) -> SolveStatus
-
-Solves the linear system `A * x = b` in-place using the specified `solver` and returns the [`SolveStatus`](@ref) enum (`Success`, `NotPositiveDefinite`, `Indefinite`).
-
-# Supported Solver Identifiers
-- Core solvers: `:auto`, `:cholesky`, `:ldl`, `:qr` (or enum constants [`auto_solver`](@ref), [`cholesky_solver`](@ref), [`ldl_solver`](@ref), [`qr_solver`](@ref)).
-- Extension solvers (when package is loaded):
-  - `using Krylov`: `:cg` (Conjugate Gradient), `:minres` (MINRES). On sparse systems, `:cg` and `:minres` are Jacobi (diagonal) preconditioned whenever the damped diagonal is positive.
-  - `using Pardiso`: `:pardiso` (Intel MKL PARDISO or Panua Pardiso multi-threaded direct sparse solver).
-
-Note: On `StaticLinearSystem`, `:qr` executes static LU decomposition via `\`, and `:ldl` uses Cholesky, falling back to LU when the matrix is not positive definite (the solve is then reported as `Indefinite`).
-
-# Example
-```julia
-x = zeros(2)
-A = [2.0 0.0; 0.0 4.0]
-b = [4.0, 8.0]
-solve!(x, A, b)
-```
-"""
-solve!
-
-"""
-    validatelinsolver(solver::Union{Symbol, StaticSymbol, OptimizationLinearSolver}) -> Bool
-
-Returns `true` if `solver` is a supported linear solver backend, or `false` otherwise.
-Extension solvers (`:cg`, `:minres` and `:lsmr`, or `:pardiso`) register validation methods when their respective packages (`Krylov.jl` or `Pardiso.jl`) are loaded.
-"""
-validatelinsolver
 
 """
     nullcallback(cost, x_trial, data, iteratedata) -> (cost, 0)
@@ -439,57 +370,13 @@ x_opt, res = optimize(x0, HessianObjective(f, fdf!); callback=storecostscallback
 """
 storecostscallback
 
-"""
-    AbstractLinearSystem
-
-Supertype of the linear systems the iterators solve: the Hessian `A` and gradient `b` that `fdf!`
-fills, the step `x`, and the damping to apply. The built-in systems are `StaticLinearSystem`,
-`DenseLinearSystem`, `SparseLinearSystem` and [`DenseTallLinearSystem`](@ref) (for a
-[`JacobianObjective`](@ref): `A = JᵀJ` held implicitly as `J` and `r`, `b = Jᵀr`, and the
-iterators' `fdf!` a wrapper that calls `resjac!` and forms `b`), and, with BlockLinearSystems.jl loaded,
-`DenseSchurLinearSystem` and `SparseSchurLinearSystem`. A new system type must provide the functions
-below (those not exported are extended as `SecondOrderOptimization.name`), and should pass
-[`check_linear_system`](@ref).
-
-# Linear system interface
-
-| Function | Contract |
-|:---|:---|
-| `makelinearsystem(x0, H, linsolver)` | Builds the system from the Hessian prototype `H` (see below for which type each `H` gives). `linsolver` is used to preallocate a factorization or Krylov workspace; a sparse system must then be solved with that same solver. |
-| `getA(ls)`, `getb(ls)`, `getx(ls)` | `A` is the Hessian storage and `b` the gradient vector that `fdf!(b, A, x)` fills; `x` is the vector `solve!` writes. `b` and `x` have length `n`. The iterators read and negate `x`, and dogleg writes its own step into it. `A` must support `dot(v, A, v)` (`LinearAlgebra`'s three-argument `dot`), or have a method of the internal `quadform(A, v)`, for `v` of the type of `b`. |
-| `zero!(ls)` | Prepares the system for a fresh linearization, keeping its structure (pattern, workspaces): storage that `fdf!` accumulates into (`A`, `b`) is zeroed. A tall system only invalidates its factorization and column norms (and zeroes `b`), since `resjac!` overwrites `J` and `r`. |
-| `dampen!(ls, λ)`, `dampen!(ls, λ, s)` | Records damping without changing `A`: `solve!` then solves with `A + λI`, or `A + λ Diagonal(s)` (`s` in the units of `diag(A)`, not squared). Each call replaces the damping set before, including the scaling; `dampen!(ls, λ, nothing)` is `dampen!(ls, λ)`, and `λ = 0` is undamped. |
-| `solve!(ls, linsolver) -> SolveStatus` | Solves the damped system `A x = b` into `getx(ls)` (the step is `-x`; the iterators negate it). Returns `Success` when `x` solves it; `NotPositiveDefinite` when the factorization failed (`x` is then unspecified); `Indefinite` when it solved but found `A` indefinite (from `:ldl`, and CG's nonpositive curvature). The iterators treat anything but `Success` as failure: Newton shifts the diagonal, Levenberg-Marquardt raises `λ`, and dogleg shifts the diagonal as Newton does, taking the Cauchy step only if every shift fails. Leaves `A` and `b` exactly as written, damped or not, whether the solve succeeds or fails. `linsolver` may be a `Symbol`, a `StaticSymbol` or an `OptimizationLinearSolver`. |
-| `copy_structure(ls)` | A new system with the same structure and its own `A` and `b` (contents unspecified). It may share `x` and factorization workspaces with `ls`, provided each `solve!` is self-contained, so that solving one never changes the other's next solution. |
-| `sharex(ls, from)` | `ls`, or a copy of it sharing its `A` and `b`, whose `getx` is `getx(from)`. |
-| `SecondOrderOptimization.max_diag(ls)` | The largest absolute diagonal entry of `A`; `NaN` if a diagonal entry is `NaN` (as `max` propagates it). |
-| `SecondOrderOptimization.dampingfloor(ls)` | The smallest damping the solver resolves, relative to the diagonal: `eps(Float64)` by default (Cholesky of `A + λD`), `eps(Float64)^2` for the tall system (QR of `J`). Levenberg-Marquardt floors its damping at `min(dampingfloor(ls) * max_diag(ls), 1e-12)` for `:levenbergmarquardt` (1e-12 if `max_diag` is not finite or is zero), and at `min(dampingfloor(ls), 1e-12)` for `:levenbergmarquardt_dtd`, whose `λ` multiplies the scaled diagonal: the floor can be lower than the former constant 1e-12, never higher. |
-| `SecondOrderOptimization.updatescaling!(lmd, ls)` | For `:levenbergmarquardt_dtd`: raises `lmd.scaling` to the running maximum of `abs.(diag(A))`, with a relative floor. The generic method reads `A[i, i]`; a system whose `A` can't be indexed needs its own method (the sparse, Schur and tall systems have one). |
-| `SecondOrderOptimization.refresh_diag_cache!(ls)` | Called by the iterators after `fdf!` writes `A`. A no-op by default; no built-in system needs it for correctness. |
-| `quadratic_model_change(ls, dx)` | `dx' A dx / 2 + b' dx`, undamped. The generic method uses `quadform(getA(ls), dx)` and `fast_dot(getb(ls), dx)`. |
-
-Which system `makelinearsystem` builds:
-- `H = nothing`: a static system when `nvars(x0)` is a static size (a `Number`, a `StaticVector`,
-  a tuple of them) of at most [`MAX_STATIC_SYSTEM`](@ref) (16); otherwise a dense system of size
-  `nvars(x0)`. [`usesstaticsystem`](@ref)`(x0)` says which.
-- `H::MMatrix`: a static system that writes into `H`; any other `StaticMatrix`: a static system of
-  its own.
-- `H::Matrix{Float64}`: a dense system that writes into `H`; any other `AbstractMatrix`: a dense
-  system on a `Float64` copy.
-- `H::SparseMatrixCSC{Float64}`: a sparse system that writes into `H`, or into a copy with explicit
-  zeros added if a diagonal entry is missing.
-- `H::SchurBlockHessian` (BlockLinearSystems.jl): a Schur-complement system, dense or sparse
-  according to the storage of `H.R`; `linsolver` (`:auto`, `:cholesky` or `:ldl`) names the solver
-  for the reduced system.
-"""
-AbstractLinearSystem
 
 # Termination masks: bits of `OptimizationResult.termination`
 
 """
     TERMINATION_REL_DCOST
 
-Bit mask of [`OptimizationResult`](@ref)`.termination`, set when an iteration changed the cost, up or down, by less than `reldcost` relative to the best cost. A convergence criterion.
+Bit mask of [`OptimizationResult`](@ref)`.termination`, set when an iteration changed the cost, up or down, by less than `reldcost` relative to the best cost, after a step the iterator did not restrict (see `reldcost` in [`OptimizationOptions`](@ref)). A convergence criterion.
 Test it with `result.termination & TERMINATION_REL_DCOST != 0`; see [`isconverged`](@ref).
 """
 TERMINATION_REL_DCOST
@@ -505,7 +392,7 @@ TERMINATION_ABS_DCOST
 """
     TERMINATION_STEP_SIZE
 
-Bit mask of [`OptimizationResult`](@ref)`.termination`, set when the step was below `dstep` (infinity norm). A convergence criterion.
+Bit mask of [`OptimizationResult`](@ref)`.termination`, set when the step was below `dstep` (infinity norm) and the iterator did not restrict it (see `reldcost` in [`OptimizationOptions`](@ref)). A convergence criterion.
 Test it with `result.termination & TERMINATION_STEP_SIZE != 0`; see [`isconverged`](@ref).
 """
 TERMINATION_STEP_SIZE

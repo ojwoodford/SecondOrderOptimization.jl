@@ -15,8 +15,10 @@ concurrency:
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 jobs:
   test:
-    name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
+    name: Julia ${{ matrix.version }} - ${{ matrix.threads }} thread(s) ${{ matrix.group }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
     runs-on: ${{ matrix.os }}
+    # Nightly is informative only: its compiler changes (e.g. allocations on the workspace-reuse paths) do not fail a PR
+    continue-on-error: ${{ matrix.version == 'nightly' }}
     strategy:
       fail-fast: false
       matrix:
@@ -28,6 +30,24 @@ jobs:
           - ubuntu-latest
         arch:
           - x64
+        threads:
+          - '1'
+        group:
+          - ''          # every test group
+        include:
+          # On 4 threads, only the tests whose behaviour depends on the thread count (rules.md 30)
+          - version: '1.10'
+            os: ubuntu-latest
+            arch: x64
+            threads: '4'
+            group: 'threaded'
+          - version: '1'
+            os: ubuntu-latest
+            arch: x64
+            threads: '4'
+            group: 'threaded'
+    env:
+      JULIA_NUM_THREADS: ${{ matrix.threads }}
     steps:
       - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v3
@@ -37,6 +57,8 @@ jobs:
       - uses: julia-actions/cache@v3
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
+        with:
+          test_args: ${{ matrix.group }}
       - uses: julia-actions/julia-processcoverage@v1
       - uses: codecov/codecov-action@v7
         with:

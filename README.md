@@ -12,8 +12,8 @@ High-performance, zero-allocation second-order nonlinear optimization in Julia.
 `SecondOrderOptimization.jl` minimizes smooth scalar objectives $f(x)$ using second-order trust-region and damped Newton methods:
 
 - **Iterators**: Levenberg-Marquardt (`:levenbergmarquardt`, `:levenbergmarquardt_dtd`), Powell's Dogleg (`:dogleg`), undamped Newton (`:newton`), and backtracking Gradient Descent (`:gradientdescent`).
-- **Objectives**: a cost with its gradient and Hessian (`HessianObjective`), or, for least squares, a cost with its residual and Jacobian (`JacobianObjective`), whose steps are solved without forming `JᵀJ`.
-- **Linear Solvers**:
+- **Objectives**: a cost with its gradient and Hessian (`HessianObjective`), or, for least squares, a cost with its residual and Jacobian (`JacobianObjective`), whose steps are solved without forming `JᵀJ` (or, for a dense Jacobian with `:cholesky` or `:ldl`, by the normal equations formed from it).
+- **Linear Solvers**, from [DampedLinearSolve.jl](https://github.com/ojwoodford/DampedLinearSolve.jl) (its [documentation](https://ojwoodford.github.io/DampedLinearSolve.jl/dev/) states the linear-system contract and how each solver is chosen):
   - *Built-in*: Cholesky (`:cholesky`), LDL / Bunch-Kaufman (`:ldl`, using `LDLFactorizations.jl` for sparse matrices), and QR (`:qr`, SuiteSparse's SPQR for sparse matrices), with automatic dispatch (`:auto`).
   - *Extensions*: Iterative Krylov subspace solvers via `Krylov.jl` (`:cg` and `:minres` for a Hessian, `:lsmr` on a Jacobian) and multi-threaded sparse direct factorizations (`:pardiso` via `Pardiso.jl`).
 - **Elimination**: with [`BlockLinearSystems.jl`](https://github.com/ojwoodford/BlockLinearSystems.jl) loaded, a `SchurBlockHessian` or `SchurBlockJacobian` prototype eliminates a block of the variables (by Schur complement, or by QR of the Jacobian) and solves a reduced system in the rest. The type of the prototype selects it; there is no option for it.
@@ -67,8 +67,10 @@ linear system:
   a dense or sparse reduced system in the retained variables.
 
 `linsolver = :auto` or `:qr` factorizes; with Krylov.jl loaded, `:lsmr` solves each damped step by
-LSMR on `J` instead, without factorizing. The reduced system of a `SchurBlockJacobian` also accepts
-`:cholesky` and `:ldl`. Every iterator is supported (`:newton` is Gauss-Newton here, and
+LSMR on `J` instead, without factorizing. A dense `J` also accepts `:cholesky` and `:ldl`: `JᵀJ` is
+formed from `J` once per linearization and factored, cheaper than QR when `J` has many more rows than
+columns, but with the condition number of `J` squared. The reduced system of a `SchurBlockJacobian`
+also accepts `:cholesky` and `:ldl`. Every iterator is supported (`:newton` is Gauss-Newton here, and
 `:gradientdescent` uses only the gradient `Jᵀr`). An unsupported combination is an `ArgumentError` before your code is called.
 The full table of supported combinations is in the
 [`JacobianObjective` docstring](https://ojwoodford.github.io/SecondOrderOptimization.jl/stable/api.html#SecondOrderOptimization.JacobianObjective).

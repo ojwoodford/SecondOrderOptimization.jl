@@ -1,19 +1,20 @@
 using SecondOrderOptimization, SparseArrays, LinearAlgebra, Static, Random, Test
+import DampedLinearSolve
 using SecondOrderOptimization: dampen!, zero!, copy_structure, Success, NotPositiveDefinite, check_linear_system   # internal names
 using SecondOrderOptimization: getA, getb, getx, solve!   # explicit: Krylov, loaded by other test files, also exports solve!
+include("fixtures/load.jl"); loadfixtures("termbits.jl")
 const SOO = SecondOrderOptimization
-include("termbits.jl")
 
-# TP1: the sparse tall system (a SparseMatrixCSC{Float64, Int} Jacobian, solved by SPQR) against
-# the dense tall system on the same J
+# TP1: the sparse Jacobian system (a SparseMatrixCSC{Float64, Int} Jacobian, solved by SPQR) against
+# the dense Jacobian system on the same J
 
 # Both systems set to J and r as a linearization leaves them (b = Jᵀr)
 function tp1_pair(J::SparseMatrixCSC, r)
-    ls, ld = SOO.SparseTallLinearSystem(copy(J)), SOO.DenseTallLinearSystem(Matrix(J))
+    ls, ld = DampedLinearSolve.SparseJacobianLinearSystem(copy(J)), DampedLinearSolve.DenseJacobianLinearSystem(Matrix(J))
     for s in (ls, ld)
         zero!(s)
         getA(s).r .= r
-        SOO.jtr!(getb(s), getA(s).J, getA(s).r)
+        DampedLinearSolve.jtr!(getb(s), getA(s).J, getA(s).r)
     end
     return ls, ld
 end
@@ -50,50 +51,7 @@ function tp1_resjac!(r, J, x)
 end
 tp1_run(x, obj, opts, ws) = (x .= (1.0, 0.0); optimize!(x, obj, opts; workspace = ws))
 
-@testset "sparsetallsystem.jl" begin
-    @testset "Steps equal the dense tall system's: ($m, $n)" for (m, n) in ((30, 6), (6, 6), (30, 1), (4, 6))
-        rng = Xoshiro(m + 10n)
-        J = sprandn(rng, m, n, 0.4) + sparse(1:min(m, n), 1:min(m, n), 1.0, m, n)
-        ls, ld = tp1_pair(J, randn(rng, m))
-        @test getb(ls) ≈ getb(ld) rtol = 1e-14
-        v = randn(rng, n)
-        @test SOO.quadform(getA(ls), v) ≈ SOO.quadform(getA(ld), v) rtol = 1e-14
-        @test SOO.max_diag(getA(ls)) == SOO.max_diag(getA(ld))
-        for (lambda, scaling) in ((0.0, nothing), (0.3, nothing), (0.3, 0.5 .+ rand(rng, n)), (1e-10, nothing))
-            a, b = tp1_solve!(ls, lambda, scaling), tp1_solve!(ld, lambda, scaling)
-            @test a == b
-            # undamped and wide: rank deficient, as for the dense system
-            @test a == (m < n && lambda == 0 ? NotPositiveDefinite : Success)
-            a == Success && @test getx(ls) ≈ getx(ld) rtol = 1e-12
-        end
-    end
-
-    @testset "Rank deficiency and non-finite entries" begin
-        rng = Xoshiro(5)
-        J0 = sparse(randn(rng, 20, 4))
-        J = [J0 J0[:, 2]]                  # a duplicated column
-        ls, ld = tp1_pair(J, randn(rng, 20))
-        @test tp1_solve!(ls, 0.0, nothing) == NotPositiveDefinite == tp1_solve!(ld, 0.0, nothing)
-        @test tp1_solve!(ls, 0.1, nothing) == Success == tp1_solve!(ld, 0.1, nothing)
-        @test getx(ls) ≈ getx(ld) rtol = 1e-10
-        # a structurally empty column
-        Jz = sparse([1, 2, 3], [1, 1, 3], [1.0, 2.0, 3.0], 5, 3)
-        lz, _ = tp1_pair(Jz, ones(5))
-        @test tp1_solve!(lz, 0.0, nothing) == NotPositiveDefinite
-        @test tp1_solve!(lz, 1.0, nothing) == Success
-        # NaN or Inf in J or r: NotPositiveDefinite, and x is NaN
-        for (Jbad, rbad) in ((sparse([1.0 NaN; 0.0 1.0; 1.0 1.0]), ones(3)), (sparse([1.0 0.0; 0.0 1.0; 1.0 1.0]), [1.0, Inf, 0.0]))
-            lb, _ = tp1_pair(Jbad, rbad)
-            @test tp1_solve!(lb, 1.0, nothing) == NotPositiveDefinite
-            @test all(isnan, getx(lb))
-        end
-        @test_throws ArgumentError solve!(ls, static(:cholesky))
-    end
-
-    @testset "Meets the linear-system interface: ($m, $n)" for (m, n) in ((8, 5), (5, 5), (3, 5), (8, 1))
-        @test isnothing(check_linear_system(s -> SOO.SparseTallLinearSystem(sparse(ones(m, n))); n, linsolvers = (:auto, :qr)))
-    end
-
+@testset "sparsejacobiansystem.jl" begin
     @testset "Every Jacobian iterator: :$it, callbackchangesstate = $ccs" for it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton), ccs in (false, true)
         opts = OptimizationOptions(; iterator = it, callbackchangesstate = ccs)
         xs, rs = optimize([1.0, 0.0], JacobianObjective(tp1_cost, tp1_resjac!, sparse(ones(20, 2))), opts)
@@ -105,16 +63,6 @@ tp1_run(x, obj, opts, ws) = (x .= (1.0, 0.0); optimize!(x, obj, opts; workspace 
     end
 
     @testset "Allocation: only SPQR's working memory, one fixed set per solve" begin
-        ls, _ = tp1_pair(sprandn(Xoshiro(2), 40, 6, 0.4) + sparse(1:6, 1:6, 1.0, 40, 6), randn(Xoshiro(3), 40))
-        perSolve = tp1_allocations(ls, 1.0)
-        @test perSolve > 0                                   # the stated exception (SPQR)
-        @test tp1_allocations(ls, 0.0) == tp1_allocations(ls, 10.0) == perSolve
-        # everything on this side of SPQR allocates nothing
-        v = ones(6)
-        @test tp1_bytes(SOO.quadform, getA(ls), v) == 0
-        @test tp1_bytes(SOO.jtr!, getb(ls), getA(ls).J, getA(ls).r) == 0
-        @test tp1_bytes(SOO.max_diag, getA(ls)) == 0
-        @test tp1_bytes(SOO.TallLinearize(tp1_resjac!), zeros(2), getA(SOO.SparseTallLinearSystem(sparse(ones(20, 2)))), [1.0, 0.0]) == 0
         # a warm run with a workspace allocates exactly SPQR's allocations for each solve
         @testset "run with :$it, callbackchangesstate = $ccs" for it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton), ccs in (false, true)
             opts = OptimizationOptions(; iterator = it, callbackchangesstate = ccs)
@@ -161,9 +109,9 @@ tp1_run(x, obj, opts, ws) = (x .= (1.0, 0.0); optimize!(x, obj, opts; workspace 
         # (an untyped workspace, which can hold either)
         wsany = OptimizationWorkspace()
         optimize([1.0, 2.0], JacobianObjective(f, rj!, sparse(1.0I, 2, 2)), opts; workspace = wsany)
-        @test wsany.data[1].linsystem isa SOO.SparseTallLinearSystem
+        @test wsany.data[1].linsystem isa DampedLinearSolve.SparseJacobianLinearSystem
         fdf!(gr, H, x) = (gr .= x; H[1, 1] = H[2, 2] = 1.0; f(x))
         x, res = optimize([1.0, 2.0], HessianObjective(f, fdf!; H = sparse(1.0I, 2, 2)), opts; workspace = wsany)
-        @test wsany.data[1].linsystem isa SOO.SparseLinearSystem && isconverged(res)
+        @test wsany.data[1].linsystem isa DampedLinearSolve.SparseLinearSystem && isconverged(res)
     end
 end

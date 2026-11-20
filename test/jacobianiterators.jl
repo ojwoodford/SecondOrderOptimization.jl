@@ -1,102 +1,15 @@
 using SecondOrderOptimization, StaticArrays, SparseArrays, LinearAlgebra, Static, Random, Test
+import DampedLinearSolve
 using SecondOrderOptimization: LevenbergData, MarquardtData, MarquardtDataTrial, AbstractLinearSystem, dampen!, zero!, copy_structure, sharex, quadratic_model_change, Success, NotPositiveDefinite, check_linear_system   # internal names
-include("termbits.jl")
+include("fixtures/load.jl"); loadfixtures("termbits.jl", "w_problems.jl")
 const SOO = SecondOrderOptimization
 using SecondOrderOptimization: getA, getb, getx, solve!   # explicit: Krylov, loaded by other test files, also exports solve!
 
-# W: the iterators other than :levenbergmarquardt on a JacobianObjective (the dense tall system),
+# W: the iterators other than :levenbergmarquardt on a JacobianObjective (the dense Jacobian system),
 # against the normal equations built from the same J
 
 # The iterators widened to in section W, each tested in both variants
 const W_ITERATORS = (:levenbergmarquardt_dtd, :dogleg, :newton)
-
-# Both objectives of a least-squares problem: the HessianObjective forms the normal equations
-# from the same J
-function w_objectives(resid, jac, m, n)
-    f(x) = 0.5 * sum(abs2, resid(x))
-    resjac!(r, J, x) = (r .= resid(x); J .= jac(x); 0.5 * sum(abs2, r))
-    fdf!(g, H, x) = (r = resid(x); J = jac(x); g .= J' * r; H .= J' * J; 0.5 * sum(abs2, r))
-    return JacobianObjective(f, resjac!, m), HessianObjective(f, fdf!; H = zeros(n, n))
-end
-
-# The iterator's own state after each iteration: the damping, the trust radius, or nothing
-w_state(itd) = hasproperty(itd, :lambda) ? itd.lambda : hasproperty(itd, :trustradius) ? itd.trustradius : 0.0
-
-# A callback recording the cost, the iterator's state and the variables after each iteration
-function w_trace()
-    costs, states, xs = Float64[], Float64[], Vector{Float64}[]
-    cb = (cost, x, data, itd) -> (push!(costs, cost); push!(states, w_state(itd)); push!(xs, collect(Float64, x)); (cost, 0))
-    return costs, states, xs, cb
-end
-
-w_opts(it, extra...) = OptimizationOptions(; iterator=it, extra...)
-
-# The well-conditioned problems of the J tests: Rosenbrock as two residuals; an exponential fit
-# with a nonzero residual; n = 30. The J tests' n = 30 problem, M tanh.(x) - y, has no finite
-# minimizer (some variables run off to infinity, where sech² makes JᵀJ singular), so here the
-# nonlinearity is the monotone x + sin(x)/2, which keeps J well conditioned and the minimizer finite.
-function w_problems()
-    t = collect(range(0, 2; length=25)); y = @. 3exp(-1.3t) + 0.05sin(7t)
-    rng = Xoshiro(11); M = randn(rng, 45, 30) ./ sqrt(45) + I(45)[:, 1:30]; yy = randn(rng, 45)
-    return (
-        ("Rosenbrock", x -> [1 - x[1], 10 * (x[2] - x[1]^2)], x -> [-1.0 0.0; -20x[1] 10.0], 2, [-1.2, 1.0]),
-        ("exponential fit", x -> @.(x[1] * exp(x[2] * t) - y), x -> hcat(exp.(x[2] .* t), x[1] .* t .* exp.(x[2] .* t)), 25, [1.0, 0.0]),
-        ("n = 30", x -> M * (x .+ 0.5 .* sin.(x)) .- yy, x -> M * Diagonal(1 .+ 0.5 .* cos.(x)), 45, zeros(30)),
-    )
-end
-
-# The degree-13 polynomial fit of the J tests (cond(J) ≈ 4e9), scaled so that the iterators'
-# absolute floors on the damping are far below the smallest squared singular value
-function w_illconditioned()
-    tt = collect(range(0, 1; length=60))
-    V = 1e4 * hcat((tt .^ k for k in 0:13)...)
-    yv = 1e4 * (@. sin(3tt) + 0.01 * cos(17tt))
-    return V, yv
-end
-
-# A two-residual Rosenbrock counting the calls to f and resjac!
-const WCALLS = Ref(0)
-wrosen_cost(x) = (WCALLS[] += 1; 0.5 * ((1 - x[1])^2 + 100 * (x[2] - x[1]^2)^2))
-function wrosen_resjac!(r, J, x)
-    WCALLS[] += 1
-    r[1] = 1 - x[1]
-    r[2] = 10 * (x[2] - x[1]^2)
-    J[1, 1] = -1.0
-    J[2, 1] = -20 * x[1]
-    J[2, 2] = 10.0
-    return 0.5 * (r[1]^2 + r[2]^2)
-end
-
-# A dogleg callback recording, for each iteration, the kind of step taken (the Gauss-Newton step,
-# a step along the gradient, or the interpolated dogleg step), the number of trial points
-# evaluated (the points in `pts`, which the objective records, other than the iteration's start;
-# emptied here), the trust radius before and after, the step norm, and the reduction ratio as the
-# iterator computes it
-function w_doglegtrace(pts::Vector{Vector{Float64}})
-    rec = NamedTuple[]
-    prevΔ = Ref(NaN)
-    cb = function (cost, x, data, dd)
-        ls = data.linsystem
-        step = collect(getx(ls)); g = collect(SOO.getgrad(ls))
-        along = norm(step - dot(step, g) / dot(g, g) * g) <= 1e-12 * norm(step)
-        kind = step == dd.newton ? :gaussnewton : along ? :gradient : :dogleg
-        noise = 10eps() * abs(data.bestcost)
-        rho = (data.bestcost - cost + noise) / (-quadratic_model_change(ls, step) + noise)
-        ntrials = count(!=(collect(Float64, data.variables)), pts)
-        push!(rec, (; kind, ntrials, before=prevΔ[], after=dd.trustradius, stepnorm=norm(step), rho, newton=copy(dd.newton), grad=g))
-        prevΔ[] = dd.trustradius
-        empty!(pts)
-        return (cost, 0)
-    end
-    return rec, cb
-end
-
-# Allocation of a warm optimize! with a workspace, measured in a function (Julia 1.10 boxes
-# variables captured at testset top level)
-function w_allocs(x, obj, opts, ws)
-    x .= (-1.2, 1.0)
-    return @allocated optimize!(x, obj, opts; workspace=ws)
-end
 
 @testset "jacobianiterators.jl" begin
     @testset "Each iterator against the normal equations: :$it, callbackchangesstate = $ccs" for it in W_ITERATORS, ccs in (false, true)
@@ -197,8 +110,8 @@ end
 
     @testset "Marquardt scaling: the rule, from the cached column norms" begin
         J = [1.0 0.0 3.0; 2.0 1e-5 0.0; 0.0 0.0 4.0]
-        ls = SOO.DenseTallLinearSystem(3, 3)
-        SOO.TallLinearize((r, Jw, x) -> (r .= 1.0; Jw .= J; 0.0))(getb(ls), getA(ls), nothing)
+        ls = DampedLinearSolve.DenseJacobianLinearSystem(3, 3)
+        SOO.JacobianLinearize((r, Jw, x) -> (r .= 1.0; Jw .= J; 0.0))(getb(ls), getA(ls), nothing)
         ws = getA(ls).ws
         @test ws.normsstale && ws.nnorms == 0
         # the generic rule on diag(JᵀJ): a running maximum, floored at 1e-8 of the largest
@@ -211,10 +124,10 @@ end
         @test ws.nnorms == 1 && !ws.normsstale
         # against the generic method on the normal equations
         lmdH = MarquardtData(0.0, zeros(3))
-        SOO.updatescaling!(lmdH, SOO.DenseLinearSystem{Float64}(J' * J, J' * ones(3), zeros(3)))
+        SOO.updatescaling!(lmdH, DampedLinearSolve.DenseLinearSystem{Float64}(J' * J, J' * ones(3), zeros(3)))
         @test lmdH.scaling == lmd.scaling
         # a new linearization recomputes them, and the scaling keeps its running maximum
-        SOO.TallLinearize((r, Jw, x) -> (r .= 1.0; Jw .= 0.5 .* J; Jw[2, 2] = 1.0; 0.0))(getb(ls), getA(ls), nothing)
+        SOO.JacobianLinearize((r, Jw, x) -> (r .= 1.0; Jw .= 0.5 .* J; Jw[2, 2] = 1.0; 0.0))(getb(ls), getA(ls), nothing)
         SOO.updatescaling!(lmd, ls)
         @test ws.nnorms == 2
         @test lmd.scaling == [5.0, 1.0, 25.0]
@@ -267,7 +180,7 @@ end
         rng = Xoshiro(5)
         a, c = randn(rng, 15), randn(rng, 15); y = randn(rng, 15)
         objJ, _ = w_objectives(x -> @.(a * (x[1] + x[2]) + c * x[3] - y), x -> hcat(a, a, c), 15, 3)
-        ls = SOO.makelinearsystem(zeros(3), objJ, :auto)
+        ls = SOO.objective_linearsystem(zeros(3), objJ, :auto)
         zero!(ls); SOO.linearizer(objJ)(getb(ls), getA(ls), zeros(3)); dampen!(ls, 0.0)
         @test solve!(ls, :auto) == NotPositiveDefinite
         for ccs in (false, true)
@@ -280,11 +193,11 @@ end
         end
     end
 
-    @testset "The tall system tolerates x being overwritten between solves" begin
+    @testset "The Jacobian system tolerates x being overwritten between solves" begin
         # dogleg writes its own step into getx(ls) between solves, and its trial system shares x
         rng = Xoshiro(23)
         J = randn(rng, 9, 4); r = randn(rng, 9)
-        ls = SOO.DenseTallLinearSystem(copy(J))
+        ls = DampedLinearSolve.DenseJacobianLinearSystem(copy(J))
         getA(ls).r .= r; mul!(getb(ls), J', r); SOO.markstale!(getA(ls))
         for λ in (0.0, 0.3)
             dampen!(ls, λ)
@@ -316,11 +229,11 @@ end
         end
     end
 
-    @testset "Newton's diagonal shift on the tall system, and dampen!(ls, 0.0) restoring it" begin
+    @testset "Newton's diagonal shift on the Jacobian system, and dampen!(ls, 0.0) restoring it" begin
         rng = Xoshiro(29)
         # full rank: undamped, shifted, then undamped again gives the identical x
         J = randn(rng, 10, 4); r = randn(rng, 10)
-        ls = SOO.DenseTallLinearSystem(copy(J))
+        ls = DampedLinearSolve.DenseJacobianLinearSystem(copy(J))
         getA(ls).r .= r; mul!(getb(ls), J', r); SOO.markstale!(getA(ls))
         dampen!(ls, 0.0)
         @test solve!(ls, :auto) == Success
@@ -334,7 +247,7 @@ end
         # rank deficient: the undamped solve fails, the shift succeeds, and dampen!(ls, 0.0) is
         # undamped (failing) again
         J[:, 4] = J[:, 2]
-        ls = SOO.DenseTallLinearSystem(copy(J))
+        ls = DampedLinearSolve.DenseJacobianLinearSystem(copy(J))
         getA(ls).r .= r; mul!(getb(ls), J', r); SOO.markstale!(getA(ls))
         @test solve!(ls, :auto) == NotPositiveDefinite
         dampen!(ls, SOO.initial_shift(ls))
@@ -349,7 +262,7 @@ end
         for (m, n) in ((20, 5), (6, 6), (3, 5))
             J = randn(rng, m, n) * Diagonal(exp10.(range(-2, 2; length=n)))
             r = randn(rng, m)
-            ls = SOO.DenseTallLinearSystem(copy(J))
+            ls = DampedLinearSolve.DenseJacobianLinearSystem(copy(J))
             getA(ls).r .= r; mul!(getb(ls), J', r); SOO.markstale!(getA(ls))
             Jb, rb = big.(J), big.(r)
             for λ in (1e-8, 1e-3, 1.0, 1e3), s in (vec(sum(abs2, J; dims=1)), exp10.(range(-6, 6; length=n)), fill(2.0, n))
@@ -367,7 +280,7 @@ end
     @testset "check_linear_system, with a non-uniform scaled damping" begin
         # the checker's dampen!(ls, λ, s) case uses s = 1 + i/n
         for (m, n) in ((6, 6), (11, 6), (4, 6))
-            @test check_linear_system(s -> SOO.DenseTallLinearSystem(m, n); n, linsolvers=(:auto, :qr)) === nothing
+            @test check_linear_system(s -> DampedLinearSolve.DenseJacobianLinearSystem(m, n); n, linsolvers=(:auto, :qr)) === nothing
         end
     end
 
@@ -441,28 +354,20 @@ end
         xH, resH = optimize(zeros(14), objH, w_opts(it, :maxiters => 500, :linsolver => :cholesky))
         exJ = (exactcost(xJ) - costmin) / costmin
         exH = (exactcost(xH) - costmin) / costmin
-        @info "Ill-conditioned fit, iterator = :$it (relative excess cost over the least-squares minimum $costmin)" tall_excess=exJ tall_iterations=resJ.niterations tall_termination=termnames(resJ) normal_excess=exH normal_iterations=resH.niterations normal_termination=termnames(resH)
+        @info "Ill-conditioned fit, iterator = :$it (relative excess cost over the least-squares minimum $costmin)" jacobian_excess=exJ jacobian_iterations=resJ.niterations jacobian_termination=termnames(resJ) hessian_excess=exH hessian_iterations=resH.niterations hessian_termination=termnames(resH)
         @test !hasbits(resJ, TERMINATION_LINSOLVER_FAILED)
         @test resJ.bestcost < resJ.startcost && resH.bestcost < resH.startcost
         # Marquardt's damping floor is the solver's (Q5): eps² times the scaled diagonal for QR of J,
-        # so the tall path resolves the small singular directions (cond(J)² ≈ 1.5e19). Before Q5 the
-        # floor was 1e-12 and both forms stalled at 81 times the minimum. The normal equations'
-        # floor is eps, and they stay above it (measured: 5.0e-4 on Julia 1.13, 1.2e-2 on 1.10).
-        if it === :levenbergmarquardt_dtd
+        # so the Jacobian path resolves the small singular directions (cond(J)² ≈ 1.5e19). Before Q5 the
+        # floor was 1e-12 and both forms stalled at 81 times the minimum. The Gauss-Newton step of
+        # dogleg and Newton is undamped: from QR it reaches the minimum in a few iterations.
+        #
+        # Only the Jacobian path is tested. The normal equations' result is the rounding of a
+        # Cholesky factorization at cond² ≈ 1.5e19, so it depends on the platform and its BLAS: measured
+        # relative excesses range from 5e-8 (Newton, x86-64, Julia 1.13) to 6.5e4 (dogleg and Newton,
+        # Apple silicon, Julia 1.13), in 5 to 500 iterations. Both are in the @info record above.
+        if it in (:levenbergmarquardt_dtd, :dogleg, :newton)
             @test exJ <= 1e-12
-            @test exH > 1e-6
-        end
-        # The Gauss-Newton step of dogleg and Newton is undamped: from QR it reaches the minimum
-        # in a few iterations; from Cholesky of the normal equations it does not. Measured on
-        # Julia 1.13 / 1.10: dogleg tall 1.8e-14 in 8 iterations / 4.2e-15 in 6, normal 6.5e4 at
-        # maxiters / 1.8e-3 in 396; Newton tall 1.3e-14 in 7 / 2.5e-15 in 8, normal 6.5e4 / 2.2e-4,
-        # both at maxiters. (Measured before Q6, when Newton stopped on max_fails at the minimum: it
-        # rejects no step, and the cost's rounding noise counted as failures. With the default
-        # reldcost of Q6 it ends on rel_dcost in 3 iterations, at the same cost.)
-        if it in (:dogleg, :newton)
-            @test exJ <= 1e-12
-            @test exH > 1e-6
-            @test resJ.niterations < resH.niterations
         end
     end
 end
@@ -472,21 +377,21 @@ end
 # Every iterator accepted with a JacobianObjective
 const Z_ITERATORS = (:levenbergmarquardt, W_ITERATORS...)
 
-# A tall system whose zero! forgets to invalidate the factorization, for the checker
-struct LazyZeroTall <: AbstractLinearSystem
-    inner::SOO.DenseTallLinearSystem
+# A Jacobian system whose zero! forgets to invalidate the factorization, for the checker
+struct LazyZeroJacobian <: AbstractLinearSystem
+    inner::DampedLinearSolve.DenseJacobianLinearSystem
 end
-SOO.getA(w::LazyZeroTall) = getA(w.inner)
-SOO.getb(w::LazyZeroTall) = getb(w.inner)
-SOO.getx(w::LazyZeroTall) = getx(w.inner)
-SOO.solve!(w::LazyZeroTall, s::StaticSymbol) = solve!(w.inner, s)
-SOO.dampen!(w::LazyZeroTall, λ::Real) = (dampen!(w.inner, λ); w)
-SOO.dampen!(w::LazyZeroTall, λ::Real, s) = (dampen!(w.inner, λ, s); w)
-SOO.copy_structure(w::LazyZeroTall) = LazyZeroTall(copy_structure(w.inner))
-SOO.sharex(w::LazyZeroTall, from) = LazyZeroTall(sharex(w.inner, from.inner))
-SOO.zero!(w::LazyZeroTall) = (fill!(getb(w.inner), 0.0); w)          # broken: the old QR is kept
-SOO.max_diag(w::LazyZeroTall) = SOO.max_diag(w.inner)
-SOO.conformance_fillb!(w::LazyZeroTall, b::AbstractVector) = (SOO.conformance_fillb!(w.inner, b); w)
+SOO.getA(w::LazyZeroJacobian) = getA(w.inner)
+SOO.getb(w::LazyZeroJacobian) = getb(w.inner)
+SOO.getx(w::LazyZeroJacobian) = getx(w.inner)
+SOO.solve!(w::LazyZeroJacobian, s::StaticSymbol) = solve!(w.inner, s)
+SOO.dampen!(w::LazyZeroJacobian, λ::Real) = (dampen!(w.inner, λ); w)
+SOO.dampen!(w::LazyZeroJacobian, λ::Real, s) = (dampen!(w.inner, λ, s); w)
+SOO.copy_structure(w::LazyZeroJacobian) = LazyZeroJacobian(copy_structure(w.inner))
+SOO.sharex(w::LazyZeroJacobian, from) = LazyZeroJacobian(sharex(w.inner, from.inner))
+SOO.zero!(w::LazyZeroJacobian) = (fill!(getb(w.inner), 0.0); w)          # broken: the old QR is kept
+SOO.max_diag(w::LazyZeroJacobian) = SOO.max_diag(w.inner)
+SOO.conformance_fillb!(w::LazyZeroJacobian, b::AbstractVector) = (SOO.conformance_fillb!(w.inner, b); w)
 
 # A banded least-squares problem: residual i couples x[i] and x[i+1], and a last residual couples
 # x[1] and x[n]. `banded!` writes only the entries of J that can be non-zero; `full!` writes all.
@@ -536,7 +441,7 @@ end
         end
         # the trial system's J starts as a copy of the main one (copy_structure copies, not similar)
         P = fill(7.0, n + 1, n)
-        ls = SOO.makelinearsystem(x0, JacobianObjective(f, banded!, P), :auto)
+        ls = SOO.objective_linearsystem(x0, JacobianObjective(f, banded!, P), :auto)
         @test getA(ls).J === P && P == fill(7.0, n + 1, n)
         itd = SOO.construct(static(it), ls, static(ccs))
         if hasfield(typeof(itd), :trial) && !isnothing(itd.trial)
@@ -602,8 +507,8 @@ end
         rng = Xoshiro(31)
         J1, r1 = randn(rng, 8, 3), randn(rng, 8)
         J2, r2 = 3.0 .* randn(rng, 8, 3), randn(rng, 8)
-        ls = SOO.DenseTallLinearSystem(8, 3)
-        SOO.TallLinearize((r, J, x) -> (r .= r1; J .= J1; 0.0))(getb(ls), getA(ls), nothing)
+        ls = DampedLinearSolve.DenseJacobianLinearSystem(8, 3)
+        SOO.JacobianLinearize((r, J, x) -> (r .= r1; J .= J1; 0.0))(getb(ls), getA(ls), nothing)
         dampen!(ls, 0.0); @test solve!(ls, :auto) == Success
         @test getx(ls) ≈ J1 \ r1
         lmd = MarquardtData(0.0, zeros(3)); SOO.updatescaling!(lmd, ls)
@@ -625,8 +530,8 @@ end
         @test solve!(ls, :auto) == Success && getx(ls) ≈ (J2' * J2 + 0.5 * Diagonal(lmd2.scaling)) \ (J2' * r2)
         @test getA(ls).ws.nfactor == nf + 1 && getA(ls).ws.nnorms == nn + 1
         # the checker catches a zero! that keeps the old factorization
-        @test check_linear_system(s -> SOO.DenseTallLinearSystem(9, 4); n=4, linsolvers=(:auto,)) === nothing
-        err = try check_linear_system(s -> LazyZeroTall(SOO.DenseTallLinearSystem(9, 4)); n=4, linsolvers=(:auto,)); nothing catch e; e end
+        @test check_linear_system(s -> DampedLinearSolve.DenseJacobianLinearSystem(9, 4); n=4, linsolvers=(:auto,)) === nothing
+        err = try check_linear_system(s -> LazyZeroJacobian(DampedLinearSolve.DenseJacobianLinearSystem(9, 4)); n=4, linsolvers=(:auto,)); nothing catch e; e end
         @test err isa ErrorException && occursin("zero! invalidates what was computed from the old A", err.msg)
     end
 
@@ -635,8 +540,8 @@ end
         J, r = randn(rng, 7, 3), randn(rng, 7)
         Jnan = copy(J); Jnan[2, 2] = NaN; Jnan[5, 1] = NaN
         rnan = copy(r); rnan[4] = NaN
-        for ls in (SOO.DenseTallLinearSystem(7, 3), copy_structure(SOO.DenseTallLinearSystem(7, 3)))
-            lin(Jw, rw) = (zero!(ls); SOO.TallLinearize((r_, J_, x) -> (r_ .= rw; J_ .= Jw; 0.0))(getb(ls), getA(ls), nothing))
+        for ls in (DampedLinearSolve.DenseJacobianLinearSystem(7, 3), copy_structure(DampedLinearSolve.DenseJacobianLinearSystem(7, 3)))
+            lin(Jw, rw) = (zero!(ls); SOO.JacobianLinearize((r_, J_, x) -> (r_ .= rw; J_ .= Jw; 0.0))(getb(ls), getA(ls), nothing))
             lin(Jnan, rnan)
             @test solve!(ls, :auto) != Success && isnan(SOO.max_diag(ls)) && !all(isfinite, getb(ls))
             lin(J, r)
@@ -759,48 +664,48 @@ q_prototype(c12) = (P = zeros(3, 2); P[1, 2] = c12; P)
 end
 
 @testset "Q4: trialsystem finds the iterator's spare system: :$it, callbackchangesstate = $ccs" for it in (Z_ITERATORS..., :gradientdescent), ccs in (false, true)
-    ls = SOO.makelinearsystem(zeros(2), JacobianObjective(wrosen_cost, wrosen_resjac!, 3), :auto)
+    ls = SOO.objective_linearsystem(zeros(2), JacobianObjective(wrosen_cost, wrosen_resjac!, 3), :auto)
     itd = SOO.construct(static(it), ls, static(ccs))
     t = SOO.trialsystem(itd)
     if !ccs && it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg)
         # the system copy_structure produced: of the same type, its own J, sharing x
-        @test t isa SOO.DenseTallLinearSystem && t !== ls
+        @test t isa DampedLinearSolve.DenseJacobianLinearSystem && t !== ls
         @test getA(t).J !== getA(ls).J && getx(t) === getx(ls)
         @test t === itd.trial
     else
         @test t === nothing
     end
     # on a HessianObjective's systems too
-    lsH = SOO.makelinearsystem(zeros(2), zeros(2, 2), :auto)
+    lsH = SOO.makehessiansystem(zeros(2, 2), :auto)
     tH = SOO.trialsystem(SOO.construct(static(it), lsH, static(ccs)))
-    @test (!ccs && it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg)) ? (tH isa SOO.DenseLinearSystem && tH !== lsH) : tH === nothing
+    @test (!ccs && it in (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg)) ? (tH isa DampedLinearSolve.DenseLinearSystem && tH !== lsH) : tH === nothing
 end
 
 @testset "Q5: the damping floor comes from the linear system" begin
     @testset "dampingfloor and the iterators' floor" begin
-        @test SOO.dampingfloor(SOO.DenseLinearSystem(3)) == eps()
-        @test SOO.dampingfloor(SOO.makelinearsystem(zeros(SVector{2}), nothing, :auto)) == eps()
-        @test SOO.dampingfloor(SOO.makelinearsystem(zeros(3), sparse(1.0I, 3, 3), :auto)) == eps()
-        tall = SOO.DenseTallLinearSystem(5, 3)
-        @test SOO.dampingfloor(tall) == eps()^2
+        @test SOO.dampingfloor(DampedLinearSolve.DenseLinearSystem(3)) == eps()
+        @test SOO.dampingfloor(SOO.makehessiansystem(static(2), :auto)) == eps()
+        @test SOO.dampingfloor(SOO.makehessiansystem(sparse(1.0I, 3, 3), :auto)) == eps()
+        ls_jac = DampedLinearSolve.DenseJacobianLinearSystem(5, 3)
+        @test SOO.dampingfloor(ls_jac) == eps()^2
         # Levenberg: relative to the largest diagonal entry, never above the former 1e-12
         lev = LevenbergData(0.0)
         for (md, expected) in ((60.0, eps() * 60.0), (1e10, 1e-12), (0.0, 1e-12), (NaN, 1e-12))
-            ls = SOO.DenseLinearSystem{Float64}(Matrix(Diagonal([md, md / 2])), zeros(2), zeros(2))
+            ls = DampedLinearSolve.DenseLinearSystem{Float64}(Matrix(Diagonal([md, md / 2])), zeros(2), zeros(2))
             @test SOO.lambdafloor(lev, ls) === expected
         end
-        getA(tall).J .= [1e3 0 0; 0 1 0; 0 0 1; 0 0 0; 0 0 0]; SOO.markstale!(getA(tall))
-        @test SOO.lambdafloor(lev, tall) == eps()^2 * 1e6
+        getA(ls_jac).J .= [1e3 0 0; 0 1 0; 0 0 1; 0 0 0; 0 0 0]; SOO.markstale!(getA(ls_jac))
+        @test SOO.lambdafloor(lev, ls_jac) == eps()^2 * 1e6
         # Marquardt: the floor itself, since λ multiplies the scaled diagonal
-        @test SOO.lambdafloor(MarquardtData(0.0, zeros(2)), SOO.DenseLinearSystem(2)) == eps()
-        @test SOO.lambdafloor(MarquardtData(0.0, zeros(3)), tall) == eps()^2
+        @test SOO.lambdafloor(MarquardtData(0.0, zeros(2)), DampedLinearSolve.DenseLinearSystem(2)) == eps()
+        @test SOO.lambdafloor(MarquardtData(0.0, zeros(3)), ls_jac) == eps()^2
         # the initial damping is unchanged where the old floor did not bind
         lmd = LevenbergData(0.0)
-        SOO.updatescaling!(lmd, SOO.DenseLinearSystem{Float64}(Matrix(Diagonal([4.0, 1.0])), zeros(2), zeros(2)))
+        SOO.updatescaling!(lmd, DampedLinearSolve.DenseLinearSystem{Float64}(Matrix(Diagonal([4.0, 1.0])), zeros(2), zeros(2)))
         @test lmd.lambda == 4e-6
     end
 
-    @testset "The ill-conditioned problem, unscaled: the tall path with :levenbergmarquardt reaches the minimum" begin
+    @testset "The ill-conditioned problem, unscaled: the Jacobian path with :levenbergmarquardt reaches the minimum" begin
         # Before Q5 the absolute floor 1e-12 was above the smallest squared singular value (about
         # 4e-18 unscaled), and both forms stopped at 20 times the minimum after 500 iterations
         tt = collect(range(0, 1; length=60))
@@ -814,7 +719,7 @@ end
             xH, resH = optimize(zeros(14), objH, w_opts(it, :maxiters => 500, :callbackchangesstate => ccs, :linsolver => :cholesky))
             exJ = (exactcost(xJ) - costmin) / costmin
             exH = (exactcost(xH) - costmin) / costmin
-            ccs || @info "Unscaled ill-conditioned fit, iterator = :$it (relative excess cost)" tall_excess=exJ tall_iterations=resJ.niterations normal_excess=exH normal_iterations=resH.niterations
+            ccs || @info "Unscaled ill-conditioned fit, iterator = :$it (relative excess cost)" jacobian_excess=exJ jacobian_iterations=resJ.niterations hessian_excess=exH hessian_iterations=resH.niterations
             @test exJ <= 1e-12
             @test resJ.niterations < 50
             @test isconverged(resJ)
@@ -878,7 +783,7 @@ end
         x, res = optimize(zeros(14), JacobianObjective(f_rows, resjac_cols!, 60), opts)
         excess = (exactcost(x) - costmin) / costmin
         disagreement = abs(f_rows(x) - resjac_cols!(zeros(60), zeros(60, 14), x)) / f_rows(x)
-        @info "P6: tall Levenberg-Marquardt on the ill-conditioned fit, f and resjac! rounded differently" excess disagreement iterations=res.niterations termination=termnames(res)
+        @info "P6: Jacobian Levenberg-Marquardt on the ill-conditioned fit, f and resjac! rounded differently" excess disagreement iterations=res.niterations termination=termnames(res)
         @test disagreement > 1e-9     # the two costs differ by far more than eps (measured: 1.7e-8 on 1.13, 2.4e-8 on 1.10)
         @test isconverged(res)
         @test excess < 1e-13          # at the minimum
@@ -886,4 +791,77 @@ end
     # With f and resjac! rounded alike, the same run converges too
     x, res = optimize(zeros(14), JacobianObjective(f_rows, (r, J, x) -> (for i in axes(V, 1); ri = 0.0; for k in axes(V, 2); ri += V[i, k] * x[k]; end; r[i] = ri - yv[i]; end; J .= V; f_rows(x)), 60), OptimizationOptions(iterator = :levenbergmarquardt))
     @test isconverged(res)
+end
+
+# S1: the normal equations on the Jacobian path (`linsolver = :cholesky` or `:ldl` with a dense J: JᵀJ formed
+# from J once per linearization and factored), against the HessianObjective of the same problem with the same
+# solver. The iterators must behave as on the other paths, apart from rounding (rules.md 31, 33).
+const S1_ITERATORS = (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :newton, :gradientdescent)
+
+@testset "S1: the normal equations of the Jacobian path" begin
+    @testset "Against the HessianObjective with the same solver: :$it, :$s, callbackchangesstate = $ccs" for it in S1_ITERATORS, s in (:cholesky, :ldl), ccs in (false, true)
+        for (name, resid, jac, m, x0) in w_problems()
+            objJ, objH = w_objectives(resid, jac, m, length(x0))
+            cJ, sJ, _, cbJ = w_trace()
+            cH, sH, _, cbH = w_trace()
+            # Gradient descent zig-zags down Rosenbrock's valley, where the two paths' rounding differences
+            # grow by about 1.2 per iteration: past 1e-8 by iteration 94 on x86-64, above the 1e-8 the costs
+            # are compared to. Fifty iterations keep them near 1e-12.
+            lim = it === :gradientdescent ? (:maxiters => 50,) : ()
+            _, resJ = optimize(x0, objJ, w_opts(it, :callbackchangesstate => ccs, :linsolver => s, lim...); callback=cbJ)
+            _, resH = optimize(x0, objH, w_opts(it, :callbackchangesstate => ccs, :linsolver => s, lim...); callback=cbH)
+            if it === :newton
+                # as in "Each iterator against the normal equations": undamped Newton rejects no step
+                allowed = TERMINATION_REL_DCOST | TERMINATION_ABS_DCOST | TERMINATION_STEP_SIZE | TERMINATION_MAX_FAILS | TERMINATION_GRAD_TOL
+                @test onlybits(resJ, allowed)
+                @test onlybits(resH, allowed)
+            elseif it === :gradientdescent
+                # linear convergence: the two stop alike, converged or not
+                @test isconverged(resJ) == isconverged(resH)
+                @test resJ.bestcost < resJ.startcost
+            else
+                @test isconverged(resJ) && isconverged(resH)
+            end
+            k = min(length(cJ), length(cH))
+            @test k >= 2
+            @test all(isapprox.(cJ[1:k], cH[1:k]; rtol=1e-8, atol=1e-8 * abs(resH.startcost) * eps()))
+            @test abs(length(cJ) - length(cH)) <= 3
+            prev = [resJ.startcost; cJ[1:k-1]]
+            lead = something(findfirst(prev .- cH[1:k] .<= 1e-6 .* abs.(cH[1:k])), k + 1) - 1
+            it in (:newton, :gradientdescent) || @test lead >= 1
+            @test all(isapprox.(sJ[1:lead], sH[1:lead]; rtol=1e-8))
+            @test resJ.bestcost ≈ resH.bestcost rtol=1e-8 atol=1e-20
+        end
+    end
+
+    @testset "A static x0 runs the dense system: :$s" for s in (:cholesky, :ldl)
+        (name, resid, jac, m, x0) = first(w_problems())    # Rosenbrock, two variables
+        objJ, _ = w_objectives(resid, jac, m, length(x0))
+        @test SOO.objective_linearsystem(SVector{2}(x0), objJ, s) isa DampedLinearSolve.DenseJacobianLinearSystem
+        xs, ress = optimize(SVector{2}(x0), objJ, OptimizationOptions(linsolver=s))
+        xd, resd = optimize(copy(x0), objJ, OptimizationOptions(linsolver=s))
+        @test xs isa SVector{2, Float64}
+        @test isconverged(ress) && isconverged(resd)
+        @test ress.bestcost ≈ resd.bestcost rtol=1e-8 atol=1e-20
+        @test xs ≈ xd rtol=1e-8
+        @test xs ≈ [1.0, 1.0] rtol=1e-6
+    end
+
+    @testset "Workspace reuse and no allocation per iteration: :$it, :$s" for it in S1_ITERATORS, s in (:cholesky, :ldl), ccs in (false, true)
+        for obj in (JacobianObjective(wrosen_cost, wrosen_resjac!, 2), JacobianObjective(wrosen_cost, wrosen_resjac!, zeros(2, 2)))
+            opts = w_opts(it, :callbackchangesstate => ccs, :gtol => 1e-10, :linsolver => s, :maxiters => it === :gradientdescent ? 50 : 100)
+            ws = OptimizationWorkspace([-1.2, 1.0], obj, opts)
+            x = [-1.2, 1.0]
+            r1 = optimize!(x, obj, opts; workspace=ws)
+            x1 = copy(x)
+            x .= (-1.2, 1.0)
+            r2 = optimize!(x, obj, opts; workspace=ws)     # the same workspace, a second run
+            @test x == x1 && r2.bestcost == r1.bestcost && r2.niterations == r1.niterations
+            it === :gradientdescent || @test x ≈ [1.0, 1.0]
+            @test w_allocs(x, obj, opts, ws) == 0
+            res = optimize!(it === :newton ? [0.9, 0.8] : [-1.2, 1.0], obj, opts)
+            @test res.optimizeallocations == 0
+            it === :gradientdescent || @test isconverged(res)
+        end
+    end
 end

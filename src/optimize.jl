@@ -34,19 +34,68 @@ function checkentry(x, obj::HessianObjective, options::OptimizationOptions)
     return nothing
 end
 checkentry(x, obj::JacobianObjective, options::OptimizationOptions) = checkobjective(x, obj, options)
-checkbuild(x, obj::HessianObjective) = checkhessian(x, obj.H)
+checkbuild(x, obj::HessianObjective) = checkhessian(obj.H, dynamic(nvars(x)))
 checkbuild(x, obj::JacobianObjective) = nothing
-objective_linearsystem(x, obj::HessianObjective, linsolver) = makelinearsystem(x, obj.H, linsolver)
-objective_linearsystem(x, obj::JacobianObjective, linsolver) = makelinearsystem(x, obj, linsolver)
+# The linear system for the variables `x`: the optimizer decides its size and whether it is static
+# (`systemsize`), and the prototype its storage
+objective_linearsystem(x, obj::HessianObjective, linsolver) = hessian_linearsystem(x, obj.H, linsolver)
+objective_linearsystem(x, obj::JacobianObjective, linsolver) = makejacobiansystem(obj.J, systemsize(x), linsolver)
+hessian_linearsystem(x, ::Nothing, linsolver) = makehessiansystem(systemsize(x), linsolver)
+hessian_linearsystem(x, H, linsolver) = makehessiansystem(H, linsolver)
 objective_structure(obj::HessianObjective) = obj.H
 objective_structure(obj::JacobianObjective) = jacobian_structure(obj.J)
-jacobian_structure(J) = JacobianStructureKey(nresiduals_of(J))
+jacobian_structure(J::Union{Integer, Matrix}) = JacobianStructureKey(jacobian_nrows(J))
 jacobian_structure(J::SparseMatrixCSC) = SparseJacobianPattern(J)
+jacobian_structure(J) = JacobianPrototypeKey(structurekey(J))
 linearizer(obj::HessianObjective) = obj.fdf!
-linearizer(obj::JacobianObjective) = TallLinearize(obj.resjac!)
+linearizer(obj::JacobianObjective) = JacobianLinearize(obj.resjac!)
+
+# How the iterators and the outer loop drive a Jacobian system unchanged: they call
+# `fdf!(getb(ls), getA(ls), x)`, and this wrapper turns that into `resjac!(r, J, x)` on the storage's
+# J and r, then has the storage form g = Jᵀr and invalidate what it computed from the old J and r
+struct JacobianLinearize{RJ}
+    resjac!::RJ
+end
+function (t::JacobianLinearize)(g::AbstractVector, A, x)
+    cost = t.resjac!(getr(A), getJ(A), x)
+    gradient!(g, A)
+    markstale!(A)
+    return cost
+end
+
 # What a run with a reused workspace must set up before it starts: for a JacobianObjective, the
 # Jacobian storage (see `initjacobian!`)
 initlinearization!(cached, obj::HessianObjective) = nothing
+function initlinearization!(cached::Tuple, obj::JacobianObjective)
+    data, iteratedata = cached
+    initjacobian!(data.linsystem, obj.J)
+    initjacobian!(trialsystem(iteratedata), obj.J)
+    return nothing
+end
+
+# The start of a run with a reused workspace. Every J the run uses (the main system's, and the
+# trial system's if the iterator has one) must start as the J a fresh run would: the prototype as
+# handed, or zeros for an integer m. A cached J holds the previous run's entries, so it is set
+# from the prototype (never written itself). r needs nothing: resjac! sets every entry.
+initjacobian!(::Nothing, J) = nothing
+initjacobian!(::Nothing, ::Integer) = nothing
+function initjacobian!(ls, ::Integer)
+    A = getA(ls)
+    fill!(getJ(A), 0.0)
+    markstale!(A)
+    return ls
+end
+function initjacobian!(ls, P)
+    A = getA(ls)
+    J = getJ(A)
+    J === P || copyprototype!(J, P)
+    markstale!(A)
+    return ls
+end
+# A reused workspace's J has the prototype's pattern (the workspace key checks it), so for a sparse J
+# only the values are set
+copyprototype!(J, P) = copyto!(J, P)
+copyprototype!(J::SparseMatrixCSC, P::SparseMatrixCSC) = copyto!(nonzeros(J), nonzeros(P))
 
 # The iterator's spare linear system, for reusing the trial linearization, or `nothing`. An
 # iterator data type that holds one must have a method, so that whatever prepares a run's systems
@@ -55,10 +104,13 @@ trialsystem(iteratedata) = nothing
 trialsystem(lmd::LevenbergDataTrial) = lmd.trial
 trialsystem(lmd::MarquardtDataTrial) = lmd.trial
 trialsystem(dd::DoglegData) = dd.trial          # nothing when callbackchangesstate = true
-# The system a workspace caches. For a JacobianObjective with a Matrix prototype it owns its
-# Jacobian storage (a copy of the prototype), so that a later run with another prototype never
-# writes into this one's (see `workspace_linearsystem` in tallsystem.jl)
+# The system a workspace caches. For a JacobianObjective it owns its Jacobian storage, a copy of the
+# prototype: were it the prototype itself, a later run with another prototype would set this one's
+# contents, and a run handed this prototype again would start from the other's.
 workspace_linearsystem(x, obj::HessianObjective, linsolver) = objective_linearsystem(x, obj, linsolver)
+workspace_linearsystem(x, obj::JacobianObjective, linsolver) = makejacobiansystem(workspace_prototype(obj.J), systemsize(x), linsolver)
+workspace_prototype(J) = copy(J)
+workspace_prototype(m::Integer) = m
 
 # Runs on `x` (updated in place when it is mutable) and returns `(x, result)`
 function optimize_internal!(x, obj::AnyObjective, options::OptimizationOptions, callback::CB, workspace::WS, startstats::Stats) where {CB, WS}
@@ -141,6 +193,12 @@ end
         dynamic(options.callbackchangesstate) || isequal(cost, cost_) || callbackchangedcost(cost_, cost)
 
         dcost = data.bestcost - cost
+        # An accepted step (the cost did not rise) that the iterator restricted is small because of
+        # its safeguard, not because the run has converged: its size and relative cost change are not
+        # tested. The absolute change still is: at the rounding floor of a minimum the step an
+        # iterator takes is often restricted (a Cauchy step, a shifted solve, LM's damping), and
+        # there the cost no longer changes
+        unrestricted = !(dcost >= 0 && restrictedstep(iteratedata))
         if dcost >= 0
             data.bestcost = cost
             rose = false
@@ -178,11 +236,11 @@ end
         maxstep = maximum(abs, getx(data.linsystem))::Float64
         converged |= isinf(cost)                                         << 0
         converged |= isnan(cost)                                         << 1
-        converged |= (dcost < abs(data.bestcost) * options.reldcost)     << 2
+        converged |= (unrestricted && dcost < abs(data.bestcost) * options.reldcost) << 2
         converged |= (dcost < options.absdcost)                          << 3
         converged |= isinf(maxstep)                                      << 4
         converged |= isnan(maxstep)                                      << 5
-        converged |= (maxstep < options.dstep)                           << 6
+        converged |= (unrestricted && maxstep < options.dstep)           << 6
         if stalls > options.maxstall
             # Stalled (converged) if the cost has settled: some iteration since the last significant
             # improvement stayed within the stall band above refcost, and none rose by more than
