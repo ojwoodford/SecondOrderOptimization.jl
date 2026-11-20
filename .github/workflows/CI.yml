@@ -17,6 +17,8 @@ jobs:
   test:
     name: Julia ${{ matrix.version }} - ${{ matrix.threads }} thread(s) ${{ matrix.group }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
     runs-on: ${{ matrix.os }}
+    # Nightly is informative only: its compiler changes (e.g. allocations on the workspace-reuse paths) do not fail a PR
+    continue-on-error: ${{ matrix.version == 'nightly' }}
     strategy:
       fail-fast: false
       matrix:

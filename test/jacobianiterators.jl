@@ -359,23 +359,15 @@ const W_ITERATORS = (:levenbergmarquardt_dtd, :dogleg, :newton)
         @test resJ.bestcost < resJ.startcost && resH.bestcost < resH.startcost
         # Marquardt's damping floor is the solver's (Q5): eps² times the scaled diagonal for QR of J,
         # so the Jacobian path resolves the small singular directions (cond(J)² ≈ 1.5e19). Before Q5 the
-        # floor was 1e-12 and both forms stalled at 81 times the minimum. The normal equations'
-        # floor is eps, and they stay above it (measured: 5.0e-4 on Julia 1.13, 1.2e-2 on 1.10).
-        if it === :levenbergmarquardt_dtd
+        # floor was 1e-12 and both forms stalled at 81 times the minimum. The Gauss-Newton step of
+        # dogleg and Newton is undamped: from QR it reaches the minimum in a few iterations.
+        #
+        # Only the Jacobian path is tested. The normal equations' result is the rounding of a
+        # Cholesky factorization at cond² ≈ 1.5e19, so it depends on the platform and its BLAS: measured
+        # relative excesses range from 5e-8 (Newton, x86-64, Julia 1.13) to 6.5e4 (dogleg and Newton,
+        # Apple silicon, Julia 1.13), in 5 to 500 iterations. Both are in the @info record above.
+        if it in (:levenbergmarquardt_dtd, :dogleg, :newton)
             @test exJ <= 1e-12
-            @test exH > 1e-6
-        end
-        # The Gauss-Newton step of dogleg and Newton is undamped: from QR it reaches the minimum
-        # in a few iterations; from Cholesky of the normal equations it does not. Measured on
-        # Julia 1.13 / 1.10: dogleg Jacobian 1.8e-14 in 8 iterations / 4.2e-15 in 6, Hessian 6.5e4 at
-        # maxiters / 1.8e-3 in 396; Newton Jacobian 1.3e-14 in 7 / 2.5e-15 in 8, Hessian 6.5e4 / 2.2e-4,
-        # both at maxiters. (Measured before Q6, when Newton stopped on max_fails at the minimum: it
-        # rejects no step, and the cost's rounding noise counted as failures. With the default
-        # reldcost of Q6 it ends on rel_dcost in 3 iterations, at the same cost.)
-        if it in (:dogleg, :newton)
-            @test exJ <= 1e-12
-            @test exH > 1e-6
-            @test resJ.niterations < resH.niterations
         end
     end
 end
@@ -812,8 +804,12 @@ const S1_ITERATORS = (:levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :ne
             objJ, objH = w_objectives(resid, jac, m, length(x0))
             cJ, sJ, _, cbJ = w_trace()
             cH, sH, _, cbH = w_trace()
-            _, resJ = optimize(x0, objJ, w_opts(it, :callbackchangesstate => ccs, :linsolver => s); callback=cbJ)
-            _, resH = optimize(x0, objH, w_opts(it, :callbackchangesstate => ccs, :linsolver => s); callback=cbH)
+            # Gradient descent zig-zags down Rosenbrock's valley, where the two paths' rounding differences
+            # grow by about 1.2 per iteration: past 1e-8 by iteration 94 on x86-64, above the 1e-8 the costs
+            # are compared to. Fifty iterations keep them near 1e-12.
+            lim = it === :gradientdescent ? (:maxiters => 50,) : ()
+            _, resJ = optimize(x0, objJ, w_opts(it, :callbackchangesstate => ccs, :linsolver => s, lim...); callback=cbJ)
+            _, resH = optimize(x0, objH, w_opts(it, :callbackchangesstate => ccs, :linsolver => s, lim...); callback=cbH)
             if it === :newton
                 # as in "Each iterator against the normal equations": undamped Newton rejects no step
                 allowed = TERMINATION_REL_DCOST | TERMINATION_ABS_DCOST | TERMINATION_STEP_SIZE | TERMINATION_MAX_FAILS | TERMINATION_GRAD_TOL

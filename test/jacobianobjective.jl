@@ -180,10 +180,11 @@ SOO.update(x::Rot3, dx, start=1) = Rot3(x.R * expso3(SVector(dx[start], dx[start
         gJ = norm(V' * (V * xJ - yv), Inf)
         gH = norm(V' * (V * xH - yv), Inf)
         @info "Ill-conditioned fit (cond(J) = $(round(cond(V), sigdigits=2)), least-squares minimum $costmin)" jacobian_cost=resJ.bestcost jacobian_excess=exactcost(xJ)-costmin jacobian_gradnorm=gJ jacobian_iterations=resJ.niterations hessian_cost=resH.bestcost hessian_excess=exactcost(xH)-costmin hessian_gradnorm=gH hessian_iterations=resH.niterations
-        @test resJ.bestcost <= resH.bestcost
+        # Only the Jacobian path's result is tested against the minimum: the normal equations' is the
+        # rounding of a Cholesky factorization at cond² ≈ 1.5e19, and depends on the platform (measured
+        # relative excess: 2.8e-3 in 500 iterations on x86-64 with Julia 1.10, 2.3e-7 in 176 with 1.13)
         @test exactcost(xJ) - costmin <= 1e-12 * costmin
-        @test exactcost(xH) - costmin > 1e-6 * costmin
-        @test resJ.niterations < resH.niterations
+        @test exactcost(xJ) <= exactcost(xH) + 1e-12 * costmin
         # Compared on cost only. The gradient norm (as the optimizer computes it, in Float64) is at
         # the level of its own rounding here: the gradient at the exact minimizer, rounded to Float64,
         # is of the same order, so gJ < gH (asserted before Q5) depends on the platform and on the

@@ -197,8 +197,10 @@ const SCRIPTED_OBJ = JacobianObjective(scost, (r, J, x::Scripted) -> (c = scost(
         costmin = exactcost(big.(V) \ big.(yv))
         obj = JacobianObjective(x -> 0.5 * sum(abs2, V * x - yv), (r, J, x) -> (r .= V * x - yv; J .= V; 0.5 * sum(abs2, r)), 60)
         for ccs in (false, true)
-            x, res = optimize(zeros(14), obj, OptimizationOptions(iterator=:newton, callbackchangesstate=ccs, maxiters=500))
-            # the cost there is computable to about 1e-8 relative: Gauss-Newton bounces within that
+            # The cost there is computable to about 1e-8 relative, and Gauss-Newton bounces within that. The
+            # default stall band, 1.5e-8, is too close to it: on x86-64 with Julia 1.10 the run ended on max_fails
+            # at the minimum. A band of 1e-7 covers the noise on every platform.
+            x, res = optimize(zeros(14), obj, OptimizationOptions(iterator=:newton, callbackchangesstate=ccs, maxiters=500, stalltol=1e-7))
             @test hasbits(res, TERMINATION_STALLED) && isconverged(res)
             @test !hasbits(res, TERMINATION_MAX_FAILS)
             @test (exactcost(x) - costmin) / costmin <= 1e-12
