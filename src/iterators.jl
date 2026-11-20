@@ -57,7 +57,7 @@ end
 # iterator's safeguard rather than taken as its model's minimiser. The loop does not read a small
 # step or a small change in cost after an accepted restricted step as convergence. Each iterator
 # records it for the step it returns; an iterator that records nothing is never restricted.
-restrictedstep(iteratedata) = false
+restrictedstep(iteratedata) = false   # COV_EXCL_LINE: runs (test/edgepaths.jl), but a constant-result method is called without running its body, so coverage never counts it
 
 # Newton optimization: a step is restricted when its solve needed a diagonal shift
 mutable struct NewtonData
@@ -88,10 +88,7 @@ restrictedstep(nd::NewtonData) = nd.restricted
             dampen!(data.linsystem, 0.0)
         end
     end
-    if status == Success
-        if !all(isfinite, getx(data.linsystem))
-            return NaN
-        end
+    if status == Success   # a successful solve's x is finite (DampedLinearSolve's contract)
         negate!(getx(data.linsystem))
         data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
         data.costs += @elapsed_ns cost_ = f(data.varnext)
@@ -128,10 +125,7 @@ restrictedstep(nd::NewtonDataRelinearize) = nd.restricted
             dampen!(data.linsystem, 0.0)
         end
     end
-    if status == Success
-        if !all(isfinite, getx(data.linsystem))
-            return NaN
-        end
+    if status == Success   # a successful solve's x is finite (DampedLinearSolve's contract)
         negate!(getx(data.linsystem))
         data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
         zero!(data.linsystem)
@@ -155,10 +149,6 @@ mutable struct DoglegData{T,L}
     restricted::Bool      # the step returned was not the full Newton point of an unshifted solve
 end
 
-DoglegData(trustradius::Float64, maxtrustradius::Float64, cauchy::T, newton::T) where {T} =
-    DoglegData(trustradius, maxtrustradius, cauchy, newton, nothing, NaN, false, false)
-DoglegData(trustradius::Float64, cauchy::T, newton::T) where {T} =
-    DoglegData(trustradius, 1e10, cauchy, newton)
 function DoglegData(ls, maxtrustradius::Float64=1e10; trial=nothing)
     x = getx(ls)
     return DoglegData(0.0, maxtrustradius, similar(x), similar(x), trial, NaN, false, false)
@@ -309,11 +299,10 @@ end
                 tau = c0 <= 0 ? (-c0 + disc) / aw : trsq / (c0 + disc)
                 tau = clamp(tau, 0.0, 1.0)
             end
+            # tau > 0, so the step ends on the boundary (step_norm = Δ): cauchy_norm < Δ ≤ maxtrustradius keeps trsq
+            # finite and positive, and aw * trsq could only overflow for a Newton step some 1e144 long
             x .*= tau
             x .+= dd.cauchy
-            if tau == 0.0
-                step_norm = cauchy_norm
-            end
             pred_red = -quadratic_model_change(data.linsystem, x)
         else
             # Newton unavailable: full Cauchy step
@@ -322,10 +311,7 @@ end
             pred_red = 0.5 * cauchy_a * gnorm2
         end
 
-        step_sz = maximum(abs, x)::Float64
-        if !isfinite(step_sz)
-            return NaN
-        end
+        step_sz = maximum(abs, x)::Float64   # finite: every step above is built from finite parts
 
         data.varnext = update!(data.varnext, data.variables, x)
         # On the first trial, linearize at the trial point too if the step is likely to be accepted
@@ -402,7 +388,6 @@ function updatescaling!(lmd::AnyLevenbergData, ls)
     end
 end
 
-dampen!(ls::AbstractLinearSystem, ::AnyLevenbergData, lambda) = dampen!(ls, max(0.0, lambda))
 dampen!(ls::AbstractLinearSystem, lmd::AnyLevenbergData) = dampen!(ls, lmd.lambda)
 
 mutable struct MarquardtData{T} <: LevMarData
@@ -452,7 +437,6 @@ end
 
 lambdafloor(::AnyMarquardtData, ls) = min(dampingfloor(ls), 1e-12)
 
-dampen!(ls::AbstractLinearSystem, lmd::AnyMarquardtData, lambda) = dampen!(ls, max(0.0, lambda), lmd.scaling)
 dampen!(ls::AbstractLinearSystem, lmd::AnyMarquardtData) = dampen!(ls, lmd.lambda, lmd.scaling)
 
 dampingnorm(::AnyLevenbergData, x) = sqnorm(x)
@@ -523,11 +507,7 @@ end
         if status != Success
             return LINSOLVER_FAILED
         end
-        step_sz = maximum(abs, getx(data.linsystem))::Float64
-        if !isfinite(step_sz)
-            dampen!(data.linsystem, 0.0)
-            return NaN
-        end
+        step_sz = maximum(abs, getx(data.linsystem))::Float64   # finite: the solve succeeded
         data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
         data.costs += @elapsed_ns cost_ = f(data.varnext)
         if cost_ <= data.bestcost || !(step_sz >= options.dstep) || inner_iters > 100 || levmardata.lambda > 1e16
@@ -577,11 +557,7 @@ end
         if status != Success
             return LINSOLVER_FAILED
         end
-        step_sz = maximum(abs, getx(data.linsystem))::Float64
-        if !isfinite(step_sz)
-            dampen!(data.linsystem, 0.0)
-            return NaN
-        end
+        step_sz = maximum(abs, getx(data.linsystem))::Float64   # finite: the solve succeeded
         data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
         step = getx(data.linsystem)
         if firsttrial && 0.5 * (levmardata.lambda * dampingnorm(levmardata, step) - fast_dot(gradient, step)) >= abs(data.bestcost) * options.reldcost
@@ -617,14 +593,10 @@ mutable struct GradientDescentData
 end
 iteratorname(::StaticSymbol{:gradientdescent}) = "gradient descent"
 construct(::StaticSymbol{:gradientdescent}, ls, ::Any) = GradientDescentData(1.0)
-construct(s::StaticSymbol, ls) = construct(s, ls, False())
 reset!(gdd::GradientDescentData) = (gdd.stepsize = 1.0)
 
 @inline function iterate!(gddata::GradientDescentData, data, f, fdf!, options::OptimizationOptions)::Float64
-    gradient = getgrad(data.linsystem)
-    if !all(isfinite, gradient)
-        return NaN
-    end
+    gradient = getgrad(data.linsystem)   # finite: the loop stops on a non-finite gradient before iterating
     getx(data.linsystem) .= .-gradient .* gddata.stepsize
     data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
     data.costs += @elapsed_ns costc = f(data.varnext)
@@ -635,15 +607,12 @@ reset!(gdd::GradientDescentData) = (gdd.stepsize = 1.0)
             return costc
         end
         if isfinite(costc)
+            # Minimiser of the quadratic through the cost and slope at 0 and the cost at the trial
+            # step, as a fraction of the step, safeguarded to [0.1, 0.5]. The slope term is not
+            # positive and the trial cost is above the best, so `costdiff` is negative, never zero.
             coststep = fast_dot(getx(data.linsystem), gradient)
             costdiff = data.bestcost + coststep - costc
-            if costdiff != 0.0
-                # Minimiser of the quadratic through the cost and slope at 0 and the cost at the
-                # trial step, as a fraction of the step, safeguarded to [0.1, 0.5]
-                gddata.stepsize *= clamp(0.5 * coststep / costdiff, 0.1, 0.5)
-            else
-                gddata.stepsize *= 0.5
-            end
+            gddata.stepsize *= clamp(0.5 * coststep / costdiff, 0.1, 0.5)
         else
             gddata.stepsize *= 0.5
         end

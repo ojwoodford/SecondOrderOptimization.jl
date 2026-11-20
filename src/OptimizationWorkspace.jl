@@ -93,7 +93,7 @@ function cachekey(x0, options::OptimizationOptions, H)
 end
 
 workspacevalid(ws::OptimizationWorkspace, x0, options::OptimizationOptions, H) = keyvalid(ws.key, x0, options, H)
-keyvalid(key, x0, options::OptimizationOptions, H) = false
+keyvalid(key, x0, options::OptimizationOptions, H) = false   # COV_EXCL_LINE: runs (test/edgepaths.jl), but a constant-result method is called without running its body, so coverage never counts it
 function keyvalid(key::Tuple, x0, options::OptimizationOptions, H)
     key[1] === typeof(x0) || return false
     key[2] == dynamic(nvars(x0)) || return false

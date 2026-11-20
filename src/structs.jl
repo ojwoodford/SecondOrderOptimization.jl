@@ -31,8 +31,6 @@ struct OptimizationOptions{S, L, B <: StaticBool}
 end
 
 makestaticbool(x::Union{Bool, StaticBool}) = static(x)
-makestaticbool(::Type{True}) = True()
-makestaticbool(::Type{False}) = False()
 
 # Termination bitmask constants
 const TERMINATION_COST_INF          = 1 << 0
