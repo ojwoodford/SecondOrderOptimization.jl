@@ -19,15 +19,21 @@ An objective given by its cost and by its gradient and Hessian, for [`optimize`]
   `:auto`/`:ldl` need both, and `:qr` and the predicted cost reduction read every stored entry,
   so an upper-triangle-only `H` gives a wrong step or a wrong step-quality estimate.
 - **Size and element type.** `H` must be `n×n`, where `n == nvars(x0)`; a mismatch is a
-  `DimensionMismatch`. The Hessian is `Float64`: a sparse prototype must be
-  `SparseMatrixCSC{Float64}`, and a dense one of another type is copied into a `Matrix{Float64}`.
+  `DimensionMismatch`. The element type of `H`, `Float64` or `Float32`, is the linear system's: a
+  `Float32` prototype (a `Matrix{Float32}`, `SparseMatrixCSC{Float32}`, `MMatrix` or
+  `SchurBlockHessian{Float32}`) gives a single-precision Hessian, its reduction and its factorization,
+  while the variables, the gradient `g`, the step, the damping and the costs stay `Float64`. `fdf!` is
+  handed `g::Vector{Float64}` and `H` in the prototype's type. A dense prototype of another matrix type
+  is copied into a `Matrix` of its element type. Any other element type, or a `linsolver` that does not
+  offer `Float32` for that system, is an `ArgumentError` (DampedLinearSolve's "Precision"). Without a
+  prototype the Hessian is `Float64`.
 - **Missing diagonal entries.** A sparse prototype should store every diagonal entry (explicit
   zeros are fine). If one is missing, a new matrix with explicit zeros on the diagonal is built
   and handed to `fdf!` in place of the prototype; its `nzval` layout differs from the
   prototype's, so an `fdf!` that writes by precomputed `nzval` positions of its own prototype
   would write to the wrong entries. Writing through `H[i, j]` works either way.
 - **Which matrix holds the final Hessian.** `fdf!` writes into the linear system's own matrix.
-  That is the prototype itself for a `Matrix{Float64}`, `MMatrix` or a sparse matrix with every
+  That is the prototype itself for a `Matrix`, `MMatrix` or a sparse matrix with every
   diagonal entry stored, and a copy otherwise. With a reused `workspace`, the matrix is the one
   from the call that built the workspace: an objective whose `H` is a different object of the
   same type and size (or, for a sparse `H`, the same pattern) reuses the cached system, and its
@@ -77,9 +83,12 @@ one. For a dense `J`, `linsolver = :cholesky` or `:ldl` solves the normal equati
   supplies a prototype with the rest already set (normally `zeros(m, n)`, for structural zeros).
   With an integer `m` the optimizer allocates `J` itself, as zeros. An entry written at some `x`
   and skipped at another keeps its old value, which is a bug in `resjac!`.
-- `J` is required: a `Matrix{Float64}` or `SparseMatrixCSC{Float64, Int}` prototype
-  (`m × nvars(x0)`), or an integer `m`, the number of residuals, for a dense system with its own
-  matrix. A sparse prototype's stored entries are its pattern: `resjac!` must write only stored
+- `J` is required: a `Matrix` or `SparseMatrixCSC{T, Int}` prototype (`m × nvars(x0)`), `T` =
+  `Float64` or `Float32`, or an integer `m`, the number of residuals, for a dense `Float64` system with
+  its own matrix. A `Float32` prototype gives a single-precision `J` and factorization; `resjac!` is
+  handed `r::Vector{Float64}` and `J` in the prototype's type, and the gradient `Jᵀr`, the step and the
+  costs are `Float64`. A `linsolver` that does not offer `Float32` for the system (SPQR, for a sparse
+  `J`) is an `ArgumentError`. A sparse prototype's stored entries are its pattern: `resjac!` must write only stored
   entries (through `nonzeros(J)`, or `J[i, j]` for a stored `(i, j)`). Writing any other entry
   inserts it, which changes the pattern, and the run throws an `ArgumentError`.
 - `J` may also be another package's prototype for which that package implements DampedLinearSolve's
@@ -103,8 +112,8 @@ that this holds.
 # Supported combinations
 | Jacobian prototype `J` | Linear system | `linsolver` |
 |:---|:---|:---|
-| integer `m ≥ 1`, or `Matrix{Float64}` (`m × n`) | dense QR of `J`; static QR when `x0` has a static size and `m·n ≤ 48` | `:auto`, `:qr`; `:cholesky`, `:ldl` (form `JᵀJ` once per linearization and factor it; always the dense system, never the static one); `:lsmr` (with Krylov.jl) |
-| `SparseMatrixCSC{Float64, Int}` | sparse QR of `J` (SPQR) | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
+| integer `m ≥ 1`, or `Matrix` (`m × n`) | dense QR of `J`; static QR when `x0` has a static size and `m·n ≤ 48` | `:auto`, `:qr`; `:cholesky`, `:ldl` (form `JᵀJ` once per linearization and factor it; always the dense system, never the static one); `:lsmr` (with Krylov.jl) |
+| `SparseMatrixCSC{T, Int}` | sparse QR of `J` (SPQR; `Float64` only) | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
 | `SchurBlockJacobian{Float64, Matrix{Float64}}` (another package's) | QR elimination, dense reduced system | `:auto`, `:qr` (QR of the reduced Jacobian); `:cholesky`, `:ldl` (factor its normal equations); `:lsmr` (with Krylov.jl) |
 | `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}` (another package's) | QR elimination, sparse reduced system | `:auto`, `:qr` (sparse QR of the reduced Jacobian, SPQR); `:cholesky` (sparse Cholesky of the reduced normal equations, falling back to LDLᵀ), `:ldl`; `:lsmr` (with Krylov.jl) |
 

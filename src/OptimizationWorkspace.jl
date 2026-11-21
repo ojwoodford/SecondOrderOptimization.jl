@@ -24,7 +24,9 @@ h_structure_key(::Nothing) = nothing
 # key, so a workspace built for one objective kind is never reused for the other.
 struct JacobianStructureKey
     m::Int
+    eltype::DataType   # of a Matrix prototype (Float64 for a number of residuals): a workspace is not reused for another
 end
+JacobianStructureKey(m::Integer) = JacobianStructureKey(m, Float64)
 h_structure_key(k::JacobianStructureKey) = k
 # Any other prototype: the system's own structure key (for a matrix, its type and size)
 h_structure_key(H) = structurekey(H)
