@@ -92,13 +92,14 @@ one. For a dense `J`, `linsolver = :cholesky` or `:ldl` solves the normal equati
   entries (through `nonzeros(J)`, or `J[i, j]` for a stored `(i, j)`). Writing any other entry
   inserts it, which changes the pattern, and the run throws an `ArgumentError`.
 - `J` may also be another package's prototype for which that package implements DampedLinearSolve's
-  linear-system contract, such as a `SchurBlockJacobian{Float64, RType}`: the variables are
+  linear-system contract, such as a `SchurBlockJacobian{T, RType}` (`T` `Float64` or `Float32`: the tables in
+  `T`, the residual `Float64`, as BlockLinearSystems documents): the variables are
   partitioned into retained and eliminated blocks, and each step eliminates the eliminated blocks by
   QR, solves the reduced problem in the retained variables and back-substitutes. `resjac!` writes
   the Jacobian blocks and the residuals into `J` by row block (through that package's `blockentry`,
   `block(J, k, entry, nrows, ncols)` and `residual_block(J, k)`); its `r` argument is then an empty
-  vector. `RType`, `Matrix{Float64}` or
-  `SparseMatrixCSC{Float64, Int}`, is the storage of the reduced system. A prototype is the matrix `resjac!` writes
+  vector. `RType`, `Matrix{T}` or
+  `SparseMatrixCSC{T, Int}`, is the storage of the reduced system. A prototype is the matrix `resjac!` writes
   into, with its values (a trial system, for `callbackchangesstate = false`, works on a copy
   made at the start of the run), except with an [`OptimizationWorkspace`](@ref): a workspace owns
   its Jacobian storage, set from the prototype handed in at the start of each run, and the
@@ -114,8 +115,8 @@ that this holds.
 |:---|:---|:---|
 | integer `m ≥ 1`, or `Matrix` (`m × n`) | dense QR of `J`; static QR when `x0` has a static size and `m·n ≤ 48` | `:auto`, `:qr`; `:cholesky`, `:ldl` (form `JᵀJ` once per linearization and factor it; always the dense system, never the static one); `:lsmr` (with Krylov.jl) |
 | `SparseMatrixCSC{T, Int}` | sparse QR of `J` (SPQR; `Float64` only) | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
-| `SchurBlockJacobian{Float64, Matrix{Float64}}` (another package's) | QR elimination, dense reduced system | `:auto`, `:qr` (QR of the reduced Jacobian); `:cholesky`, `:ldl` (factor its normal equations); `:lsmr` (with Krylov.jl) |
-| `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}` (another package's) | QR elimination, sparse reduced system | `:auto`, `:qr` (sparse QR of the reduced Jacobian, SPQR); `:cholesky` (sparse Cholesky of the reduced normal equations, falling back to LDLᵀ), `:ldl`; `:lsmr` (with Krylov.jl) |
+| `SchurBlockJacobian{T, Matrix{T}}` (another package's) | QR elimination, dense reduced system | `:auto`, `:qr` (QR of the reduced Jacobian); `:cholesky`, `:ldl` (factor its normal equations); `:lsmr` (with Krylov.jl) |
+| `SchurBlockJacobian{T, SparseMatrixCSC{T, Int}}` (another package's) | QR elimination, sparse reduced system | `:auto`, `:qr` (sparse QR of the reduced Jacobian, SPQR; `Float64` only); `:cholesky` (sparse Cholesky of the reduced normal equations, falling back to LDLᵀ; `Float32` only where CHOLMOD offers it), `:ldl`; `:lsmr` (with Krylov.jl) |
 
 Every row takes every iterator: `:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg`, `:newton`
 (Gauss-Newton) and `:gradientdescent`, which uses only the gradient `Jᵀr` and never solves the linear
@@ -132,7 +133,7 @@ With a sparse `J`, each solve (each damping value tried) is a numeric SPQR facto
 `[J; √λ D^½]`, whose ordering and symbolic analysis are done once, when the system is built. SPQR
 allocates its working memory inside each factorization and frees it again; nothing else allocates
 in the loop. The same holds for `:auto` and `:qr` with a `SchurBlockJacobian{Float64,
-SparseMatrixCSC{Float64, Int}}`: the reduced Jacobian `J̃` has a fixed pattern, filled after each
+SparseMatrixCSC{Float64, Int}}` (SPQR is `Float64` only): the reduced Jacobian `J̃` has a fixed pattern, filled after each
 elimination, and `[J̃; √λ D_r^½]` is factored by SPQR in the same way.
 
 `linsolver = :lsmr` (with `using Krylov`) solves each damped step iteratively by LSMR on `J`,

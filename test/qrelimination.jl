@@ -78,12 +78,13 @@ const SOO = SecondOrderOptimization
             @test_throws ArgumentError OptimizationWorkspace(x0, obj, OptimizationOptions(linsolver = s))
         end
         @test !called[]
-        @test_throws ArgumentError JacobianObjective(f, rj!, SchurBlockJacobian{Float32, Matrix{Float32}}(p.jst))
+        @test_throws ArgumentError JacobianObjective(f, rj!, SchurBlockJacobian{Float16, Matrix{Float16}}(p.jst))
+        @test JacobianObjective(f, rj!, SchurBlockJacobian{Float32, Matrix{Float32}}(p.jst)) isa JacobianObjective   # SP-B1
         @test_throws DimensionMismatch optimize(zeros(3), JacobianObjective(f, rj!, SchurBlockJacobian{Float64, Matrix{Float64}}(p.jst)))
         @test !called[]
         # The message shared by every Jacobian-path error names the solvers each SchurBlockJacobian takes
-        msg = sprint(showerror, try JacobianObjective(f, rj!, SchurBlockJacobian{Float32, Matrix{Float32}}(p.jst)); nothing catch e; e end)
-        @test occursin("SchurBlockJacobian{Float64, Matrix{Float64}} or SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}, linsolver = :auto, :qr, :cholesky or :ldl", msg)
+        msg = sprint(showerror, try JacobianObjective(f, rj!, SchurBlockJacobian{Float16, Matrix{Float16}}(p.jst)); nothing catch e; e end)
+        @test occursin("SchurBlockJacobian{T, Matrix{T}} or SchurBlockJacobian{T, SparseMatrixCSC{T, Int}} with T Float64 or Float32, linsolver = :auto, :qr, :cholesky or :ldl", msg)
         @test !called[]
     end
 

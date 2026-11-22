@@ -1,7 +1,7 @@
 !in(@__DIR__, LOAD_PATH) && push!(LOAD_PATH, @__DIR__)
 using Test, LinearAlgebra, SparseArrays, StaticArrays, SecondOrderOptimization, BlockLinearSystems
 using DampedLinearSolve: systemeltype, getA, getb, getx, getr, makehessiansystem
-include("fixtures/load.jl"); loadfixtures("schur_problems.jl")
+include("fixtures/load.jl"); loadfixtures("schur_problems.jl", "tp3.jl")
 const SOO = SecondOrderOptimization
 
 # A Float32 prototype (single-precision.md, SP-S3): every iterator on every conditioned system kind, both paths,
@@ -160,6 +160,65 @@ end
     ws = OptimizationWorkspace(copy(x0), JacobianObjective(lsq, PrResJac(lsq), zeros(Float32, 2n, n)), opts)
     @test !SOO.workspacevalid(ws, copy(x0), opts, SOO.jacobian_structure(zeros(2n, n)))
     @test SOO.workspacevalid(ws, copy(x0), opts, SOO.jacobian_structure(zeros(Float32, 2n, n)))
+end
+
+# The Jacobian path through QR elimination (SP-S3's rest; BlockLinearSystems SP-B1): a SchurBlockJacobian{Float32, R}
+# prototype, TP3's nonlinear problem, dense and sparse reduced storage, every solver that offers Float32 (sparse: no
+# SPQR; :cholesky where CHOLMOD offers Float32)
+pr_qrsolvers(::Type{Matrix{Float32}}) = (:auto, :qr, :cholesky, :ldl)
+pr_qrsolvers(::Type{SparseMatrixCSC{Float32, Int}}) = Float32 <: SparseArrays.CHOLMOD.VTypes ? (:cholesky, :ldl) : (:ldl,)
+@testset "precision.jl: QR elimination with a SchurBlockJacobian{Float32} prototype" begin
+    p = TP3Problem(tp3_structure())
+    x0 = fill(0.1, p.lay.n)
+    for R in (Matrix{Float32}, SparseMatrixCSC{Float32, Int}), s in pr_qrsolvers(R), it in PR_ITERATORS
+        R64 = R <: Matrix ? Matrix{Float64} : SparseMatrixCSC{Float64, Int}
+        opts = OptimizationOptions(iterator = it, linsolver = s)
+        _, r64 = optimize(copy(x0), JacobianObjective(TP3Cost(p), TP3Tables(p), SchurBlockJacobian{Float64, R64}(p.jst)), opts)
+        obj32 = JacobianObjective(TP3Cost(p), TP3Tables(p), SchurBlockJacobian{Float32, R}(p.jst))
+        x32, r32 = optimize(copy(x0), obj32, opts)
+        @info "Float32 QR elimination" R s it iterations64 = r64.niterations iterations32 = r32.niterations cost64 = r64.bestcost cost32 = r32.bestcost
+        @test isconverged(r64) && isconverged(r32)
+        @test abs(r32.bestcost - r64.bestcost) <= 1e-6 * abs(r64.bestcost)
+        @test eltype(x32) === Float64 && r32.bestcost isa Float64
+        ws = OptimizationWorkspace(copy(x0), obj32, opts)
+        @test systemeltype(ws.data[1].linsystem) === Float32 && eltype(getb(ws.data[1].linsystem)) === Float64
+        # Zero allocation per iteration on the dense reduced storage (the sparse one's CHOLMOD and LDLFactorizations
+        # allocate inside the library, as in Float64)
+        if R <: Matrix
+            warm(x, obj, o, w) = @allocated optimize!(x, obj, o; workspace = w)
+            warm(copy(x0), obj32, opts, ws)
+            @test warm(copy(x0), obj32, opts, ws) == 0
+        end
+    end
+end
+
+# A problem whose variables differ in scale by 1e8 (SP-S3): the least-squares problem of the Jacobian testset above
+# with its columns scaled from 1e-4 to 1e4, and the quartic with its variables scaled likewise. In Float64, Levenberg
+# and dogleg take the same number of iterations to within 1 as before conditioning (the counts pinned are those of
+# SecondOrderOptimization a42a5ae with DampedLinearSolve 3b16369 and BlockLinearSystems 0e446ca, measured by a script);
+# in Float32 they converge.
+function pr_scaled_lsq()
+    n = 8
+    sc = 10.0 .^ range(-4, 4; length = n)
+    A = [sin(0.9 * i + 1.1 * j + 0.2 * i * j) + (i == j ? 3.0 : 0.0) for i in 1:n, j in 1:n] * Diagonal(sc)
+    y = [cos(0.7 * i) for i in 1:n]
+    res!(r, x) = (mul!(view(r, 1:n), A, x); r[1:n] .-= y; r[n+1:2n] .= 0.5 / 3 .* (x ./ sc) .^ 3; r)
+    f(x) = 0.5 * sum(abs2, res!(zeros(2n), x))
+    rj!(r, J, x) = (res!(r, x); J[1:n, :] .= A; J[n+1:2n, :] .= Diagonal(0.5 .* (x ./ sc) .^ 2 ./ sc); 0.5 * sum(abs2, r))
+    return f, rj!, fill(0.3, n) ./ sc
+end
+const PR_SCALED_BEFORE = Dict(:levenbergmarquardt => 107, :dogleg => 52)
+@testset "precision.jl: a problem whose variables differ in scale by 1e8" begin
+    f, rj!, x0 = pr_scaled_lsq()
+    n = length(x0)
+    for it in (:levenbergmarquardt, :dogleg), s in (:auto, :cholesky)
+        opts = OptimizationOptions(iterator = it, linsolver = s, maxiters = 300)
+        _, r64 = optimize(copy(x0), JacobianObjective(f, rj!, zeros(2n, n)), opts)
+        _, r32 = optimize(copy(x0), JacobianObjective(f, rj!, zeros(Float32, 2n, n)), opts)
+        @info "1e8-scaled least squares" it s before = PR_SCALED_BEFORE[it] iterations64 = r64.niterations iterations32 = r32.niterations cost64 = r64.bestcost cost32 = r32.bestcost
+        @test isconverged(r64) && abs(r64.niterations - PR_SCALED_BEFORE[it]) <= 1
+        @test isconverged(r32)
+    end
 end
 
 @testset "precision.jl: the constants that depend on the element type" begin
