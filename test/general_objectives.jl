@@ -148,8 +148,8 @@ using SecondOrderOptimization, StaticArrays, LinearAlgebra, SparseArrays, Test
         @test_throws DimensionMismatch optimize(ones(3), HessianObjective(sq, sq_fdf!; H = H_bad), OptimizationOptions())
         @test_throws DimensionMismatch OptimizationWorkspace(ones(3), HessianObjective(sq, sq_fdf!; H = H_bad), OptimizationOptions())
     end
-    # M4: the Hessian is Float64; another sparse element type is a clear error
-    err = try optimize(ones(3), HessianObjective(sq, sq_fdf!; H = sparse(Float32(1) * I(3))), OptimizationOptions()); nothing catch e; e end
+    # M4: the Hessian is Float64 or Float32 (single-precision.md, SP-S1); another sparse element type is a clear error
+    err = try optimize(ones(3), HessianObjective(sq, sq_fdf!; H = sparse(Float16(1) * I(3))), OptimizationOptions()); nothing catch e; e end
     @test err isa ArgumentError
     @test occursin("Float64", sprint(showerror, err))
 end

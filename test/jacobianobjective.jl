@@ -33,14 +33,15 @@ end
     end
 
     @testset "Unsupported Jacobian prototypes are rejected when the objective is built" begin
-        for (J, needle) in ((spzeros(Float64, Int32, 2, 2), "sparse"), (spzeros(Float32, 2, 2), "sparse"), (spzeros(0, 2), "no rows"), (zeros(Float32, 2, 2), "Float64"), (zeros(Int, 2, 2), "Float64"),
+        # A Float32 prototype is accepted (single-precision.md, SP-S1); Float16 is not
+        for (J, needle) in ((spzeros(Float64, Int32, 2, 2), "sparse"), (spzeros(Float16, 2, 2), "sparse"), (spzeros(0, 2), "no rows"), (zeros(Float16, 2, 2), "Float64 or Float32"), (zeros(Int, 2, 2), "Float64 or Float32"),
                             (zeros(MMatrix{2, 2}), "not supported"), (view(zeros(3, 2), 1:2, :), "not supported"),
                             (Diagonal(ones(2)), "not supported"), (nothing, "not supported"), (2.0, "not supported"),
                             (true, "not supported"), (0, "at least 1"), (-3, "at least 1"), (zeros(0, 2), "no rows"))
             err = try JacobianObjective(jrosen_cost, jrosen_resjac!, J); nothing catch e; e end
             @test err isa ArgumentError
             @test occursin(needle, err.msg)
-            @test occursin("Matrix{Float64}", err.msg) && occursin("linsolver = :auto or :qr", err.msg)
+            @test occursin("a Matrix or SparseMatrixCSC{T, Int} Jacobian prototype", err.msg) && occursin("linsolver = :auto or :qr", err.msg)
         end
     end
 
@@ -56,7 +57,7 @@ end
             err = try SOO.checkobjective([0.0, 0.0], sobj, OptimizationOptions(linsolver=s)); nothing catch e; e end
             name = s isa Symbol ? s : Symbol(s === cholesky_solver ? :cholesky : :ldl)
             @test err isa ArgumentError && occursin(":$name", err.msg) && occursin(":auto or :qr", err.msg)
-            @test occursin("a Matrix{Float64} prototype or an integer m also takes :cholesky or :ldl", err.msg)
+            @test occursin("a Matrix prototype or an integer m also takes :cholesky or :ldl", err.msg)
         end
         for s in (:auto, :qr, :cholesky, :ldl, auto_solver, qr_solver, cholesky_solver, ldl_solver)
             @test SOO.checkobjective([0.0, 0.0], obj, OptimizationOptions(linsolver=s)) === nothing

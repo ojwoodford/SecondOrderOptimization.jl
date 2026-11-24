@@ -64,7 +64,11 @@ The contract of `resjac!(r, J, x)`:
   $\tfrac12 \lVert r \rVert^2$, so `f` can be any cost whose gradient is $J^\top r$. For a robust
   cost, for example, `resjac!` writes the reweighted residual and Jacobian.
 
-`J` is a `Matrix{Float64}` prototype, which the optimizer then writes into, or the integer `m`.
+`J` is a `Matrix` prototype, which the optimizer then writes into, or the integer `m`. Its element type,
+`Float64` or `Float32`, is the linear system's: a `zeros(Float32, m, n)` prototype gives a single-precision `J`
+and factorization, with the residual, the gradient, the step and the costs still in `Float64`, so the run
+converges to the double-precision answer (in this package's tests, in as many iterations). The solvers that
+offer `Float32` are listed in DampedLinearSolve's contract ("Precision"); SPQR does not.
 
 ## When the Jacobian form is worth it
 
@@ -119,8 +123,8 @@ shift the diagonal.
 
 | Jacobian prototype `J` | Linear system | `linsolver` |
 |:---|:---|:---|
-| integer `m ≥ 1`, or `Matrix{Float64}` (`m × n`) | dense QR of `J`; static QR when `x0` has a static size and `m·n ≤ 48` | `:auto`, `:qr`; `:cholesky`, `:ldl` (form `JᵀJ` once per linearization and factor it; always the dense system, never the static one); `:lsmr` (with Krylov.jl) |
-| `SparseMatrixCSC{Float64, Int}` | sparse QR of `J` (SPQR) | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
+| integer `m ≥ 1`, or `Matrix` (`m × n`) | dense QR of `J`; static QR when `x0` has a static size and `m·n ≤ 48` | `:auto`, `:qr`; `:cholesky`, `:ldl` (form `JᵀJ` once per linearization and factor it; always the dense system, never the static one); `:lsmr` (with Krylov.jl) |
+| `SparseMatrixCSC{Float64, Int}` | sparse QR of `J` (SPQR, `Float64` only) | `:auto`, `:qr`; `:lsmr` (with Krylov.jl) |
 | `SchurBlockJacobian{Float64, Matrix{Float64}}` (with BlockLinearSystems.jl) | QR elimination, dense reduced system | `:auto`, `:qr` (QR of the reduced Jacobian); `:cholesky`, `:ldl` (factor its normal equations); `:lsmr` (with Krylov.jl) |
 | `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}` (with BlockLinearSystems.jl) | QR elimination, sparse reduced system | `:auto`, `:qr` (sparse QR of the reduced Jacobian, SPQR); `:cholesky` (sparse Cholesky of the reduced normal equations, falling back to LDLᵀ), `:ldl`; `:lsmr` (with Krylov.jl) |
 

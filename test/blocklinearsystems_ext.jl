@@ -65,29 +65,34 @@ include("fixtures/load.jl"); loadfixtures("schur_problems.jl")
 end
 
 
-# The same system in Float32: built from the same structure, its parts copied whole
-function to_float32(H::SchurBlockHessian)
-    H32 = SchurBlockHessian{Float32, H.R isa Matrix ? Matrix{Float32} : SparseBlockLinearSystem{Float32}}(H.structure)
-    H.R isa Matrix ? (H32.R .= H.R) : (H32.R.data .= H.R.data)
-    H32.E_data .= H.E_data
-    H32.C_data .= H.C_data
-    return H32
+# The same system in another element type: built from the same structure, its parts copied whole
+function to_eltype(::Type{T}, H::SchurBlockHessian) where T
+    HT = SchurBlockHessian{T, H.R isa Matrix ? Matrix{T} : SparseBlockLinearSystem{T}}(H.structure)
+    H.R isa Matrix ? (HT.R .= H.R) : (HT.R.data .= H.R.data)
+    HT.E_data .= H.E_data
+    HT.C_data .= H.C_data
+    return HT
 end
 
-@testset "A SchurBlockHessian must be Float64; Float32 is rejected up front" begin
+# A SchurBlockHessian{Float32} gives a single-precision system (single-precision.md); another element type is rejected
+# up front, before f or fdf! is called. (Until SP-S1 a Float32 prototype was rejected here too.)
+@testset "A SchurBlockHessian must be Float64 or Float32; another element type is rejected up front" begin
     p = standard_problem()
     n = length(p.b)
-    for kind in (:dense, :sparse), x0 in (zeros(Float32, n), zeros(n))
-        H = to_float32(kind === :dense ? dense_schur_matrix(p) : sparse_schur_matrix(p))
+    for kind in (:dense, :sparse)
+        H = to_eltype(Float16, kind === :dense ? dense_schur_matrix(p) : sparse_schur_matrix(p))
         calls = Ref(0)
         obj = HessianObjective(x -> (calls[] += 1; 0.0), (g, Hs, x) -> (calls[] += 1; 0.0); H)
         for s in (:auto, :ldl)
-            @test_throws ArgumentError optimize(x0, obj, OptimizationOptions(; linsolver = s))
-            @test_throws ArgumentError OptimizationWorkspace(x0, obj, OptimizationOptions(; linsolver = s))
+            @test_throws ArgumentError optimize(zeros(n), obj, OptimizationOptions(; linsolver = s))
+            @test_throws ArgumentError OptimizationWorkspace(zeros(n), obj, OptimizationOptions(; linsolver = s))
         end
         @test calls[] == 0
-        err = try optimize(x0, obj, OptimizationOptions()) catch e; e end
-        @test occursin("SchurBlockHessian{Float32", sprint(showerror, err))
+        err = try optimize(zeros(n), obj, OptimizationOptions()) catch e; e end
+        @test occursin("SchurBlockHessian{Float32}", sprint(showerror, err))
+        H32 = to_eltype(Float32, kind === :dense ? dense_schur_matrix(p) : sparse_schur_matrix(p))
+        ws = OptimizationWorkspace(zeros(n), HessianObjective(x -> 0.0, (g, Hs, x) -> 0.0; H = H32), OptimizationOptions(; linsolver = :ldl))
+        @test SecondOrderOptimization.systemeltype(ws.data[1].linsystem) === Float32   # DampedLinearSolve's, through SecondOrderOptimization
     end
 end
 
@@ -177,11 +182,12 @@ function as1_objective(p, Href)
     d = similar(p.b)
     ranges = block_ranges(Href)
     cost(x) = 0.5 * dot(x, p.H, x) - dot(p.b, x) + 0.25 * sum(xi -> xi^4, x)
+    # Products, not `x .^ 3`: on Julia 1.10 with bounds checks on, a literal power in a broadcast can allocate a Ref
     function fdf!(g, H, x)
         mul!(g, p.H, x)
-        g .+= x .^ 3 .- p.b
+        g .+= x .* x .* x .- p.b
         copy_content!(H, Href)
-        d .= 3 .* x .^ 2
+        d .= 3 .* x .* x
         add_schur_diag!(H, d, ranges)
         return cost(x)
     end

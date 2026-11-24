@@ -688,9 +688,10 @@ end
         @test SOO.dampingfloor(SOO.makehessiansystem(sparse(1.0I, 3, 3), :auto)) == eps()
         ls_jac = DampedLinearSolve.DenseJacobianLinearSystem(5, 3)
         @test SOO.dampingfloor(ls_jac) == eps()^2
-        # Levenberg: relative to the largest diagonal entry, never above the former 1e-12
+        # Levenberg: relative to the largest diagonal entry, never above the damping floor eps(T)^(3/4) (1e-12 until
+        # SP-S2, single-precision.md decision 8)
         lev = LevenbergData(0.0)
-        for (md, expected) in ((60.0, eps() * 60.0), (1e10, 1e-12), (0.0, 1e-12), (NaN, 1e-12))
+        for (md, expected) in ((60.0, eps() * 60.0), (1e10, eps()^(3 / 4)), (0.0, eps()^(3 / 4)), (NaN, eps()^(3 / 4)))
             ls = DampedLinearSolve.DenseLinearSystem{Float64}(Matrix(Diagonal([md, md / 2])), zeros(2), zeros(2))
             @test SOO.lambdafloor(lev, ls) === expected
         end

@@ -34,15 +34,15 @@ end
 # Default linearization is at data.variables
 linearize!(::Any, data, fdf!) = computelinearization!(data, fdf!, data.variables)
 
-# The first retry when an undamped Newton solve fails: a shift of eps·max_diag (at least the
-# solver's `dampingfloor`, at which a positive-definite matrix solves). It cures a failure that came
+# The first retry when an undamped Newton solve fails: a shift of eps·max_diag, eps that of the system's element type
+# (at least the solver's `dampingfloor`, at which a positive-definite matrix solves). It cures a failure that came
 # from rounding alone in an ill-conditioned matrix that is positive definite, without the larger
 # shift below making the step negligible. If it fails, the matrix is not positive definite, and the
 # shifted retry below runs as before.
 function probe_shift!(ls, linsolver)
     md = max_diag(ls)
     (isfinite(md) && md > 0) || return NotPositiveDefinite
-    dampen!(ls, max(dampingfloor(ls), eps(Float64)) * md)
+    dampen!(ls, max(dampingfloor(ls), Float64(eps(systemeltype(ls)))) * md)
     return solve!(ls, linsolver)
 end
 
@@ -372,13 +372,16 @@ const AnyLevenbergData = Union{LevenbergData, LevenbergDataTrial}
 
 # The smallest damping applied, from the linear system's `dampingfloor`, relative to the
 # diagonal. Levenberg's λ multiplies I, so the floor is scaled by the largest diagonal entry
-# (falling back to 1e-12 when that is not finite or is zero); Marquardt's λ multiplies the scaled
-# diagonal already. Both are capped at the former constant 1e-12: a higher floor (eps times a
-# large diagonal) holds back the weak directions of an ill-conditioned problem even where Cholesky
-# still resolves a smaller damping, and failed solves are caught by the retry loop.
+# (falling back to the damping floor when that is not finite or is zero); Marquardt's λ multiplies the scaled
+# diagonal already. Both are capped at the damping floor `eps(T)^(3/4)`, T the system's element type (1.8e-12 for
+# Float64, where it was the constant 1e-12; 6.4e-6 for Float32; a starting value, rules.md 26): a higher floor (eps
+# times a large diagonal) holds back the weak directions of an ill-conditioned problem even where Cholesky still
+# resolves a smaller damping, and failed solves are caught by the retry loop.
+dampingcap(ls) = Float64(eps(systemeltype(ls)))^(3 / 4)
 function lambdafloor(::AnyLevenbergData, ls)
     md = max_diag(ls)
-    return (isfinite(md) && md > 0) ? min(dampingfloor(ls) * md, 1e-12) : 1e-12
+    cap = dampingcap(ls)
+    return (isfinite(md) && md > 0) ? min(dampingfloor(ls) * md, cap) : cap
 end
 
 function updatescaling!(lmd::AnyLevenbergData, ls)
@@ -420,7 +423,8 @@ const AnyMarquardtData = Union{MarquardtData, MarquardtDataTrial}
 # Marquardt scaling from the undamped diagonal of A (the squared column norms of J for a Jacobian system), which
 # the system writes (`getdiag!`): a running maximum of its absolute values, a non-finite entry counting as 1,
 # then a floor of 1e-8 times the largest scale (and at least 1e-12). The scale is in the units of diag(A), as
-# `dampen!(ls, λ, s)` expects.
+# `dampen!(ls, λ, s)` expects. The relative floor is about the precision of the matrix: 1e-8 for Float64, and
+# eps(Float32)^(1/2) ≈ 3.5e-4 for Float32 (the rule of single-precision.md; a starting value).
 function updatescaling!(lmd::AnyMarquardtData, ls)
     if lmd.lambda == 0
         lmd.lambda = 1e-6
@@ -432,10 +436,12 @@ function updatescaling!(lmd::AnyMarquardtData, ls)
         @inbounds d = lmd.scaling[i] = max(lmd.scaling[i], isfinite(val) ? val : 1.0)
         m = max(m, d)
     end
-    lmd.scaling .= max.(lmd.scaling, max(m * 1e-8, 1e-12))
+    lmd.scaling .= max.(lmd.scaling, max(m * scalingfloor(systemeltype(ls)), 1e-12))
 end
+scalingfloor(::Type{Float64}) = 1e-8
+scalingfloor(::Type{T}) where T = Float64(eps(T))^(1 / 2)
 
-lambdafloor(::AnyMarquardtData, ls) = min(dampingfloor(ls), 1e-12)
+lambdafloor(::AnyMarquardtData, ls) = min(dampingfloor(ls), dampingcap(ls))
 
 dampen!(ls::AbstractLinearSystem, lmd::AnyMarquardtData) = dampen!(ls, lmd.lambda, lmd.scaling)
 
