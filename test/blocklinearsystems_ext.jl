@@ -182,11 +182,12 @@ function as1_objective(p, Href)
     d = similar(p.b)
     ranges = block_ranges(Href)
     cost(x) = 0.5 * dot(x, p.H, x) - dot(p.b, x) + 0.25 * sum(xi -> xi^4, x)
+    # Products, not `x .^ 3`: on Julia 1.10 with bounds checks on, a literal power in a broadcast can allocate a Ref
     function fdf!(g, H, x)
         mul!(g, p.H, x)
-        g .+= x .^ 3 .- p.b
+        g .+= x .* x .* x .- p.b
         copy_content!(H, Href)
-        d .= 3 .* x .^ 2
+        d .= 3 .* x .* x
         add_schur_diag!(H, d, ranges)
         return cost(x)
     end

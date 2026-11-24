@@ -194,9 +194,10 @@ end
 
 # A problem whose variables differ in scale by 1e8 (SP-S3): the least-squares problem of the Jacobian testset above
 # with its columns scaled from 1e-4 to 1e4, and the quartic with its variables scaled likewise. In Float64, Levenberg
-# and dogleg take the same number of iterations to within 1 as before conditioning (the counts pinned are those of
-# SecondOrderOptimization a42a5ae with DampedLinearSolve 3b16369 and BlockLinearSystems 0e446ca, measured by a script);
-# in Float32 they converge.
+# and dogleg take the same number of iterations to within 5% (at least 1) as before conditioning (the counts pinned are
+# those of SecondOrderOptimization a42a5ae with DampedLinearSolve 3b16369 and BlockLinearSystems 0e446ca, measured by a
+# script on macOS aarch64). The count is sensitive to rounding on this ill-conditioned problem: on Linux x64, dogleg with
+# :auto takes 54 where macOS takes 52. In Float32 they converge.
 function pr_scaled_lsq()
     n = 8
     sc = 10.0 .^ range(-4, 4; length = n)
@@ -216,7 +217,7 @@ const PR_SCALED_BEFORE = Dict(:levenbergmarquardt => 107, :dogleg => 52)
         _, r64 = optimize(copy(x0), JacobianObjective(f, rj!, zeros(2n, n)), opts)
         _, r32 = optimize(copy(x0), JacobianObjective(f, rj!, zeros(Float32, 2n, n)), opts)
         @info "1e8-scaled least squares" it s before = PR_SCALED_BEFORE[it] iterations64 = r64.niterations iterations32 = r32.niterations cost64 = r64.bestcost cost32 = r32.bestcost
-        @test isconverged(r64) && abs(r64.niterations - PR_SCALED_BEFORE[it]) <= 1
+        @test isconverged(r64) && abs(r64.niterations - PR_SCALED_BEFORE[it]) <= max(1, round(Int, 0.05 * PR_SCALED_BEFORE[it]))
         @test isconverged(r32)
     end
 end
