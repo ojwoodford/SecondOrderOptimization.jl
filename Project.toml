@@ -1,6 +1,6 @@
 name = "SecondOrderOptimization"
 uuid = "a3f5c71e-3b2d-4d9a-9e20-7f8e3c4b1a50"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Oliver Woodford"]
 
 [deps]
@@ -14,7 +14,7 @@ Static = "aedffcd0-7271-4cad-89d0-dc628f76c6d3"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [compat]
-DampedLinearSolve = "0.1"
+DampedLinearSolve = "0.1.1"
 FastNorm = "0.2, 0.3"
 LinearAlgebra = "1.10"
 OptimizationVariableInterface = "0.3"
