@@ -290,29 +290,15 @@ printoutcallback(cost, x_trial, data, iteratedata::DoglegData) = printoutcallbac
 
 # Levenberg-Marquardt optimization
 abstract type LevMarData end
-abstract type LevMarDataTrial <: LevMarData end
 
-mutable struct LevenbergData <: LevMarData
+mutable struct LevenbergData{L} <: LevMarData
     lambda::Float64
+    tl::TrialLinearization{L}
     restricted::Bool      # the damping term exceeded the curvature term along the accepted step
 end
-LevenbergData(lambda::Float64) = LevenbergData(lambda, false)
 iteratorname(::StaticSymbol{:levenbergmarquardt}) = "Levenberg-Marquardt"
-construct(::StaticSymbol{:levenbergmarquardt}, ls, ::True) = LevenbergData(0.0)
-reset!(lmd::LevenbergData) = (lmd.lambda = 0.0; lmd.restricted = false)
-
-mutable struct LevenbergDataTrial{L} <: LevMarDataTrial
-    lambda::Float64
-    trial::L
-    trialcost::Float64
-    trialready::Bool
-    restricted::Bool
-end
-LevenbergDataTrial(lambda::Float64, trial, trialcost::Float64, trialready::Bool) = LevenbergDataTrial(lambda, trial, trialcost, trialready, false)
-construct(::StaticSymbol{:levenbergmarquardt}, ls, ::False) = LevenbergDataTrial(0.0, copy_structure(ls), NaN, false)
-reset!(lmd::LevenbergDataTrial) = (lmd.trialready = false; lmd.trialcost = NaN; lmd.lambda = 0.0; lmd.restricted = false)
-
-const AnyLevenbergData = Union{LevenbergData, LevenbergDataTrial}
+construct(::StaticSymbol{:levenbergmarquardt}, ls, callbackchangesstate::StaticBool) = LevenbergData(0.0, TrialLinearization(ls, callbackchangesstate), false)
+reset!(lmd::LevenbergData) = (reset!(lmd.tl); lmd.lambda = 0.0; lmd.restricted = false)
 
 # The smallest damping applied, from the linear system's `dampingfloor`, relative to the
 # diagonal. Levenberg's λ multiplies I, so the floor is scaled by the largest diagonal entry
@@ -321,76 +307,62 @@ const AnyLevenbergData = Union{LevenbergData, LevenbergDataTrial}
 # Float64, where it was the constant 1e-12; 6.4e-6 for Float32; a starting value, rules.md 26): a higher floor (eps
 # times a large diagonal) holds back the weak directions of an ill-conditioned problem even where Cholesky still
 # resolves a smaller damping, and failed solves are caught by the retry loop.
-dampingcap(ls) = Float64(eps(systemeltype(ls)))^(3 / 4)
-function lambdafloor(::AnyLevenbergData, ls)
-    md = max_diag(ls)
-    cap = dampingcap(ls)
-    return (isfinite(md) && md > 0) ? min(dampingfloor(ls) * md, cap) : cap
+dampingcap(data) = Float64(eps(systemeltype(data)))^(3 / 4)
+function lambdafloor(::LevenbergData, data)
+    md = maxdiagonal(data)
+    cap = dampingcap(data)
+    return (isfinite(md) && md > 0) ? min(dampingfloor(data) * md, cap) : cap
 end
 
-function updatescaling!(lmd::AnyLevenbergData, ls)
+function updatescaling!(lmd::LevenbergData, data)
     if lmd.lambda == 0
-        md = max_diag(ls)
-        lmd.lambda = isfinite(md) ? max(md * 1e-6, lambdafloor(lmd, ls)) : 1e-6
+        md = maxdiagonal(data)
+        lmd.lambda = isfinite(md) ? max(md * 1e-6, lambdafloor(lmd, data)) : 1e-6
     end
 end
 
-dampen!(ls::AbstractLinearSystem, lmd::AnyLevenbergData) = dampen!(ls, lmd.lambda)
+# The damped solve, at the iterator's damping
+dampedsolve!(lmd::LevenbergData, data, options) = solvestep!(data, options, lmd.lambda)
 
-mutable struct MarquardtData{T} <: LevMarData
+mutable struct MarquardtData{T, L} <: LevMarData
     lambda::Float64
     scaling::T
-    diag::T               # the undamped diagonal, written by `getdiag!` for `updatescaling!`
+    diag::T               # the undamped diagonal, written by `getdiagonal!` for `updatescaling!`
+    tl::TrialLinearization{L}
     restricted::Bool
 end
-MarquardtData(lambda::Float64, scaling) = MarquardtData(lambda, scaling, similar(scaling), false)
 iteratorname(::StaticSymbol{:levenbergmarquardt_dtd}) = "Levenberg-Marquardt (D'D scaling)"
-construct(::StaticSymbol{:levenbergmarquardt_dtd}, ls, ::True) = MarquardtData(0.0, zero(getx(ls)))
-reset!(lmd::MarquardtData) = (fill!(lmd.scaling, 0.0); lmd.lambda = 0.0; lmd.restricted = false)
-
-mutable struct MarquardtDataTrial{T, L} <: LevMarDataTrial
-    lambda::Float64
-    scaling::T
-    diag::T               # the undamped diagonal, written by `getdiag!` for `updatescaling!`
-    trial::L
-    trialcost::Float64
-    trialready::Bool
-    restricted::Bool
-end
-MarquardtDataTrial(lambda::Float64, scaling, trial, trialcost::Float64, trialready::Bool) =
-    MarquardtDataTrial(lambda, scaling, similar(scaling), trial, trialcost, trialready, false)
-construct(::StaticSymbol{:levenbergmarquardt_dtd}, ls, ::False) = MarquardtDataTrial(0.0, zero(getx(ls)), copy_structure(ls), NaN, false)
-reset!(lmd::MarquardtDataTrial) = (fill!(lmd.scaling, 0.0); lmd.trialready = false; lmd.trialcost = NaN; lmd.lambda = 0.0; lmd.restricted = false)
-
-const AnyMarquardtData = Union{MarquardtData, MarquardtDataTrial}
+construct(::StaticSymbol{:levenbergmarquardt_dtd}, ls, callbackchangesstate::StaticBool) =
+    MarquardtData(0.0, fill!(similarstep(ls), 0.0), similarstep(ls), TrialLinearization(ls, callbackchangesstate), false)
+reset!(lmd::MarquardtData) = (fill!(lmd.scaling, 0.0); reset!(lmd.tl); lmd.lambda = 0.0; lmd.restricted = false)
 
 # Marquardt scaling from the undamped diagonal of A (the squared column norms of J for a Jacobian system), which
 # the system writes (`getdiag!`): a running maximum of its absolute values, a non-finite entry counting as 1,
 # then a floor of 1e-8 times the largest scale (and at least 1e-12). The scale is in the units of diag(A), as
 # `dampen!(ls, λ, s)` expects. The relative floor is about the precision of the matrix: 1e-8 for Float64, and
 # eps(Float32)^(1/2) ≈ 3.5e-4 for Float32 (the rule of single-precision.md; a starting value).
-function updatescaling!(lmd::AnyMarquardtData, ls)
+function updatescaling!(lmd::MarquardtData, data)
     if lmd.lambda == 0
         lmd.lambda = 1e-6
     end
     m = zero(eltype(lmd.scaling))
-    diag = getdiag!(lmd.diag, ls)
+    diag = getdiagonal!(lmd.diag, data)
     for i in eachindex(diag)
         val = abs(diag[i])
         @inbounds d = lmd.scaling[i] = max(lmd.scaling[i], isfinite(val) ? val : 1.0)
         m = max(m, d)
     end
-    lmd.scaling .= max.(lmd.scaling, max(m * scalingfloor(systemeltype(ls)), 1e-12))
+    lmd.scaling .= max.(lmd.scaling, max(m * scalingfloor(systemeltype(data)), 1e-12))
 end
 scalingfloor(::Type{Float64}) = 1e-8
 scalingfloor(::Type{T}) where T = Float64(eps(T))^(1 / 2)
 
-lambdafloor(::AnyMarquardtData, ls) = min(dampingfloor(ls), dampingcap(ls))
+lambdafloor(::MarquardtData, data) = min(dampingfloor(data), dampingcap(data))
 
-dampen!(ls::AbstractLinearSystem, lmd::AnyMarquardtData) = dampen!(ls, lmd.lambda, lmd.scaling)
+dampedsolve!(lmd::MarquardtData, data, options) = solvestep!(data, options, lmd.lambda, lmd.scaling)
 
-dampingnorm(::AnyLevenbergData, x) = sqnorm(x)
-function dampingnorm(lmd::AnyMarquardtData, x)
+dampingnorm(::LevenbergData, x) = sqnorm(x)
+function dampingnorm(lmd::MarquardtData, x)
     total = 0.0
     scaling = lmd.scaling
     @inbounds @fastmath @simd for i in eachindex(x)
@@ -400,22 +372,12 @@ function dampingnorm(lmd::AnyMarquardtData, x)
 end
 
 restrictedstep(lmd::LevMarData) = lmd.restricted
+triallinearization(lmd::LevMarData) = lmd.tl
 
 # Whether the damping term exceeds the curvature term along an accepted step s, λ·sᵀDs > sᵀHs.
 # sᵀHs = 2·(predicted − gᵀs), from the undamped predicted change already computed, so this costs
 # one dot product. A non-positive sᵀHs with λ > 0 is restricted.
-lm_restricted(lmd, ls, step, predicted) = lmd.lambda * dampingnorm(lmd, step) > 2 * (predicted - fast_dot(getgrad(ls), step))
-
-function linearize!(lmd::LevMarDataTrial, data, fdf!)
-    if !lmd.trialready
-        return computelinearization!(data, fdf!, data.variables)
-    end
-    lmd.trialready = false
-    trial = sharex(lmd.trial, data.linsystem)
-    lmd.trial = data.linsystem
-    data.linsystem = trial
-    return lmd.trialcost
-end
+lm_restricted(lmd, data, step, predicted) = lmd.lambda * dampingnorm(lmd, step) > 2 * (predicted - fast_dot(getgradient(data), step))
 
 # Multiplier for the damping after an accepted step, from the actual and the predicted change
 # in cost (Nielsen's update). The predicted change is not negative when the Hessian is
@@ -431,105 +393,47 @@ end
 @inline function iterate!(levmardata::LevMarData, data, f, fdf!, options::OptimizationOptions)::Float64
     @assert levmardata.lambda >= 0.0
     levmardata.restricted = false
-    updatescaling!(levmardata, data.linsystem)
+    gradient = getgradient(data)
+    updatescaling!(levmardata, data)
     mu = 2.0
-    inner_iters = 0
-    while true
-        inner_iters += 1
-        status = Success
-        data.solves += @elapsed_ns begin
-            while true
-                dampen!(data.linsystem, levmardata)
-                status = solve!(data.linsystem, options.linsolver)
-                if status == Success
-                    negate!(getx(data.linsystem))
-                    break
-                end
-                levmardata.lambda *= mu
-                mu *= 2.0
-                # Damping cannot repair a non-finite matrix: give up at once
-                if levmardata.lambda > 1e16 || !isfinitesystem(data.linsystem)
-                    dampen!(data.linsystem, 0.0)
-                    break
-                end
-            end
-        end
-        if status != Success
-            return LINSOLVER_FAILED
-        end
-        step_sz = maximum(abs, getx(data.linsystem))::Float64   # finite: the solve succeeded
-        data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
-        data.costs += @elapsed_ns cost_ = f(data.varnext)
-        if cost_ <= data.bestcost || !(step_sz >= options.dstep) || inner_iters > 100 || levmardata.lambda > 1e16
-            dampen!(data.linsystem, 0.0)
-            if cost_ <= data.bestcost
-                predicted = quadratic_model_change(data.linsystem, getx(data.linsystem))
-                levmardata.restricted = lm_restricted(levmardata, data.linsystem, getx(data.linsystem), predicted)
-                levmardata.lambda = max(levmardata.lambda * lambda_update_factor(cost_ - data.bestcost, predicted), lambdafloor(levmardata, data.linsystem))
-            end
-            return cost_
-        end
-        levmardata.lambda *= mu
-        mu *= 2.0
-    end
-end
-
-@inline function iterate!(levmardata::LevMarDataTrial, data, f, fdf!, options::OptimizationOptions)::Float64
-    @assert levmardata.lambda >= 0.0
-    levmardata.restricted = false
-    gradient = getgrad(data.linsystem)
-    updatescaling!(levmardata, data.linsystem)
-    mu = 2.0
-    levmardata.trialready = false
+    discardtrial!(levmardata.tl)
     firsttrial = true
     inner_iters = 0
     while true
         inner_iters += 1
-        status = Success
-        data.solves += @elapsed_ns begin
-            while true
-                dampen!(data.linsystem, levmardata)
-                status = solve!(data.linsystem, options.linsolver)
-                if status == Success
-                    negate!(getx(data.linsystem))
-                    break
-                end
-                levmardata.trialready = false
-                levmardata.lambda *= mu
-                mu *= 2.0
-                # Damping cannot repair a non-finite matrix: give up at once
-                if levmardata.lambda > 1e16 || !isfinitesystem(data.linsystem)
-                    dampen!(data.linsystem, 0.0)
-                    break
-                end
+        ok = false
+        while true
+            ok = dampedsolve!(levmardata, data, options)
+            ok && break
+            discardtrial!(levmardata.tl)
+            levmardata.lambda *= mu
+            mu *= 2.0
+            # Damping cannot repair a non-finite matrix: give up at once
+            if levmardata.lambda > 1e16 || !systemisfinite(data)
+                undamp!(data)
+                break
             end
         end
-        if status != Success
+        if !ok
             return LINSOLVER_FAILED
         end
-        step_sz = maximum(abs, getx(data.linsystem))::Float64   # finite: the solve succeeded
-        data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
-        step = getx(data.linsystem)
-        if firsttrial && 0.5 * (levmardata.lambda * dampingnorm(levmardata, step) - fast_dot(gradient, step)) >= abs(data.bestcost) * options.reldcost
-            levmardata.trial = sharex(levmardata.trial, data.linsystem)
-            zero!(levmardata.trial)
-            data.gradients += @elapsed_ns cost_ = fdf!(getb(levmardata.trial), getA(levmardata.trial), data.varnext)
-            levmardata.trialready = true
-            levmardata.trialcost = cost_
-        else
-            data.costs += @elapsed_ns cost_ = f(data.varnext)
-        end
+        step = getstep(data)
+        step_sz = maximum(abs, step)::Float64   # finite: the solve succeeded
+        settrial!(data)
+        # On the first trial, linearize at the trial point too if the step is likely to be accepted
+        likely = firsttrial && 0.5 * (levmardata.lambda * dampingnorm(levmardata, step) - fast_dot(gradient, step)) >= abs(getbestcost(data)) * options.reldcost
+        cost_ = trialcost!(levmardata.tl, data, f, fdf!, likely)
         firsttrial = false
-        if cost_ <= data.bestcost || !(step_sz >= options.dstep) || inner_iters > 100 || levmardata.lambda > 1e16
-            dampen!(data.linsystem, 0.0)
-            if cost_ <= data.bestcost
-                predicted = quadratic_model_change(data.linsystem, getx(data.linsystem))
-                levmardata.restricted = lm_restricted(levmardata, data.linsystem, getx(data.linsystem), predicted)
-                levmardata.lambda = max(levmardata.lambda * lambda_update_factor(cost_ - data.bestcost, predicted), lambdafloor(levmardata, data.linsystem))
+        if cost_ <= getbestcost(data) || !(step_sz >= options.dstep) || inner_iters > 100 || levmardata.lambda > 1e16
+            undamp!(data)
+            if cost_ <= getbestcost(data)
+                predicted = predictedchange(data, step)
+                levmardata.restricted = lm_restricted(levmardata, data, step, predicted)
+                levmardata.lambda = max(levmardata.lambda * lambda_update_factor(cost_ - getbestcost(data), predicted), lambdafloor(levmardata, data))
             end
             return cost_
         end
-        levmardata.trialready = false
+        discardtrial!(levmardata.tl)
         levmardata.lambda *= mu
         mu *= 2.0
     end

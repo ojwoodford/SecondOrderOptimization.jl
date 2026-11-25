@@ -11,9 +11,9 @@ module SecondOrderOptimization
 using FastNorm
 using LinearAlgebra, SparseArrays, StaticArrays, Static
 using DampedLinearSolve
-# The linear-system contract (DampedLinearSolve's exports) is extended here, for the iterators' own data, and two of
-# its functions gain a method for the loop's state, for the iterator interface
-import DampedLinearSolve: dampen!, systemeltype, dampingfloor
+# Two functions of the linear-system contract (DampedLinearSolve's exports) gain a method for the loop's state, for the
+# iterator interface
+import DampedLinearSolve: systemeltype, dampingfloor
 using Printf: @printf, @sprintf
 using OptimizationVariableInterface
 import OptimizationVariableInterface: nvars, update, update!, copyvars, syncvars!, ismutablevar

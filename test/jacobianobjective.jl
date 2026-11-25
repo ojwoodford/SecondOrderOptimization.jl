@@ -1,5 +1,5 @@
 using SecondOrderOptimization, StaticArrays, SparseArrays, LinearAlgebra, Static, Random, Test
-using SecondOrderOptimization: LevenbergDataTrial, auto_solver, cholesky_solver, ldl_solver, qr_solver, dampen!, zero!, Success, NotPositiveDefinite   # internal names
+using SecondOrderOptimization: auto_solver, cholesky_solver, ldl_solver, qr_solver, dampen!, zero!, Success, NotPositiveDefinite   # internal names
 include("fixtures/load.jl"); loadfixtures("termbits.jl", "lsq_problems.jl")
 const SOO = SecondOrderOptimization
 using SecondOrderOptimization: getA, getb, getx, solve!   # explicit: Krylov, loaded by other test files, also exports solve!
@@ -320,7 +320,7 @@ SOO.update(x::Rot3, dx, start=1) = Rot3(x.R * expso3(SVector(dx[start], dx[start
         # the trial variant reuses the trial linearization, so it needs fewer cost evaluations
         @test res_trial.costcomputations < res_plain.costcomputations
         @test res_trial.niterations == res_plain.niterations
-        @test SOO.construct(static(:levenbergmarquardt), SOO.objective_linearsystem([0.0, 0.0], objJ, :auto), False()) isa LevenbergDataTrial
+        @test SOO.construct(static(:levenbergmarquardt), SOO.objective_linearsystem([0.0, 0.0], objJ, :auto), False()).tl isa SOO.TrialLinearization{<:SOO.DampedLinearSolve.DenseJacobianLinearSystem}
     end
 
     @testset "Non-finite residuals or Jacobians stop the run" begin

@@ -1,9 +1,14 @@
 using SecondOrderOptimization, StaticArrays, SparseArrays, LinearAlgebra, Static, Random, Test
 import DampedLinearSolve
-using SecondOrderOptimization: LevenbergData, MarquardtData, MarquardtDataTrial, AbstractLinearSystem, dampen!, zero!, copy_structure, sharex, quadratic_model_change, Success, NotPositiveDefinite, check_linear_system   # internal names
+using SecondOrderOptimization: AbstractLinearSystem, dampen!, zero!, copy_structure, sharex, quadratic_model_change, Success, NotPositiveDefinite, check_linear_system   # internal names
 include("fixtures/load.jl"); loadfixtures("termbits.jl", "w_problems.jl")
 const SOO = SecondOrderOptimization
 using SecondOrderOptimization: getA, getb, getx, solve!   # explicit: Krylov, loaded by other test files, also exports solve!
+
+# The iterators' data and the loop's state on a bare linear system, for testing the iterators' internal helpers
+levenberg(ls) = SOO.construct(static(:levenbergmarquardt), ls, True())
+marquardt(ls, ccs = True()) = SOO.construct(static(:levenbergmarquardt_dtd), ls, ccs)
+lsdata(ls) = SOO.OptimizationInternal(ls, zeros(length(getx(ls))))
 
 # W: the iterators other than :levenbergmarquardt on a JacobianObjective (the dense Jacobian system),
 # against the normal equations built from the same J
@@ -115,20 +120,21 @@ const W_ITERATORS = (:levenbergmarquardt_dtd, :dogleg, :newton)
         ws = getA(ls).ws
         @test ws.normsstale && ws.nnorms == 0
         # the generic rule on diag(JᵀJ): a running maximum, floored at 1e-8 of the largest
-        lmd = MarquardtData(0.0, zeros(3))
-        SOO.updatescaling!(lmd, ls)
+        lmd = marquardt(ls)
+        SOO.updatescaling!(lmd, lsdata(ls))
         @test lmd.lambda == 1e-6
         @test lmd.scaling == [5.0, max(1e-10, 25.0 * 1e-8), 25.0]
         @test SOO.max_diag(ls) == 25.0
         # the column norms were computed once for this linearization, and shared by max_diag
         @test ws.nnorms == 1 && !ws.normsstale
         # against the generic method on the normal equations
-        lmdH = MarquardtData(0.0, zeros(3))
-        SOO.updatescaling!(lmdH, DampedLinearSolve.DenseLinearSystem{Float64}(J' * J, J' * ones(3), zeros(3)))
+        lsH = DampedLinearSolve.DenseLinearSystem{Float64}(J' * J, J' * ones(3), zeros(3))
+        lmdH = marquardt(lsH)
+        SOO.updatescaling!(lmdH, lsdata(lsH))
         @test lmdH.scaling == lmd.scaling
         # a new linearization recomputes them, and the scaling keeps its running maximum
         SOO.JacobianLinearize((r, Jw, x) -> (r .= 1.0; Jw .= 0.5 .* J; Jw[2, 2] = 1.0; 0.0))(getb(ls), getA(ls), nothing)
-        SOO.updatescaling!(lmd, ls)
+        SOO.updatescaling!(lmd, lsdata(ls))
         @test ws.nnorms == 2
         @test lmd.scaling == [5.0, 1.0, 25.0]
         @test lmd.lambda == 1e-6
@@ -136,8 +142,8 @@ const W_ITERATORS = (:levenbergmarquardt_dtd, :dogleg, :newton)
         zero!(ls)
         @test ws.normsstale
         getA(ls).J .= J; getA(ls).J[1, 1] = NaN; SOO.markstale!(getA(ls))
-        lmd = MarquardtDataTrial(0.0, zeros(3), nothing, NaN, false)
-        SOO.updatescaling!(lmd, ls)
+        lmd = marquardt(ls, False())
+        SOO.updatescaling!(lmd, lsdata(ls))
         @test lmd.scaling == [1.0, 25.0 * 1e-8, 25.0]
         @test isnan(SOO.max_diag(ls))
     end
@@ -444,8 +450,8 @@ end
         ls = SOO.objective_linearsystem(x0, JacobianObjective(f, banded!, P), :auto)
         @test getA(ls).J === P && P == fill(7.0, n + 1, n)
         itd = SOO.construct(static(it), ls, static(ccs))
-        if hasfield(typeof(itd), :trial) && !isnothing(itd.trial)
-            @test getA(itd.trial).J == P && getA(itd.trial).J !== P
+        if !isnothing(SOO.trialsystem(itd))
+            @test getA(SOO.trialsystem(itd)).J == P && getA(SOO.trialsystem(itd)).J !== P
         end
         @test getA(copy_structure(ls)).J == P
     end
@@ -511,7 +517,7 @@ end
         SOO.JacobianLinearize((r, J, x) -> (r .= r1; J .= J1; 0.0))(getb(ls), getA(ls), nothing)
         dampen!(ls, 0.0); @test solve!(ls, :auto) == Success
         @test getx(ls) ≈ J1 \ r1
-        lmd = MarquardtData(0.0, zeros(3)); SOO.updatescaling!(lmd, ls)
+        lmd = marquardt(ls); SOO.updatescaling!(lmd, lsdata(ls))
         @test SOO.max_diag(ls) ≈ maximum(sum(abs2, J1; dims=1))
         nf, nn = getA(ls).ws.nfactor, getA(ls).ws.nnorms
         # zero! keeps J and r, but whatever is written next is what the system solves with
@@ -519,7 +525,7 @@ end
         @test getA(ls).J == J1 && getA(ls).r == r1 && all(iszero, getb(ls))
         getA(ls).J .= J2; getA(ls).r .= r2; mul!(getb(ls), J2', r2)   # written directly, without markstale!
         @test SOO.max_diag(ls) ≈ maximum(sum(abs2, J2; dims=1))
-        lmd2 = MarquardtData(0.0, zeros(3)); SOO.updatescaling!(lmd2, ls)
+        lmd2 = marquardt(ls); SOO.updatescaling!(lmd2, lsdata(ls))
         @test lmd2.scaling ≈ max.(vec(sum(abs2, J2; dims=1)), 1e-8 * maximum(sum(abs2, J2; dims=1)))
         for λ in (0.0, 0.5)
             dampen!(ls, λ)
@@ -549,7 +555,7 @@ end
             @test SOO.max_diag(ls) ≈ maximum(sum(abs2, J; dims=1))
             dampen!(ls, 0.0)
             @test solve!(ls, :auto) == Success && getx(ls) ≈ J \ r
-            lmd = MarquardtData(0.0, zeros(3)); SOO.updatescaling!(lmd, ls)
+            lmd = marquardt(ls); SOO.updatescaling!(lmd, lsdata(ls))
             @test all(isfinite, lmd.scaling)
         end
         # through optimize: the trial system linearized at a point where J and r are NaN (the
@@ -671,7 +677,7 @@ end
         # the system copy_structure produced: of the same type, its own J, sharing x
         @test t isa DampedLinearSolve.DenseJacobianLinearSystem && t !== ls
         @test getA(t).J !== getA(ls).J && getx(t) === getx(ls)
-        @test t === itd.trial
+        @test t === (hasfield(typeof(itd), :tl) ? itd.tl.trial : itd.trial)
     else
         @test t === nothing
     end
@@ -690,19 +696,20 @@ end
         @test SOO.dampingfloor(ls_jac) == eps()^2
         # Levenberg: relative to the largest diagonal entry, never above the damping floor eps(T)^(3/4) (1e-12 until
         # SP-S2, single-precision.md decision 8)
-        lev = LevenbergData(0.0)
+        lev = levenberg(DampedLinearSolve.DenseLinearSystem(2))
         for (md, expected) in ((60.0, eps() * 60.0), (1e10, eps()^(3 / 4)), (0.0, eps()^(3 / 4)), (NaN, eps()^(3 / 4)))
             ls = DampedLinearSolve.DenseLinearSystem{Float64}(Matrix(Diagonal([md, md / 2])), zeros(2), zeros(2))
-            @test SOO.lambdafloor(lev, ls) === expected
+            @test SOO.lambdafloor(lev, lsdata(ls)) === expected
         end
         getA(ls_jac).J .= [1e3 0 0; 0 1 0; 0 0 1; 0 0 0; 0 0 0]; SOO.markstale!(getA(ls_jac))
-        @test SOO.lambdafloor(lev, ls_jac) == eps()^2 * 1e6
+        @test SOO.lambdafloor(lev, lsdata(ls_jac)) == eps()^2 * 1e6
         # Marquardt: the floor itself, since λ multiplies the scaled diagonal
-        @test SOO.lambdafloor(MarquardtData(0.0, zeros(2)), DampedLinearSolve.DenseLinearSystem(2)) == eps()
-        @test SOO.lambdafloor(MarquardtData(0.0, zeros(3)), ls_jac) == eps()^2
+        @test SOO.lambdafloor(marquardt(DampedLinearSolve.DenseLinearSystem(2)), lsdata(DampedLinearSolve.DenseLinearSystem(2))) == eps()
+        @test SOO.lambdafloor(marquardt(ls_jac), lsdata(ls_jac)) == eps()^2
         # the initial damping is unchanged where the old floor did not bind
-        lmd = LevenbergData(0.0)
-        SOO.updatescaling!(lmd, DampedLinearSolve.DenseLinearSystem{Float64}(Matrix(Diagonal([4.0, 1.0])), zeros(2), zeros(2)))
+        ls4 = DampedLinearSolve.DenseLinearSystem{Float64}(Matrix(Diagonal([4.0, 1.0])), zeros(2), zeros(2))
+        lmd = levenberg(ls4)
+        SOO.updatescaling!(lmd, lsdata(ls4))
         @test lmd.lambda == 4e-6
     end
 

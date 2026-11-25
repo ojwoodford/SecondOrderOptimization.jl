@@ -101,8 +101,6 @@ copyprototype!(J::SparseMatrixCSC, P::SparseMatrixCSC) = copyto!(nonzeros(J), no
 # The iterator's spare linear system, for reusing the trial linearization, or `nothing` (the default, from
 # `triallinearization`, is in triallinearization.jl). An iterator data type that holds a spare outside a
 # `TrialLinearization` must have a method, so that whatever prepares a run's systems finds it.
-trialsystem(lmd::LevenbergDataTrial) = lmd.trial
-trialsystem(lmd::MarquardtDataTrial) = lmd.trial
 trialsystem(dd::DoglegData) = dd.trial          # nothing when callbackchangesstate = true
 # The system a workspace caches. For a JacobianObjective it owns its Jacobian storage, a copy of the
 # prototype: were it the prototype itself, a later run with another prototype would set this one's
