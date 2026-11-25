@@ -137,9 +137,11 @@ end
 const ITERATOR_INTERFACE_API = sort([
     :IteratorInterface,
     :LINSOLVER_FAILED,
+    :TrialLinearization,
     :construct,
     :curvature,
     :dampingfloor,
+    :discardtrial!,
     :getbestcost,
     :getdiagonal!,
     :getgradient,
@@ -158,6 +160,7 @@ const ITERATOR_INTERFACE_API = sort([
     :systemeltype,
     :systemisfinite,
     :trialcost!,
+    :triallinearization,
     :undamp!,
 ])
 @testset "IteratorInterface: the API" begin

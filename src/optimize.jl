@@ -98,10 +98,9 @@ end
 copyprototype!(J, P) = copyto!(J, P)
 copyprototype!(J::SparseMatrixCSC, P::SparseMatrixCSC) = copyto!(nonzeros(J), nonzeros(P))
 
-# The iterator's spare linear system, for reusing the trial linearization, or `nothing`. An
-# iterator data type that holds one must have a method, so that whatever prepares a run's systems
-# finds it.
-trialsystem(iteratedata) = nothing
+# The iterator's spare linear system, for reusing the trial linearization, or `nothing` (the default, from
+# `triallinearization`, is in triallinearization.jl). An iterator data type that holds a spare outside a
+# `TrialLinearization` must have a method, so that whatever prepares a run's systems finds it.
 trialsystem(lmd::LevenbergDataTrial) = lmd.trial
 trialsystem(lmd::MarquardtDataTrial) = lmd.trial
 trialsystem(dd::DoglegData) = dd.trial          # nothing when callbackchangesstate = true

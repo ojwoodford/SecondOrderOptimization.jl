@@ -49,6 +49,7 @@ include("callbacks.jl")
 
 # The functions an iterator calls, and the iterators
 include("iteratorinterface.jl")
+include("triallinearization.jl")
 include("iterators.jl")
 
 # Optimization driver and loop
@@ -63,18 +64,18 @@ include("docstrings.jl")
     SecondOrderOptimization.IteratorInterface
 
 The interface for writing an iterator: the methods an iterator defines (`iteratorname`, `construct`, `reset!`,
-`iterate!`, and optionally `restrictedstep` and `linearize!`), and the functions it calls on the loop's state
+`iterate!`, and optionally `restrictedstep`, `triallinearization` and `linearize!`), and the functions it calls on the loop's state
 `data`. See the manual's page on the iterator interface.
 """
 module IteratorInterface
-import ..SecondOrderOptimization: iteratorname, construct, reset!, iterate!, restrictedstep, linearize!,
+import ..SecondOrderOptimization: iteratorname, construct, reset!, iterate!, restrictedstep, triallinearization, linearize!,
     solvestep!, undamp!, systemisfinite, systemeltype, dampingfloor, getgradient, getstep, similarstep,
     predictedchange, curvature, maxdiagonal, getdiagonal!, getbestcost, settrial!, trialcost!, linearizetrial!,
-    LINSOLVER_FAILED
-export iteratorname, construct, reset!, iterate!, restrictedstep, linearize!
+    TrialLinearization, discardtrial!, LINSOLVER_FAILED
+export iteratorname, construct, reset!, iterate!, restrictedstep, triallinearization, linearize!
 export solvestep!, undamp!, systemisfinite, systemeltype, dampingfloor, getgradient, getstep, similarstep
 export predictedchange, curvature, maxdiagonal, getdiagonal!, getbestcost, settrial!, trialcost!, linearizetrial!
-export LINSOLVER_FAILED
+export TrialLinearization, discardtrial!, LINSOLVER_FAILED
 end
 
 end # module SecondOrderOptimization

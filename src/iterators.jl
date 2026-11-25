@@ -31,9 +31,6 @@ function computelinearization!(data, fdf!, x)
     return cost
 end
 
-# Default linearization is at data.variables
-linearize!(::Any, data, fdf!) = computelinearization!(data, fdf!, data.variables)
-
 # The first retry when an undamped Newton solve fails: a shift of eps·max_diag, eps that of the system's element type
 # (at least the solver's `dampingfloor`, at which a positive-definite matrix solves). It cures a failure that came
 # from rounding alone in an ill-conditioned matrix that is positive definite, without the larger

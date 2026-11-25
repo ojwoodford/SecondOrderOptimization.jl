@@ -556,6 +556,15 @@ rather than being its model's minimiser. After an accepted restricted step the l
 restrictedstep
 
 """
+    triallinearization(itdata) -> Union{TrialLinearization, Nothing}
+
+The iterator's [`TrialLinearization`](@ref), if it holds one, so that the default [`linearize!`](@ref) can swap in the
+linearization it made at an accepted trial point, and so that a run with a reused workspace can prepare its spare
+system. Optional; the default is `nothing`. Part of [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+triallinearization
+
+"""
     linearize!(itdata, data, fdf!) -> Float64
 
 Linearizes the objective at the current point, the point the loop moved to, and returns the cost there. Optional:
@@ -690,11 +699,36 @@ settrial!
 
 """
     trialcost!(data, f) -> Float64
+    trialcost!(tl::TrialLinearization, data, f, fdf!, likely::Bool) -> Float64
 
-The cost `f` at the trial point. Counted and timed as a cost evaluation. Part of
-[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+The cost at the trial point. The first form evaluates `f`, counted and timed as a cost evaluation. The second, for an
+iterator that holds a [`TrialLinearization`](@ref) `tl`: if `likely` (the iterator expects to accept the trial point)
+and `tl` holds a spare system, the cost is computed by `fdf!`, linearizing at the trial point into the spare (counted
+and timed as a gradient evaluation), which is then ready for the next [`linearize!`](@ref); otherwise by `f`, as the
+first form. Part of [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
 """
 trialcost!
+
+"""
+    TrialLinearization(ls, callbackchangesstate::StaticBool)
+
+A component for an iterator's data that saves an evaluation: when the iterator expects its trial point to be
+accepted it linearizes there ([`trialcost!`](@ref) with `likely = true`), into a spare system, while computing the
+cost; the default [`linearize!`](@ref) then swaps that system in instead of linearizing again. Built in
+[`construct`](@ref), from its arguments. With `callbackchangesstate` true it holds no spare (the callback may change
+the point or the cost after the trial) and always evaluates `f`. The iterator returns it from
+[`triallinearization`](@ref), resets it in its [`reset!`](@ref) (`reset!(tl)`), and discards a trial it will not
+accept with [`discardtrial!`](@ref). Part of [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+TrialLinearization
+
+"""
+    discardtrial!(tl::TrialLinearization)
+
+Marks the spare linearization as not ready: for a trial the iterator rejects, after a failed solve, and at the start
+of [`iterate!`](@ref). Part of [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+discardtrial!
 
 """
     linearizetrial!(data, fdf!) -> Float64
