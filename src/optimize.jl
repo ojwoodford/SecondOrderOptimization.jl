@@ -98,10 +98,8 @@ end
 copyprototype!(J, P) = copyto!(J, P)
 copyprototype!(J::SparseMatrixCSC, P::SparseMatrixCSC) = copyto!(nonzeros(J), nonzeros(P))
 
-# The iterator's spare linear system, for reusing the trial linearization, or `nothing` (the default, from
-# `triallinearization`, is in triallinearization.jl). An iterator data type that holds a spare outside a
-# `TrialLinearization` must have a method, so that whatever prepares a run's systems finds it.
-trialsystem(dd::DoglegData) = dd.trial          # nothing when callbackchangesstate = true
+# The iterator's spare linear system, for reusing the trial linearization, or `nothing`, is `trialsystem`, read from
+# the iterator's `triallinearization` (triallinearization.jl)
 # The system a workspace caches. For a JacobianObjective it owns its Jacobian storage, a copy of the
 # prototype: were it the prototype itself, a later run with another prototype would set this one's
 # contents, and a run handed this prototype again would start from the other's.
@@ -187,6 +185,7 @@ end
             converged |= TERMINATION_LINSOLVER_FAILED
             break
         end
+        undamp!(data)   # so that an iterator need not, and the callback sees the undamped system
         cost, terminate = callback(cost_, data.varnext, data, iteratedata)
         dynamic(options.callbackchangesstate) || isequal(cost, cost_) || callbackchangedcost(cost_, cost)
 

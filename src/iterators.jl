@@ -1,9 +1,7 @@
 negate!(x) = @.(x = -x)
 
-# The iterators' names for the linear system's parts: the gradient is b, the Hessian A
+# The iterators' name for the linear system's gradient, b
 getgrad(ls) = getb(ls)
-gethessian(ls) = getA(ls)
-gethessgrad(ls) = gethessian(ls), getgrad(ls)
 
 # An iterator exists if it has a display name: each iterator defines `iteratorname` beside its
 # `construct`, `reset!` and `iterate!`. The names accepted are found from those methods.
@@ -99,72 +97,39 @@ end
 linearize!(nd::NewtonData{True}, data, fdf!) = nd.cost
 
 # Dogleg optimization
-mutable struct DoglegData{T,L}
+mutable struct DoglegData{T, L}
     trustradius::Float64
     maxtrustradius::Float64
     cauchy::T
     newton::T
-    trial::L              # nothing, or a spare linear system for reusing the trial linearization
-    trialcost::Float64
-    trialready::Bool
-    restricted::Bool      # the step returned was not the full Newton point of an unshifted solve
+    tl::TrialLinearization{L}   # the trial linearization, reused when the trial point is accepted
+    restricted::Bool            # the step returned was not the full Newton point of an unshifted solve
 end
 
-function DoglegData(ls, maxtrustradius::Float64=1e10; trial=nothing)
-    x = getx(ls)
-    return DoglegData(0.0, maxtrustradius, similar(x), similar(x), trial, NaN, false, false)
-end
+DoglegData(ls, maxtrustradius::Float64 = 1e10, callbackchangesstate::StaticBool = True()) =
+    DoglegData(0.0, maxtrustradius, similarstep(ls), similarstep(ls), TrialLinearization(ls, callbackchangesstate), false)
 
 iteratorname(::StaticSymbol{:dogleg}) = "Dogleg"
-construct(::StaticSymbol{:dogleg}, ls, ::True) = DoglegData(ls)
-construct(::StaticSymbol{:dogleg}, ls, ::False) = DoglegData(ls; trial=copy_structure(ls))
-reset!(dd::DoglegData) = (dd.trustradius = 0.0; dd.trialready = false; dd.trialcost = NaN; dd.restricted = false)
+construct(::StaticSymbol{:dogleg}, ls, callbackchangesstate::StaticBool) = DoglegData(ls, 1e10, callbackchangesstate)
+reset!(dd::DoglegData) = (dd.trustradius = 0.0; reset!(dd.tl); dd.restricted = false)
 restrictedstep(dd::DoglegData) = dd.restricted
-
-@inline function evaltrial!(dd::DoglegData{T,Nothing}, data, f, fdf!, ::Bool) where {T}
-    data.costs += @elapsed_ns cost_ = f(data.varnext)
-    return cost_
-end
-@inline function evaltrial!(dd::DoglegData, data, f, fdf!, usefdf::Bool)
-    if !usefdf
-        data.costs += @elapsed_ns cost_ = f(data.varnext)
-        return cost_
-    end
-    dd.trial = sharex(dd.trial, data.linsystem)
-    zero!(dd.trial)
-    data.gradients += @elapsed_ns cost_ = fdf!(getb(dd.trial), getA(dd.trial), data.varnext)
-    dd.trialready = true
-    dd.trialcost = cost_
-    return cost_
-end
-
-linearize!(::DoglegData{T,Nothing}, data, fdf!) where {T} = computelinearization!(data, fdf!, data.variables)
-function linearize!(dd::DoglegData, data, fdf!)
-    if !dd.trialready
-        return computelinearization!(data, fdf!, data.variables)
-    end
-    dd.trialready = false
-    trial = sharex(dd.trial, data.linsystem)
-    dd.trial = data.linsystem
-    data.linsystem = trial
-    return dd.trialcost
-end
+triallinearization(dd::DoglegData) = dd.tl
 
 @inline function iterate!(dd::DoglegData, data, f, fdf!, options::OptimizationOptions)::Float64
-    dd.trialready = false
+    discardtrial!(dd.tl)
     dd.restricted = false
-    hessian, gradient = gethessgrad(data.linsystem)
+    gradient = getgradient(data)
 
-    gHg = quadform(hessian, gradient)
+    gHg = curvature(data, gradient)
     if !isfinite(gHg)
         return NaN
     end
     gnorm2 = sqnorm(gradient)
     if gnorm2 == 0
         # Stationary point: zero step (outer loop terminates on dstep/reldcost)
-        getx(data.linsystem) .= 0.0
-        data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
-        return data.bestcost
+        getstep(data) .= 0.0
+        settrial!(data)
+        return getbestcost(data)
     end
     gnorm = sqrt(gnorm2)
 
@@ -186,12 +151,12 @@ end
     newton_valid = false
     ok, shifted = newtonstep!(data, options, 20)   # leaves the system undamped, for the model below
     if ok
-        dd.newton .= getx(data.linsystem)
+        dd.newton .= getstep(data)
         newton_norm = fast_norm(dd.newton)
         newton_dot_g = fast_dot(gradient, dd.newton)
         if isfinite(newton_norm) && newton_dot_g < 0
             # Validity = positive predicted model reduction under the true (undamped) H
-            newton_pred = -quadratic_model_change(data.linsystem, dd.newton)
+            newton_pred = -predictedchange(data, dd.newton)
             newton_valid = isfinite(newton_pred) && newton_pred > 0
         end
     end
@@ -203,15 +168,15 @@ end
         elseif cauchy_ok
             r = cauchy_norm
         else
-            md = max_diag(data.linsystem)
+            md = maxdiagonal(data)
             r = (isfinite(md) && md > 0) ? gnorm / md : 1.0
         end
         dd.trustradius = min(r, dd.maxtrustradius)
     end
 
-    x = getx(data.linsystem)
-    cost_ = data.bestcost
-    noise = 10 * eps(Float64) * abs(data.bestcost)
+    x = getstep(data)
+    cost_ = getbestcost(data)
+    noise = 10 * eps(Float64) * abs(getbestcost(data))
     inner_iters = 0
     while true
         inner_iters += 1
@@ -247,7 +212,7 @@ end
             # finite and positive, and aw * trsq could only overflow for a Newton step some 1e144 long
             x .*= tau
             x .+= dd.cauchy
-            pred_red = -quadratic_model_change(data.linsystem, x)
+            pred_red = -predictedchange(data, x)
         else
             # Newton unavailable: full Cauchy step
             x .= dd.cauchy
@@ -257,13 +222,13 @@ end
 
         step_sz = maximum(abs, x)::Float64   # finite: every step above is built from finite parts
 
-        data.varnext = update!(data.varnext, data.variables, x)
+        settrial!(data, x)
         # On the first trial, linearize at the trial point too if the step is likely to be accepted
-        usefdf = inner_iters == 1 && pred_red >= abs(data.bestcost) * options.reldcost
-        cost_ = evaltrial!(dd, data, f, fdf!, usefdf)
+        likely = inner_iters == 1 && pred_red >= abs(getbestcost(data)) * options.reldcost
+        cost_ = trialcost!(dd.tl, data, f, fdf!, likely)
 
         # Noise-floored reduction ratio (Fletcher): stable when both reductions ~ eps*cost
-        act_red = data.bestcost - cost_
+        act_red = getbestcost(data) - cost_
         denom = pred_red + noise
         rho = (isfinite(act_red) && isfinite(denom) && denom > 0) ? (act_red + noise) / denom : -Inf
 
@@ -278,7 +243,7 @@ end
         end
 
         # Rejected
-        dd.trialready = false
+        discardtrial!(dd.tl)
         dd.trustradius = 0.25 * step_norm
         if !(step_sz >= options.dstep) || !(dd.trustradius >= floatmin(Float64)) || inner_iters > 100
             return cost_

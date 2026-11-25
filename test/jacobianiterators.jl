@@ -677,7 +677,7 @@ end
         # the system copy_structure produced: of the same type, its own J, sharing x
         @test t isa DampedLinearSolve.DenseJacobianLinearSystem && t !== ls
         @test getA(t).J !== getA(ls).J && getx(t) === getx(ls)
-        @test t === (hasfield(typeof(itd), :tl) ? itd.tl.trial : itd.trial)
+        @test t === itd.tl.trial
     else
         @test t === nothing
     end
