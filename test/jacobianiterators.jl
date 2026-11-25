@@ -238,7 +238,7 @@ const W_ITERATORS = (:levenbergmarquardt_dtd, :dogleg, :newton)
         dampen!(ls, 0.0)
         @test solve!(ls, :auto) == Success
         x0 = copy(getx(ls))
-        mu = SOO.initial_shift(ls)
+        mu = SOO.initial_shift(SOO.OptimizationInternal(ls, zeros(4)))
         @test mu ≈ max(maximum(sum(abs2, J; dims=1)) * 1e-4, 1e-6) rtol=1e-14
         dampen!(ls, mu)
         @test solve!(ls, :auto) == Success && getx(ls) ≈ (J' * J + mu * I) \ (J' * r)
@@ -250,7 +250,7 @@ const W_ITERATORS = (:levenbergmarquardt_dtd, :dogleg, :newton)
         ls = DampedLinearSolve.DenseJacobianLinearSystem(copy(J))
         getA(ls).r .= r; mul!(getb(ls), J', r); SOO.markstale!(getA(ls))
         @test solve!(ls, :auto) == NotPositiveDefinite
-        dampen!(ls, SOO.initial_shift(ls))
+        dampen!(ls, SOO.initial_shift(SOO.OptimizationInternal(ls, zeros(4))))
         @test solve!(ls, :auto) == Success
         dampen!(ls, 0.0)
         @test solve!(ls, :auto) == NotPositiveDefinite

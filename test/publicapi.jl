@@ -46,7 +46,7 @@ const PUBLIC_API = sort([
     end
     # Internal names stay defined, under the module
     @testset "$name is defined but internal" for name in (
-            :OptimizationInternal, :NewtonData, :NewtonDataRelinearize, :DoglegData,
+            :OptimizationInternal, :NewtonData, :DoglegData,
             :LevenbergData, :LevenbergDataTrial, :MarquardtData, :MarquardtDataTrial, :GradientDescentData,
             :iteratorname, :knowniterators, :validateiterator,
             :OptimizationLinearSolver, :auto_solver, :cholesky_solver, :ldl_solver, :qr_solver,

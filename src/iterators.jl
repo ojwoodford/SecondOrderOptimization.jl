@@ -36,18 +36,34 @@ end
 # from rounding alone in an ill-conditioned matrix that is positive definite, without the larger
 # shift below making the step negligible. If it fails, the matrix is not positive definite, and the
 # shifted retry below runs as before.
-function probe_shift!(ls, linsolver)
-    md = max_diag(ls)
-    (isfinite(md) && md > 0) || return NotPositiveDefinite
-    dampen!(ls, max(dampingfloor(ls), Float64(eps(systemeltype(ls)))) * md)
-    return solve!(ls, linsolver)
+function probe_shift!(data, options)
+    md = maxdiagonal(data)
+    (isfinite(md) && md > 0) || return false
+    return solvestep!(data, options, max(dampingfloor(data), Float64(eps(systemeltype(data)))) * md)
 end
 
 # First diagonal shift tried when an undamped Newton solve fails. `max_diag` is NaN if the
 # diagonal holds a NaN, and `dampen!` ignores a NaN shift, so fall back to a fixed value.
-function initial_shift(ls)
-    md = max_diag(ls)
+function initial_shift(data)
+    md = maxdiagonal(data)
     return isfinite(md) ? max(md * 1e-4, 1e-6) : 1e-6
+end
+
+# The Newton step, shared by Newton and dogleg: the undamped solve, and if it fails the probe and then up to
+# `maxshifts` growing diagonal shifts (none for a non-finite matrix, which damping cannot repair), leaving the system
+# undamped. Returns whether a solve succeeded and whether the undamped one failed.
+@inline function newtonstep!(data, options, maxshifts::Int)
+    solvestep!(data, options) && return true, false
+    ok = probe_shift!(data, options)
+    mu = initial_shift(data)
+    shifts = systemisfinite(data) ? maxshifts : 0
+    while !ok && shifts > 0
+        shifts -= 1
+        ok = solvestep!(data, options, mu)
+        mu *= 4.0
+    end
+    undamp!(data)
+    return ok, true
 end
 
 # Whether the step the iterator last returned was restricted: shortened or damped by the
@@ -56,83 +72,31 @@ end
 # records it for the step it returns; an iterator that records nothing is never restricted.
 restrictedstep(iteratedata) = false   # COV_EXCL_LINE: runs (test/edgepaths.jl), but a constant-result method is called without running its body, so coverage never counts it
 
-# Newton optimization: a step is restricted when its solve needed a diagonal shift
-mutable struct NewtonData
+# Newton optimization: a step is restricted when its solve needed a diagonal shift. With callbackchangesstate = false
+# Newton always moves to its trial point, so it linearizes there at once (`linearizetrial!`) and its `linearize!`
+# returns that cost; otherwise it evaluates the cost alone.
+mutable struct NewtonData{R <: StaticBool}
+    cost::Float64         # the cost at the last trial point, when relinearizing
     restricted::Bool
+    relinearize::R
 end
 iteratorname(::StaticSymbol{:newton}) = "Newton"
-construct(::StaticSymbol{:newton}, ls, ::True) = NewtonData(false)
+construct(::StaticSymbol{:newton}, ls, callbackchangesstate::StaticBool) = NewtonData(0.0, false, !callbackchangesstate)
 reset!(nd::NewtonData) = (nd.restricted = false; nothing)
 restrictedstep(nd::NewtonData) = nd.restricted
 
 @inline function iterate!(nd::NewtonData, data, f, fdf!, options::OptimizationOptions)::Float64
-    status = Success
-    nd.restricted = false
-    data.solves += @elapsed_ns begin
-        status = solve!(data.linsystem, options.linsolver)
-        if status == Success
-        else
-            nd.restricted = true
-            status = probe_shift!(data.linsystem, options.linsolver)
-            mu = initial_shift(data.linsystem)
-            shift_iters = isfinitesystem(data.linsystem) ? 30 : 0   # damping cannot repair a non-finite matrix
-            while status != Success && shift_iters > 0
-                shift_iters -= 1
-                dampen!(data.linsystem, mu)
-                mu *= 4.0
-                status = solve!(data.linsystem, options.linsolver)
-            end
-            dampen!(data.linsystem, 0.0)
-        end
-    end
-    if status == Success   # a successful solve's x is finite (DampedLinearSolve's contract)
-        negate!(getx(data.linsystem))
-        data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
-        data.costs += @elapsed_ns cost_ = f(data.varnext)
-        return cost_
-    end
-    return LINSOLVER_FAILED
-end
-
-mutable struct NewtonDataRelinearize
-    cost::Float64
-    restricted::Bool
-end
-construct(::StaticSymbol{:newton}, ls, ::False) = NewtonDataRelinearize(0.0, false)
-reset!(nd::NewtonDataRelinearize) = (nd.restricted = false; nothing)
-restrictedstep(nd::NewtonDataRelinearize) = nd.restricted
-
-@inline function iterate!(nd::NewtonDataRelinearize, data, f, fdf!, options::OptimizationOptions)::Float64
-    status = Success
-    nd.restricted = false
-    data.solves += @elapsed_ns begin
-        status = solve!(data.linsystem, options.linsolver)
-        if status == Success
-        else
-            nd.restricted = true
-            status = probe_shift!(data.linsystem, options.linsolver)
-            mu = initial_shift(data.linsystem)
-            shift_iters = isfinitesystem(data.linsystem) ? 30 : 0   # damping cannot repair a non-finite matrix
-            while status != Success && shift_iters > 0
-                shift_iters -= 1
-                dampen!(data.linsystem, mu)
-                mu *= 4.0
-                status = solve!(data.linsystem, options.linsolver)
-            end
-            dampen!(data.linsystem, 0.0)
-        end
-    end
-    if status == Success   # a successful solve's x is finite (DampedLinearSolve's contract)
-        negate!(getx(data.linsystem))
-        data.varnext = update!(data.varnext, data.variables, getx(data.linsystem))
-        zero!(data.linsystem)
-        data.gradients += @elapsed_ns nd.cost = fdf!(getb(data.linsystem), getA(data.linsystem), data.varnext)
+    ok, nd.restricted = newtonstep!(data, options, 30)
+    ok || return LINSOLVER_FAILED
+    settrial!(data)
+    if dynamic(nd.relinearize)
+        nd.cost = linearizetrial!(data, fdf!)
         return nd.cost
     end
-    return LINSOLVER_FAILED
+    return trialcost!(data, f)
 end
 
-linearize!(nd::NewtonDataRelinearize, data, fdf!) = nd.cost
+linearize!(nd::NewtonData{True}, data, fdf!) = nd.cost
 
 # Dogleg optimization
 mutable struct DoglegData{T,L}
@@ -216,29 +180,12 @@ end
     end
     cauchy_ok = isfinite(cauchy_norm)
 
-    # Newton step, with the same shifted-retry fallback as NewtonData
+    # Newton step, with the same shifted-retry fallback as Newton
     newton_norm = Inf
     newton_pred = 0.0
     newton_valid = false
-    status = Success
-    data.solves += @elapsed_ns begin
-        status = solve!(data.linsystem, options.linsolver)
-        shifted = status != Success
-        if shifted
-            status = probe_shift!(data.linsystem, options.linsolver)
-            mu = initial_shift(data.linsystem)
-            shifts = isfinitesystem(data.linsystem) ? 20 : 0
-            while status != Success && shifts > 0
-                shifts -= 1
-                dampen!(data.linsystem, mu)
-                mu *= 4.0
-                status = solve!(data.linsystem, options.linsolver)
-            end
-            dampen!(data.linsystem, 0.0)   # hessian must be undamped below
-        end
-    end
-    if status == Success
-        negate!(getx(data.linsystem))
+    ok, shifted = newtonstep!(data, options, 20)   # leaves the system undamped, for the model below
+    if ok
         dd.newton .= getx(data.linsystem)
         newton_norm = fast_norm(dd.newton)
         newton_dot_g = fast_dot(gradient, dd.newton)
