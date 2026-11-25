@@ -19,7 +19,7 @@ function knowniterators()
     return sort!(syms)
 end
 
-function checkiterator(s::Symbol)
+function validateiterator(s::Symbol)
     isnothing(iteratorname(s)) || return nothing
     throw(ArgumentError("Unknown iterator: :$s. The iterators are " * join((":$x" for x in knowniterators()), ", ", " and ") * "."))
 end

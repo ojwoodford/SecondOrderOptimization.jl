@@ -5,6 +5,7 @@ using SecondOrderOptimization, Test
 const PUBLIC_API = sort([
     :CostTrajectory,
     :HessianObjective,
+    :IteratorInterface,
     :JacobianObjective,
     :OptimizationOptions,
     :OptimizationResult,
@@ -38,7 +39,8 @@ const PUBLIC_API = sort([
     @test issorted(PUBLIC_API)
     @test sort(names(SecondOrderOptimization)) == PUBLIC_API
     # (Base.Docs.hasdoc is not in Julia 1.10, so look the binding up in the module's docstrings)
-    docs = Base.Docs.meta(SecondOrderOptimization)
+    # (a submodule's docstring is in its own module's docstrings)
+    docs = merge(Base.Docs.meta(SecondOrderOptimization), Base.Docs.meta(SecondOrderOptimization.IteratorInterface))
     @testset "$name has a docstring" for name in PUBLIC_API
         @test haskey(docs, Base.Docs.Binding(SecondOrderOptimization, name))
     end
@@ -46,7 +48,7 @@ const PUBLIC_API = sort([
     @testset "$name is defined but internal" for name in (
             :OptimizationInternal, :NewtonData, :NewtonDataRelinearize, :DoglegData,
             :LevenbergData, :LevenbergDataTrial, :MarquardtData, :MarquardtDataTrial, :GradientDescentData,
-            :iteratorname, :knowniterators, :checkiterator,
+            :iteratorname, :knowniterators, :validateiterator,
             :OptimizationLinearSolver, :auto_solver, :cholesky_solver, :ldl_solver, :qr_solver,
             :LINSOLVER_FAILED, :fast_dot,
             :AbstractLinearSystem, :solve!, :dampen!, :zero!, :makehessiansystem, :copy_structure,

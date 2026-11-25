@@ -70,6 +70,10 @@ documentation states the linear-system contract the iterators use, the solvers e
 how `:auto` chooses, and how to implement the contract for your own storage. `OptimizationOptions`
 validates `linsolver` by asking it.
 
+```@docs
+IteratorInterface
+```
+
 ### Extension Solvers
 
 Loading these packages adds solvers, through DampedLinearSolve's package extensions:

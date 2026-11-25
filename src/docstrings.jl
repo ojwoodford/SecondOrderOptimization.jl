@@ -500,3 +500,216 @@ Bit mask of [`OptimizationResult`](@ref)`.termination`, set when the linear solv
 Test it with `result.termination & TERMINATION_LINSOLVER_FAILED != 0`; see [`isconverged`](@ref).
 """
 TERMINATION_LINSOLVER_FAILED
+
+# The iterator interface (`SecondOrderOptimization.IteratorInterface`): the methods an iterator defines
+
+"""
+    iteratorname(::StaticSymbol{:name}) -> String
+
+The display name of the iterator selected by `iterator = :name` (`show(result)` prints it). Required: defining it
+registers the symbol, so that `OptimizationOptions(iterator = :name)` accepts it. Part of
+[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+iteratorname
+
+"""
+    construct(::StaticSymbol{:name}, ls, callbackchangesstate::StaticBool) -> itdata
+
+Returns the data of the iterator `:name` for a run on the linear system `ls`: the state it keeps between
+iterations. Required, one method per iterator. It may call [`similarstep`](@ref)`(ls)` for work vectors, and
+`TrialLinearization(ls, callbackchangesstate)`, and nothing else of `ls`. Part of
+[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+construct
+
+"""
+    reset!(itdata)
+
+Restores the iterator's data to the state [`construct`](@ref) returned, so that a run with a reused
+[`OptimizationWorkspace`](@ref) repeats a first run. Required. Part of
+[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+reset!
+
+"""
+    iterate!(itdata, data, f, fdf!, options) -> Float64
+
+One iteration. Sets the trial point ([`settrial!`](@ref)) and leaves the step in [`getstep`](@ref)`(data)`, and returns
+the cost at the trial point; or [`LINSOLVER_FAILED`](@ref) when no solve succeeded; or `NaN` when no finite step could be
+formed. `f` is the objective's cost function and `fdf!` its linearization, to be handed to the functions that evaluate
+them ([`trialcost!`](@ref), [`linearizetrial!`](@ref)); `options` is the run's [`OptimizationOptions`](@ref), of which
+an iterator reads `options.dstep` and `options.reldcost`, and hands `options` itself to [`solvestep!`](@ref).
+
+The loop moves to the returned point even if its cost is higher, keeping the best point itself; to reject a step, retry
+inside `iterate!`. Required. Part of [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+iterate!
+
+"""
+    restrictedstep(itdata) -> Bool
+
+Whether the step last returned was held back by the iterator's safeguard (damping, a trust radius, a shifted solve)
+rather than being its model's minimiser. After an accepted restricted step the loop does not test `reldcost` or
+`dstep`, since the step is small because of the safeguard. Optional; the default is `false`. Part of
+[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+restrictedstep
+
+"""
+    linearize!(itdata, data, fdf!) -> Float64
+
+Linearizes the objective at the current point, the point the loop moved to, and returns the cost there. Optional:
+the default swaps in a trial linearization the iterator has ready (see `triallinearization`), and otherwise
+evaluates `fdf!` at the current point. Override it only to do something else, for example to return a cost the
+iterator has already computed by [`linearizetrial!`](@ref). Part of
+[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+linearize!
+
+# The functions an iterator calls on the loop's state
+
+"""
+    solvestep!(data, options) -> Bool
+    solvestep!(data, options, λ)
+    solvestep!(data, options, λ, scaling)
+
+Solves the linear system for the step with the run's linear solver, `options.linsolver`. The two-argument form solves
+the system as it is currently damped; the others first set the damping to `λ` (a multiple of the identity), or to `λ`
+times the diagonal `scaling` (Marquardt's form), which stays set until it is changed. On success writes the step,
+the negated solution, into [`getstep`](@ref)`(data)` and returns `true`; otherwise returns `false`, and the step's
+contents are undefined. Each call counts as one linear solve in the result, and is timed. Part of
+[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+solvestep!
+
+"""
+    undamp!(data)
+
+Sets the system's damping to zero, so that [`predictedchange`](@ref) and [`curvature`](@ref) use the undamped model.
+The loop undamps after each iteration. Part of [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+undamp!
+
+"""
+    systemisfinite(data) -> Bool
+
+Whether every entry of the system's matrix is finite. A failed solve of a non-finite matrix cannot be repaired by
+damping, so an iterator stops retrying. Part of [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+systemisfinite
+
+"""
+    systemeltype(data) -> Type
+
+The element type of the linear system's matrix (`Float64` or `Float32`). The step, the gradient and the costs are
+`Float64` whatever it is. A method of DampedLinearSolve's `systemeltype`, re-exported by
+[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+systemeltype(::OptimizationInternal)
+
+"""
+    dampingfloor(data) -> Float64
+
+The linear solver's smallest useful relative damping: a positive-definite matrix damped by
+`dampingfloor(data) * maxdiagonal(data)` solves. A method of DampedLinearSolve's `dampingfloor`, re-exported by
+[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+dampingfloor(::OptimizationInternal)
+
+"""
+    getgradient(data) -> AbstractVector{Float64}
+
+The gradient at the current point. Read-only for an iterator. Part of
+[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+getgradient
+
+"""
+    getstep(data) -> AbstractVector{Float64}
+
+The step storage, which [`solvestep!`](@ref) writes. An iterator leaves the step it took here: the loop reads it after
+[`iterate!`](@ref). Part of [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+getstep
+
+"""
+    similarstep(ls) -> AbstractVector{Float64}
+
+A new work vector like the step, for [`construct`](@ref) to allocate the iterator's data. Its contents are undefined.
+Part of [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+similarstep
+
+"""
+    predictedchange(data, s) -> Float64
+
+The change in cost the quadratic model predicts for the step `s`, `gᵀs + ½ sᵀHs`, on the undamped system (call
+[`undamp!`](@ref) first if the system is damped). Part of [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+predictedchange
+
+"""
+    curvature(data, v) -> Float64
+
+The curvature of the model along `v`, `vᵀHv` (`‖Jv‖²` for a Jacobian system), undamped. Part of
+[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+curvature
+
+"""
+    maxdiagonal(data) -> Float64
+
+The largest absolute diagonal entry of the system's matrix (of `JᵀJ` for a Jacobian system), or `NaN` if a diagonal
+entry is `NaN`. Part of [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+maxdiagonal
+
+"""
+    getdiagonal!(out, data) -> out
+
+Writes the undamped diagonal of the system's matrix (the squared column norms of `J` for a Jacobian system) into
+`out`, a vector like the step, and returns it. Part of [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+getdiagonal!
+
+"""
+    getbestcost(data) -> Float64
+
+The lowest cost the run has reached. Part of [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+getbestcost
+
+"""
+    settrial!(data)
+    settrial!(data, s)
+
+Sets the trial point to the current point updated by the step `s`, [`getstep`](@ref)`(data)` by default. Part of
+[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+settrial!
+
+"""
+    trialcost!(data, f) -> Float64
+
+The cost `f` at the trial point. Counted and timed as a cost evaluation. Part of
+[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+trialcost!
+
+"""
+    linearizetrial!(data, fdf!) -> Float64
+
+Linearizes the objective at the trial point into the current system, in place, and returns the cost there. Counted
+and timed as a gradient evaluation. For an iterator that always moves to its trial point: it then returns that cost
+from its own [`linearize!`](@ref) method. Part of [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+linearizetrial!
+
+"""
+    LINSOLVER_FAILED
+
+The value [`iterate!`](@ref) returns when no linear solve succeeded: a `NaN` with its own bit pattern, which the loop
+recognises (compared with `===`) and stops on, with `TERMINATION_LINSOLVER_FAILED`. Part of
+[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+LINSOLVER_FAILED

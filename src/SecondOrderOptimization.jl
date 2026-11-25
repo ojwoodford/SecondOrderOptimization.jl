@@ -11,8 +11,9 @@ module SecondOrderOptimization
 using FastNorm
 using LinearAlgebra, SparseArrays, StaticArrays, Static
 using DampedLinearSolve
-# The linear-system contract (DampedLinearSolve's exports) is extended here, for the iterators' own data
-import DampedLinearSolve: dampen!
+# The linear-system contract (DampedLinearSolve's exports) is extended here, for the iterators' own data, and two of
+# its functions gain a method for the loop's state, for the iterator interface
+import DampedLinearSolve: dampen!, systemeltype, dampingfloor
 using Printf: @printf, @sprintf
 using OptimizationVariableInterface
 import OptimizationVariableInterface: nvars, update, update!, copyvars, syncvars!, ismutablevar
@@ -29,6 +30,7 @@ export TERMINATION_STEP_INF, TERMINATION_STEP_NAN, TERMINATION_STEP_SIZE, TERMIN
 export TERMINATION_MAX_ITERS, TERMINATION_MAX_TIME
 export TERMINATION_START_NOT_FINITE, TERMINATION_GRAD_INF, TERMINATION_GRAD_NAN, TERMINATION_GRAD_TOL
 export TERMINATION_LINSOLVER_FAILED, TERMINATION_STALLED
+export IteratorInterface
 
 # Utilities
 include("utils.jl")
@@ -45,7 +47,8 @@ include("OptimizationWorkspace.jl")
 # Callbacks
 include("callbacks.jl")
 
-# Iterators
+# The functions an iterator calls, and the iterators
+include("iteratorinterface.jl")
 include("iterators.jl")
 
 # Optimization driver and loop
@@ -53,5 +56,25 @@ include("optimize.jl")
 
 # API docstrings
 include("docstrings.jl")
+
+# The iterator interface, public through this submodule: the functions are the parent's (and two DampedLinearSolve's),
+# so that a method a user adds through it extends the same function
+"""
+    SecondOrderOptimization.IteratorInterface
+
+The interface for writing an iterator: the methods an iterator defines (`iteratorname`, `construct`, `reset!`,
+`iterate!`, and optionally `restrictedstep` and `linearize!`), and the functions it calls on the loop's state
+`data`. See the manual's page on the iterator interface.
+"""
+module IteratorInterface
+import ..SecondOrderOptimization: iteratorname, construct, reset!, iterate!, restrictedstep, linearize!,
+    solvestep!, undamp!, systemisfinite, systemeltype, dampingfloor, getgradient, getstep, similarstep,
+    predictedchange, curvature, maxdiagonal, getdiagonal!, getbestcost, settrial!, trialcost!, linearizetrial!,
+    LINSOLVER_FAILED
+export iteratorname, construct, reset!, iterate!, restrictedstep, linearize!
+export solvestep!, undamp!, systemisfinite, systemeltype, dampingfloor, getgradient, getstep, similarstep
+export predictedchange, curvature, maxdiagonal, getdiagonal!, getbestcost, settrial!, trialcost!, linearizetrial!
+export LINSOLVER_FAILED
+end
 
 end # module SecondOrderOptimization

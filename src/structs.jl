@@ -100,7 +100,7 @@ function OptimizationOptions(;
     isnothing(callback) || throw(ArgumentError("Callbacks should be passed directly to optimize, not to the options struct."))
     isnothing(iteratordata) || throw(ArgumentError("Iteratordata should not be passed to the options struct."))
     iter_sym = Symbol(iterator)
-    checkiterator(iter_sym) # validates iterator symbol
+    validateiterator(iter_sym) # validates iterator symbol
     linsolv_sym = linsolver_symbol(linsolver)
     checklinsolver(linsolv_sym) # validates linear solver symbol
     # Saturate: anything at or beyond the UInt64 nanosecond range means no time limit
