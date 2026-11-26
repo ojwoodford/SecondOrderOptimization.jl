@@ -51,6 +51,7 @@ include("callbacks.jl")
 include("iteratorinterface.jl")
 include("triallinearization.jl")
 include("iterators.jl")
+include("iteratorconformance.jl")
 
 # Optimization driver and loop
 include("optimize.jl")
@@ -65,17 +66,19 @@ include("docstrings.jl")
 
 The interface for writing an iterator: the methods an iterator defines (`iteratorname`, `construct`, `reset!`,
 `iterate!`, and optionally `restrictedstep`, `triallinearization` and `linearize!`), and the functions it calls on the loop's state
-`data`. See the manual's page on the iterator interface.
+`data`; and `check_iterator`, which checks an iterator against the contract. See the manual's page on the iterator
+interface.
 """
 module IteratorInterface
 import ..SecondOrderOptimization: iteratorname, construct, reset!, iterate!, restrictedstep, triallinearization, linearize!,
     solvestep!, undamp!, systemisfinite, systemeltype, dampingfloor, getgradient, getstep, similarstep,
     predictedchange, curvature, maxdiagonal, getdiagonal!, getbestcost, settrial!, trialcost!, linearizetrial!,
-    TrialLinearization, discardtrial!, LINSOLVER_FAILED
+    TrialLinearization, discardtrial!, LINSOLVER_FAILED, check_iterator
 export iteratorname, construct, reset!, iterate!, restrictedstep, triallinearization, linearize!
 export solvestep!, undamp!, systemisfinite, systemeltype, dampingfloor, getgradient, getstep, similarstep
 export predictedchange, curvature, maxdiagonal, getdiagonal!, getbestcost, settrial!, trialcost!, linearizetrial!
 export TrialLinearization, discardtrial!, LINSOLVER_FAILED
+export check_iterator
 end
 
 end # module SecondOrderOptimization

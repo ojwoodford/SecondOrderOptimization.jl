@@ -138,6 +138,7 @@ const ITERATOR_INTERFACE_API = sort([
     :IteratorInterface,
     :LINSOLVER_FAILED,
     :TrialLinearization,
+    :check_iterator,
     :construct,
     :curvature,
     :dampingfloor,
