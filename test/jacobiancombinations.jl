@@ -1,6 +1,6 @@
 using SecondOrderOptimization, BlockLinearSystems, Krylov, Pardiso, StaticArrays, SparseArrays, LinearAlgebra, Random, Test
 import DampedLinearSolve
-include("fixtures/load.jl"); loadfixtures("tp5.jl", "tp3.jl")
+include("fixtures/load.jl"); loadfixtures("gradientdescent.jl", "tp5.jl", "tp3.jl")
 const SOO = SecondOrderOptimization
 
 # TP5: the supported-combinations table of the JacobianObjective docstring and the Jacobian tutorial. Every

@@ -33,7 +33,7 @@ Stores configuration options and stopping criteria for second-order optimization
   flat valley crossed slowly: whether the step was held back by damping or a trust radius is
   known only to the iterator. Check the gradient (`gtol`) when that matters.
 - `maxtime::Float64 = 30.0`: Maximum wall-clock optimization runtime in seconds.
-- `iterator::Symbol = :levenbergmarquardt`: Iterator algorithm (`:newton`, `:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg`, `:gradientdescent`).
+- `iterator::Symbol = :levenbergmarquardt`: Iterator algorithm: one of the four built in (`:newton`, `:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg`), or one defined through [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface) (the manual's tutorial writes a gradient descent, `:gradientdescent`).
 - `linsolver::Symbol = :auto`: Linear solver method: `:auto`, `:cholesky`, `:ldl` or `:qr`; `:cg` or `:minres` (Krylov solvers for a Hessian) and `:lsmr` (for a [`JacobianObjective`](@ref) only), via `Krylov.jl`; or `:pardiso`, via `Pardiso.jl`. Which of these an objective accepts is set by its prototype: see [`HessianObjective`](@ref) and the table of supported combinations in [`JacobianObjective`](@ref) (a dense Jacobian takes `:auto`, `:qr`, `:cholesky`, `:ldl` and `:lsmr`; a sparse one `:auto`, `:qr` and `:lsmr`).
 - `callbackchangesstate::Union{Bool, StaticBool} = false`: Set `true` if callback modifies problem state.
 
@@ -133,63 +133,38 @@ OptimizationInternal
 """
     NewtonData
 
-Iterator state for undamped Newton optimization when `callbackchangesstate` is `true`.
+Iterator state for undamped Newton optimization: whether the last step needed a diagonal shift, and, when
+`callbackchangesstate` is `false` (Newton then linearizes at each trial point at once, since it always moves there),
+the cost at the trial point.
 """
 NewtonData
-
-"""
-    NewtonDataRelinearize
-
-Iterator state for undamped Newton optimization when `callbackchangesstate` is `false`,
-relinearizing immediately at each trial point.
-"""
-NewtonDataRelinearize
 
 """
     DoglegData
 
 Iterator state for Powell's dogleg trust-region optimization (Nocedal & Wright 2006 framework),
 storing the active trust-region radius `trustradius`, maximum radius bound `maxtrustradius`,
-and scratch buffers for the Cauchy and Newton steps.
+scratch buffers for the Cauchy and Newton steps, and a `TrialLinearization` (with a spare system when
+`callbackchangesstate` is `false`).
 """
 DoglegData
 
 """
     LevenbergData
 
-Iterator state for Levenberg-Marquardt (`lambda * I`) when `callbackchangesstate` is `true`.
+Iterator state for Levenberg-Marquardt (`lambda * I`): the damping, and a `TrialLinearization` (with a spare system,
+for reusing the linearization at an accepted first trial, when `callbackchangesstate` is `false`).
 """
 LevenbergData
 
 """
-    LevenbergDataTrial
-
-Iterator state for Levenberg-Marquardt (`lambda * I`) when `callbackchangesstate` is `false`,
-reusing trial linearizations on accepted first steps.
-"""
-LevenbergDataTrial
-
-"""
     MarquardtData
 
-Iterator state for Levenberg-Marquardt (`lambda * D'D`) when `callbackchangesstate` is `true`.
+Iterator state for Levenberg-Marquardt (`lambda * D'D`): the damping, the scaling `D'D` and its work vector, and a
+`TrialLinearization` (with a spare system, for reusing the linearization at an accepted first trial, when
+`callbackchangesstate` is `false`).
 """
 MarquardtData
-
-"""
-    MarquardtDataTrial
-
-Iterator state for Levenberg-Marquardt (`lambda * D'D`) when `callbackchangesstate` is `false`,
-reusing trial linearizations on accepted first steps.
-"""
-MarquardtDataTrial
-
-"""
-    GradientDescentData
-
-Iterator state for backtracking gradient descent, storing the current `stepsize`.
-"""
-GradientDescentData
 
 """
     OptimizationLinearSolver

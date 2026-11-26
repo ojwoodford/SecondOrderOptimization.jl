@@ -1,4 +1,5 @@
 using SecondOrderOptimization, SparseArrays, StaticArrays, Static, LinearAlgebra, Test
+include("fixtures/load.jl"); loadfixtures("gradientdescent.jl")   # :gradientdescent, the tutorial's user-defined iterator
 const SOO = SecondOrderOptimization
 
 # The less travelled paths of the iterators, callbacks and workspace: each testset names the branch it reaches
@@ -16,7 +17,7 @@ const SOO = SecondOrderOptimization
         end
         lines = split(chomp(out), '\n')
         @test startswith(lines[1], "iter      cost      cost_change    |step|")
-        @test endswith(lines[1], it === :newton ? "|step|" : "tr_radius")
+        @test endswith(lines[1], it in (:newton, :gradientdescent) ? "|step|" : "tr_radius")   # a user-defined iterator prints the four standard columns
         @test length(lines) >= 3   # the header, iteration 0 and at least one iteration
     end
 end
@@ -44,7 +45,7 @@ end
 
 @testset "An iterator that records nothing never restricts its step" begin
     # Behind a barrier, so that the call is made rather than folded to `false` where it is compiled
-    @test SOO.restrictedstep(Base.inferencebarrier(SOO.GradientDescentData(1.0))) === false
+    @test SOO.restrictedstep(Base.inferencebarrier(GradientDescentData(1.0))) === false   # the fixture's type
 end
 
 @testset "reset! with x0 the workspace's best point swaps it in" begin

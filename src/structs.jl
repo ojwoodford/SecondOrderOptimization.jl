@@ -20,7 +20,7 @@ struct OptimizationOptions{S, L, B <: StaticBool}
     stallrise::Float64          # sqrt(stalltol), set by the constructor: the largest relative rise a stalled stop may contain
     maxiters::Int               # Maximum number of outer iterations
     maxtime::UInt64             # Maximum optimization time allowed, in nanoseconds
-    iterator::StaticSymbol{S}   # Static Symbol of the inner iterator (:newton, :levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :gradientdescent)
+    iterator::StaticSymbol{S}   # Static Symbol of the inner iterator (:newton, :levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, or a user-defined one)
     linsolver::StaticSymbol{L}  # Static Symbol of the linear solver (:auto, :cholesky, :ldl, :qr)
     callbackchangesstate::B     # True if callback can modify problem state/cost
 

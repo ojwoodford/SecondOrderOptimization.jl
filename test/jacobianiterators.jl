@@ -1,7 +1,7 @@
 using SecondOrderOptimization, StaticArrays, SparseArrays, LinearAlgebra, Static, Random, Test
 import DampedLinearSolve
 using SecondOrderOptimization: AbstractLinearSystem, dampen!, zero!, copy_structure, sharex, quadratic_model_change, Success, NotPositiveDefinite, check_linear_system   # internal names
-include("fixtures/load.jl"); loadfixtures("termbits.jl", "w_problems.jl")
+include("fixtures/load.jl"); loadfixtures("gradientdescent.jl", "termbits.jl", "w_problems.jl")
 const SOO = SecondOrderOptimization
 using SecondOrderOptimization: getA, getb, getx, solve!   # explicit: Krylov, loaded by other test files, also exports solve!
 

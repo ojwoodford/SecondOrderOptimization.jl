@@ -1,4 +1,5 @@
 using SecondOrderOptimization, StaticArrays, LinearAlgebra, SparseArrays, Test
+include("fixtures/load.jl"); loadfixtures("gradientdescent.jl")   # :gradientdescent, the tutorial's user-defined iterator
 
 @testset "general_objectives.jl" begin
     # 1. Nonzero minimum / offset cost in Dogleg and all second-order iterators
