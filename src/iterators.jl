@@ -22,13 +22,6 @@ function validateiterator(s::Symbol)
     throw(ArgumentError("Unknown iterator: :$s. The iterators are " * join((":$x" for x in knowniterators()), ", ", " and ") * "."))
 end
 
-function computelinearization!(data, fdf!, x)
-    zero!(data.linsystem)
-    cost = 0.0
-    data.gradients += @elapsed_ns_if collectsstats(data) cost = fdf!(getb(data.linsystem), getA(data.linsystem), x)
-    return cost
-end
-
 # The first retry when an undamped Newton solve fails: a shift of eps·max_diag, eps that of the system's element type
 # (at least the solver's `dampingfloor`, at which a positive-definite matrix solves). It cures a failure that came
 # from rounding alone in an ill-conditioned matrix that is positive definite, without the larger

@@ -36,6 +36,12 @@ end
     data.costs += @elapsed_ns_if collectsstats(data) cost = f(data.varnext)
     return cost
 end
+function computelinearization!(data, fdf!, x)
+    zero!(data.linsystem)
+    cost = 0.0
+    data.gradients += @elapsed_ns_if collectsstats(data) cost = fdf!(getb(data.linsystem), getA(data.linsystem), x)
+    return cost
+end
 @inline function linearizetrial!(data::OptimizationInternal, fdf!)
     zero!(data.linsystem)
     data.gradients += @elapsed_ns_if collectsstats(data) cost = fdf!(getb(data.linsystem), getA(data.linsystem), data.varnext)
