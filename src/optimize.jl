@@ -183,13 +183,14 @@ end
     while converged == 0
         data.iternum += 1
         cost_ = iterate!(iteratedata, data, f, fdf!, options)
-        if cost_ === LINSOLVER_FAILED
-            converged |= TERMINATION_LINSOLVER_FAILED
-            break
-        end
-        if cost_ === NO_STEP   # no step to test and no trial point to move to or show the callback
-            converged |= TERMINATION_COST_NAN
-            break
+        # The sentinels are NaNs with their own bit patterns; any other NaN is a trial point's cost, handled below
+        # (NO_STEP: no step to test and no trial point to move to or show the callback)
+        if isnan(cost_)
+            converged |= (cost_ === LINSOLVER_FAILED) << 14
+            converged |= (cost_ === NO_STEP)          << 1
+            if converged != 0
+                break
+            end
         end
         undamp!(data)   # so that an iterator need not, and the callback sees the undamped system
         cost, terminate = callback(cost_, data.varnext, data, iteratedata)
