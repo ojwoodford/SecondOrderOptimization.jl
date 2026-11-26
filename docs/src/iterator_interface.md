@@ -59,7 +59,11 @@ linearize!
 - **the cost at the trial point**, which it has set with [`settrial!`](@ref), leaving the step it took in
   [`getstep`](@ref)`(data)`;
 - [`LINSOLVER_FAILED`](@ref), when no linear solve succeeded: the run stops with `TERMINATION_LINSOLVER_FAILED`;
-- `NaN`, when no finite step could be formed: the run stops with `TERMINATION_COST_NAN`.
+- [`NO_STEP`](@ref), when no finite step could be formed, with no trial point or step set: the run stops with
+  `TERMINATION_COST_NAN`, before the callback and the loop's step tests.
+
+A trial point whose cost is `NaN` is returned as that cost, not as `NO_STEP`: the loop then moves there and tests
+the step as usual, and stops with `TERMINATION_COST_NAN`.
 
 `data` is the loop's state. Its type and fields are internal: an iterator reads it, and changes it, only through the
 functions below. Of `options`, the run's [`OptimizationOptions`](@ref), an iterator reads the fields `dstep` and
@@ -111,6 +115,7 @@ settrial!
 trialcost!
 linearizetrial!
 LINSOLVER_FAILED
+NO_STEP
 ```
 
 ## Saving an evaluation: the trial linearization

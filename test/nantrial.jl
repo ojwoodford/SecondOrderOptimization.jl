@@ -151,6 +151,20 @@ end
             @test res.termination == TERMINATION_LINSOLVER_FAILED
             @test x == x0
         end
+        # Dogleg's curvature gᵀHg is NaN, so it forms no step and returns NO_STEP: the loop stops before the callback
+        # and the step tests, with the same termination every run (it read the step storage before, uninitialised
+        # memory for a static system, and set a step bit at random)
+        @testset "$storage, $s, dogleg" begin
+            for _ in 1:3
+                calls = Ref(0)
+                cb = (cost, x, data, itdata) -> (calls[] += 1; (cost, false))
+                x, res = optimize(x0, HessianObjective(cost, fdf!; H), OptimizationOptions(; iterator = :dogleg, linsolver = s); callback = cb)
+                @test res.niterations == 1
+                @test res.termination == TERMINATION_COST_NAN
+                @test calls[] == 0
+                @test x == x0
+            end
+        end
     end
 end
 

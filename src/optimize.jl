@@ -187,6 +187,10 @@ end
             converged |= TERMINATION_LINSOLVER_FAILED
             break
         end
+        if cost_ === NO_STEP   # no step to test and no trial point to move to or show the callback
+            converged |= TERMINATION_COST_NAN
+            break
+        end
         undamp!(data)   # so that an iterator need not, and the callback sees the undamped system
         cost, terminate = callback(cost_, data.varnext, data, iteratedata)
         dynamic(options.callbackchangesstate) || isequal(cost, cost_) || callbackchangedcost(cost_, cost)

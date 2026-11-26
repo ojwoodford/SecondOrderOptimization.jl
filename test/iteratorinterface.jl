@@ -130,6 +130,7 @@ end
     data, = ii_state([0.0, 0.0], HessianObjective(nf, nfdf!; H = zeros(2, 2)))
     @test II.systemisfinite(data) === false
     @test II.LINSOLVER_FAILED === SOO.LINSOLVER_FAILED && isnan(II.LINSOLVER_FAILED)
+    @test II.NO_STEP === SOO.NO_STEP && isnan(II.NO_STEP) && II.NO_STEP !== II.LINSOLVER_FAILED && II.NO_STEP !== NaN
 end
 
 # The submodule's API, pinned (rules.md 10): its exported names, each with a docstring; and its functions are the
@@ -137,6 +138,7 @@ end
 const ITERATOR_INTERFACE_API = sort([
     :IteratorInterface,
     :LINSOLVER_FAILED,
+    :NO_STEP,
     :TrialLinearization,
     :check_iterator,
     :construct,

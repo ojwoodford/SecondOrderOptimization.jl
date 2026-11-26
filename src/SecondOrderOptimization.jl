@@ -73,11 +73,11 @@ module IteratorInterface
 import ..SecondOrderOptimization: iteratorname, construct, reset!, iterate!, restrictedstep, triallinearization, linearize!,
     solvestep!, undamp!, systemisfinite, systemeltype, dampingfloor, getgradient, getstep, similarstep,
     predictedchange, curvature, maxdiagonal, getdiagonal!, getbestcost, settrial!, trialcost!, linearizetrial!,
-    TrialLinearization, discardtrial!, LINSOLVER_FAILED, check_iterator
+    TrialLinearization, discardtrial!, LINSOLVER_FAILED, NO_STEP, check_iterator
 export iteratorname, construct, reset!, iterate!, restrictedstep, triallinearization, linearize!
 export solvestep!, undamp!, systemisfinite, systemeltype, dampingfloor, getgradient, getstep, similarstep
 export predictedchange, curvature, maxdiagonal, getdiagonal!, getbestcost, settrial!, trialcost!, linearizetrial!
-export TrialLinearization, discardtrial!, LINSOLVER_FAILED
+export TrialLinearization, discardtrial!, LINSOLVER_FAILED, NO_STEP
 export check_iterator
 end
 

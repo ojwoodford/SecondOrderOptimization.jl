@@ -122,7 +122,7 @@ triallinearization(dd::DoglegData) = dd.tl
 
     gHg = curvature(data, gradient)
     if !isfinite(gHg)
-        return NaN
+        return NO_STEP
     end
     gnorm2 = sqnorm(gradient)
     if gnorm2 == 0

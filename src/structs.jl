@@ -82,6 +82,7 @@ const TERMINATION_REASONS = (
 )
 
 const LINSOLVER_FAILED = reinterpret(Float64, 0x7ff8000000000001)
+const NO_STEP = reinterpret(Float64, 0x7ff8000000000002)
 
 function OptimizationOptions(;
     maxiters=100,

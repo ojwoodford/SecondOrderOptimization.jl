@@ -50,7 +50,7 @@ const PUBLIC_API = sort([
             :LevenbergData, :MarquardtData,
             :iteratorname, :knowniterators, :validateiterator,
             :OptimizationLinearSolver, :auto_solver, :cholesky_solver, :ldl_solver, :qr_solver,
-            :LINSOLVER_FAILED, :fast_dot,
+            :LINSOLVER_FAILED, :NO_STEP, :fast_dot,
             :AbstractLinearSystem, :solve!, :dampen!, :zero!, :makehessiansystem, :copy_structure,
             :sharex, :quadform, :quadratic_model_change, :validatelinsolver,
             :SolveStatus, :Success, :NotPositiveDefinite, :Indefinite,

@@ -163,7 +163,7 @@ Requirement 4, that the system is undamped when the callback runs, is not checke
 `iterate!` returns, before the callback, so no iterator can break it. For each run it checks that
 
 5. on a problem whose Hessian is singular, and on one whose Hessian holds an `Inf`, the run ends without an exception
-   (a step, `LINSOLVER_FAILED` or `NaN` are all conforming);
+   (a step, `LINSOLVER_FAILED` or `NO_STEP` are all conforming);
 6. on a problem whose cost is `NaN` away from the start, the run ends without an exception;
 7. a second run on the same [`OptimizationWorkspace`](@ref) allocates nothing and repeats the first run's costs
    exactly (which tests [`reset!`](@ref));

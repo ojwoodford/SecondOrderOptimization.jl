@@ -517,8 +517,8 @@ reset!
     iterate!(itdata, data, f, fdf!, options) -> Float64
 
 One iteration. Sets the trial point ([`settrial!`](@ref)) and leaves the step in [`getstep`](@ref)`(data)`, and returns
-the cost at the trial point; or [`LINSOLVER_FAILED`](@ref) when no solve succeeded; or `NaN` when no finite step could be
-formed. `f` is the objective's cost function and `fdf!` its linearization, to be handed to the functions that evaluate
+the cost at the trial point (`NaN` if the cost there is `NaN`); or [`LINSOLVER_FAILED`](@ref) when no solve succeeded; or
+[`NO_STEP`](@ref) when no finite step could be formed. `f` is the objective's cost function and `fdf!` its linearization, to be handed to the functions that evaluate
 them ([`trialcost!`](@ref), [`linearizetrial!`](@ref)); `options` is the run's [`OptimizationOptions`](@ref), of which
 an iterator reads `options.dstep` and `options.reldcost`, and hands `options` itself to [`solvestep!`](@ref).
 
@@ -729,3 +729,14 @@ recognises (compared with `===`) and stops on, with `TERMINATION_LINSOLVER_FAILE
 [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
 """
 LINSOLVER_FAILED
+
+"""
+    NO_STEP
+
+The value [`iterate!`](@ref) returns when no finite step could be formed (dogleg, when the curvature along the
+gradient is not finite), having set neither a trial point nor a step: a `NaN` with its own bit pattern, which the loop
+recognises (compared with `===`) and stops on at once, with `TERMINATION_COST_NAN`, before the callback and the step
+tests. A `NaN` cost at a trial point the iterator did set is returned as itself, not as `NO_STEP`. Part of
+[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+NO_STEP
