@@ -6,7 +6,7 @@ function optimize!(
     options::OptimizationOptions = OptimizationOptions();
     callback::CB = nullcallback,
     workspace::WS = nothing,
-    startstats::Stats = Stats()
+    startstats::Union{Stats, Nothing} = nothing
 ) where {CB, WS}
     ismutablevar(x0) || throw(ArgumentError("optimize! updates x0 in place, but a $(typeof(x0)) cannot be updated in place. Use `x, result = optimize(x0, obj, options)` instead."))
     _, result = optimize_internal!(x0, obj, options, callback, workspace, startstats)
@@ -19,7 +19,7 @@ function optimize(
     options::OptimizationOptions = OptimizationOptions();
     callback::CB = nullcallback,
     workspace::WS = nothing,
-    startstats::Stats = Stats()
+    startstats::Union{Stats, Nothing} = nothing
 ) where {CB, WS}
     return optimize_internal!(copyvars(x0), obj, options, callback, workspace, startstats)
 end
@@ -109,7 +109,9 @@ workspace_prototype(J) = copy(J)
 workspace_prototype(m::Integer) = m
 
 # Runs on `x` (updated in place when it is mutable) and returns `(x, result)`
-function optimize_internal!(x, obj::AnyObjective, options::OptimizationOptions, callback::CB, workspace::WS, startstats::Stats) where {CB, WS}
+function optimize_internal!(x, obj::AnyObjective, options::OptimizationOptions, callback::CB, workspace::WS, givenstats::Union{Stats, Nothing}) where {CB, WS}
+    # The snapshot at the start: the one given, or now's (without statistics, the clock alone)
+    startstats = something(givenstats, startsnapshot(options.collectstats))
     checkentry(x, obj, options)
     structure = objective_structure(obj)
     if !isnothing(workspace) && workspacevalid(workspace, x, options, structure)
@@ -119,7 +121,7 @@ function optimize_internal!(x, obj::AnyObjective, options::OptimizationOptions, 
     else
         checkbuild(x, obj)
         ls = isnothing(workspace) ? objective_linearsystem(x, obj, options.linsolver) : workspace_linearsystem(x, obj, options.linsolver)
-        data = OptimizationInternal(ls, x, startstats)
+        data = OptimizationInternal(ls, x, startstats, options.collectstats)
         iteratedata = construct(options.iterator, ls, options.callbackchangesstate)
         if !isnothing(workspace)
             storeworkspace!(workspace, cachekey(x, options, structure), (data, iteratedata))
@@ -136,9 +138,9 @@ function run_cached_optimize!(cached::Tuple{D, ID}, x, f::F, fdf!::FDF, options:
 end
 
 function run_optimize!(data::D, iteratedata::ID, x, f::F, fdf!::FDF, options::OptimizationOptions, callback::CB) where {D, ID, F, FDF, CB}
-    data.init = Stats()
+    data.init = snapshot(data)
     converged = optimizeloop!(data, iteratedata, f, fdf!, options, callback)
-    data.optimize = Stats()
+    data.optimize = snapshot(data)
     if data.variables !== x
         x = syncvars!(x, data.variables)
         if data.varnext === x

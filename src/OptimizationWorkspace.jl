@@ -108,7 +108,7 @@ function OptimizationWorkspace(x0, obj::Union{HessianObjective, JacobianObjectiv
     checkentry(x0, obj, options)
     checkbuild(x0, obj)
     ls = workspace_linearsystem(x0, obj, options.linsolver)
-    data = OptimizationInternal(ls, x0, startstats)
+    data = OptimizationInternal(ls, x0, startstats, options.collectstats)
     iteratedata = construct(options.iterator, ls, options.callbackchangesstate)
     key = cachekey(x0, options, objective_structure(obj))
     return OptimizationWorkspace{typeof(key), Tuple{typeof(data), typeof(iteratedata)}}(key, (data, iteratedata))

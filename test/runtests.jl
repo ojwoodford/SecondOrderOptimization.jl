@@ -10,7 +10,7 @@ const TEST_GROUPS = (
         "jacobianiterators.jl", "jacobiansystem.jl", "sparsejacobiansystem.jl", "staticjacobiansystem.jl", "staticrule.jl",
         "functional.jl", "convergence.jl", "nantrial.jl", "trialreuse.jl", "OptimizationWorkspace.jl",
         "general_objectives.jl", "dogleg_trustregion.jl", "illconditioned.jl", "extensions.jl", "lsmr.jl",
-        "blocklinearsystems_ext.jl", "qrelimination.jl", "jacobiancombinations.jl", "edgepaths.jl", "precision.jl", "iteratorinterface.jl", "triallinearization.jl", "iteratorconformance.jl"],
+        "blocklinearsystems_ext.jl", "qrelimination.jl", "jacobiancombinations.jl", "edgepaths.jl", "precision.jl", "iteratorinterface.jl", "triallinearization.jl", "iteratorconformance.jl", "collectstats.jl"],
     threaded = ["qrelimination_threaded.jl"],
 )
 const SELECTED_GROUPS = isempty(ARGS) ? collect(keys(TEST_GROUPS)) : Symbol.(ARGS)

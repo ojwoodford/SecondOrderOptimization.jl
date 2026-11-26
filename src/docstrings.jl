@@ -36,6 +36,12 @@ Stores configuration options and stopping criteria for second-order optimization
 - `iterator::Symbol = :levenbergmarquardt`: Iterator algorithm: one of the four built in (`:newton`, `:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg`), or one defined through [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface) (the manual's tutorial writes a gradient descent, `:gradientdescent`).
 - `linsolver::Symbol = :auto`: Linear solver method: `:auto`, `:cholesky`, `:ldl` or `:qr`; `:cg` or `:minres` (Krylov solvers for a Hessian) and `:lsmr` (for a [`JacobianObjective`](@ref) only), via `Krylov.jl`; or `:pardiso`, via `Pardiso.jl`. Which of these an objective accepts is set by its prototype: see [`HessianObjective`](@ref) and the table of supported combinations in [`JacobianObjective`](@ref) (a dense Jacobian takes `:auto`, `:qr`, `:cholesky`, `:ldl` and `:lsmr`; a sparse one `:auto`, `:qr` and `:lsmr`).
 - `callbackchangesstate::Union{Bool, StaticBool} = false`: Set `true` if callback modifies problem state.
+- `collectstats::Union{Bool, StaticBool} = true`: Whether to time the run and count its allocations. With `false`, no
+  clock is read around an evaluation or a solve and the allocation counters are not read: every time and allocation
+  field of the [`OptimizationResult`](@ref) is zero (and `show` says that statistics were not collected), while the
+  counts of iterations, cost and gradient evaluations and linear solves, the costs and the termination are as with
+  `true`. `maxtime` is still enforced, by one reading of the clock per iteration. Held as a type parameter, so the
+  choice is made at compile time; a workspace built for one setting is not reused for the other.
 
 # Example
 ```julia
@@ -234,8 +240,8 @@ x_opt, res = optimize(x0, HessianObjective(f, fdf!); callback=storecostscallback
 CostTrajectory
 
 """
-    optimize!(x0, obj::HessianObjective, options=OptimizationOptions(); callback=nullcallback, workspace=nothing, startstats=Stats()) -> result
-    optimize!(x0, obj::JacobianObjective, options=OptimizationOptions(); callback=nullcallback, workspace=nothing, startstats=Stats()) -> result
+    optimize!(x0, obj::HessianObjective, options=OptimizationOptions(); callback=nullcallback, workspace=nothing, startstats=nothing) -> result
+    optimize!(x0, obj::JacobianObjective, options=OptimizationOptions(); callback=nullcallback, workspace=nothing, startstats=nothing) -> result
 
 Minimizes the objective `obj` starting from `x0`, updating `x0` in place, and returns the
 [`OptimizationResult`](@ref). On return `x0` holds the best point found.
@@ -257,13 +263,14 @@ For a `Number`, an `SVector` or any other immutable variable it throws an `Argum
 # Keyword Arguments
 - `callback = nullcallback`: Callback invoked per iteration: `callback(cost, x_trial, data, iteratedata) -> (cost, terminate_flags)`.
 - `workspace = nothing`: Optional [`OptimizationWorkspace`](@ref) for memory reuse.
-- `startstats = Stats()`: Time and allocation counters at the start, for the timings in the result.
+- `startstats = nothing`: Time and allocation counters at the start, for the timings in the result (a `Stats`);
+  `nothing` reads them at the call (without statistics, `collectstats = false`, the clock alone).
 """
 optimize!
 
 """
-    optimize(x0, obj::HessianObjective, options=OptimizationOptions(); callback=nullcallback, workspace=nothing, startstats=Stats()) -> (x, result)
-    optimize(x0, obj::JacobianObjective, options=OptimizationOptions(); callback=nullcallback, workspace=nothing, startstats=Stats()) -> (x, result)
+    optimize(x0, obj::HessianObjective, options=OptimizationOptions(); callback=nullcallback, workspace=nothing, startstats=nothing) -> (x, result)
+    optimize(x0, obj::JacobianObjective, options=OptimizationOptions(); callback=nullcallback, workspace=nothing, startstats=nothing) -> (x, result)
 
 Minimizes the objective `obj` starting from `x0`, and returns the best point found and the
 [`OptimizationResult`](@ref). `x0` is not modified: the optimization runs on `copyvars(x0)`.

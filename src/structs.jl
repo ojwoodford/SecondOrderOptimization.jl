@@ -10,7 +10,7 @@ function linsolver_symbol(s::OptimizationLinearSolver)
     return :qr
 end
 
-struct OptimizationOptions{S, L, B <: StaticBool}
+struct OptimizationOptions{S, L, B <: StaticBool, C <: StaticBool}
     reldcost::Float64           # Minimum relative change in cost (either direction) required to avoid termination
     absdcost::Float64           # Minimum absolute change in cost (either direction) required to avoid termination
     dstep::Float64              # Minimum L-infinity norm of the update vector required to avoid termination
@@ -23,10 +23,11 @@ struct OptimizationOptions{S, L, B <: StaticBool}
     iterator::StaticSymbol{S}   # Static Symbol of the inner iterator (:newton, :levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, or a user-defined one)
     linsolver::StaticSymbol{L}  # Static Symbol of the linear solver (:auto, :cholesky, :ldl, :qr)
     callbackchangesstate::B     # True if callback can modify problem state/cost
+    collectstats::C             # True to time the run and count its allocations (the counts of evaluations are always kept)
 
-    function OptimizationOptions(reldcost, absdcost, dstep, gtol, maxstall, stalltol, maxiters, maxtime, iterator::StaticSymbol{S}, linsolver::StaticSymbol{L}, callbackchangesstate::B) where {S, L, B <: StaticBool}
+    function OptimizationOptions(reldcost, absdcost, dstep, gtol, maxstall, stalltol, maxiters, maxtime, iterator::StaticSymbol{S}, linsolver::StaticSymbol{L}, callbackchangesstate::B, collectstats::C = True()) where {S, L, B <: StaticBool, C <: StaticBool}
         # The rise bound is derived from stalltol here, once, so the two can never disagree
-        return new{S, L, B}(reldcost, absdcost, dstep, gtol, maxstall, stalltol, sqrt(stalltol), maxiters, maxtime, iterator, linsolver, callbackchangesstate)
+        return new{S, L, B, C}(reldcost, absdcost, dstep, gtol, maxstall, stalltol, sqrt(stalltol), maxiters, maxtime, iterator, linsolver, callbackchangesstate, collectstats)
     end
 end
 
@@ -95,7 +96,8 @@ function OptimizationOptions(;
     linsolver=:auto,
     callback=nothing,
     iteratordata=nothing,
-    callbackchangesstate=False()
+    callbackchangesstate=False(),
+    collectstats=True()
 )
     isnothing(callback) || throw(ArgumentError("Callbacks should be passed directly to optimize, not to the options struct."))
     isnothing(iteratordata) || throw(ArgumentError("Iteratordata should not be passed to the options struct."))
@@ -110,7 +112,8 @@ function OptimizationOptions(;
         Float64(reldcost), Float64(absdcost), Float64(dstep), Float64(gtol),
         Int(maxstall), Float64(stalltol), Int(maxiters), maxtime_ns,
         static(iter_sym), static(linsolv_sym),
-        makestaticbool(callbackchangesstate)
+        makestaticbool(callbackchangesstate),
+        makestaticbool(collectstats)
     )
 end
 
@@ -238,9 +241,15 @@ function Base.show(io::IO, x::OptimizationResult)
     end
     userflags = x.termination >> 16
     if 0 != userflags; println(io, "   Terminated by user-defined callback, with flags: ", string(userflags, base=2)); end
+    statscollected(x) || println(io, "Statistics were not collected (collectstats = false): the times and allocations above are zero.")
 end
 
-mutable struct OptimizationInternal{LSType, VarType}
+# Whether the run collected statistics: a run that did has a positive total time, as two readings of the clock around
+# any work differ, and one that did not has every time and allocation field zero
+statscollected(x::OptimizationResult) = !(x.timetotal == 0 && x.timeinit == 0 && x.timecost == 0 && x.timegradient == 0 &&
+    x.timesolver == 0 && x.initallocations == 0 && x.initallocated == 0 && x.optimizeallocations == 0 && x.optimizeallocated == 0)
+
+mutable struct OptimizationInternal{LSType, VarType, C <: StaticBool}
     # Costs
     startcost::Float64
     bestcost::Float64
@@ -259,15 +268,25 @@ mutable struct OptimizationInternal{LSType, VarType}
     varbest::VarType
     varbestvalid::Bool
 
-    function OptimizationInternal(linsystem::LSType, x0::VarType, startstats=Stats()) where {LSType, VarType}
+    # `collectstats` from the options: whether the run is timed and its allocations counted
+    function OptimizationInternal(linsystem::LSType, x0::VarType, startstats=Stats(), ::C=True()) where {LSType, VarType, C <: StaticBool}
         varnext = copyvars(x0)
-        return new{LSType, VarType}(
+        return new{LSType, VarType, C}(
             0.0, 0.0, startstats, Stats(0), Stats(0),
             TimeCounter(), TimeCounter(), TimeCounter(), 0,
             linsystem, x0, varnext, x0, false
         )
     end
 end
+
+# Whether the run collects statistics (the options' `collectstats`)
+collectsstats(::OptimizationInternal{L, V, C}) where {L, V, C} = C()
+# The snapshot of the time and the allocation counters at a point of the run, or, without statistics, the start's (so
+# that every difference is zero)
+snapshot(data::OptimizationInternal) = dynamic(collectsstats(data)) ? Stats() : data.start
+# The start's snapshot: without statistics the clock alone (for `storecostscallback`'s times), and no allocation counts
+startsnapshot(::True) = Stats()
+startsnapshot(::False) = Stats(0, 0, Base.time_ns())
 
 function reset!(data::OptimizationInternal, x0, startstats)
     data.startcost = 0.0

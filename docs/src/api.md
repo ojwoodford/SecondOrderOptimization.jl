@@ -18,6 +18,11 @@ isconverged
 OptimizationWorkspace
 ```
 
+Every run times its evaluations and solves and counts its allocations, into the time and allocation fields of the
+result. For a small problem solved many times, where reading the clock is a visible part of the cost of a run, pass
+`collectstats = false` to [`OptimizationOptions`](@ref): those fields are then zero, and everything else in the
+result is as before.
+
 Why a run stopped is in `result.termination`, a bitfield. Test it against the exported masks, for
 example `result.termination & TERMINATION_GRAD_TOL != 0`, and use [`isconverged`](@ref) for whether
 the run converged:

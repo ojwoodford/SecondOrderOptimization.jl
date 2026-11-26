@@ -5,7 +5,7 @@
 
 @inline function solvestep!(data::OptimizationInternal, options::OptimizationOptions)
     status = Success
-    data.solves += @elapsed_ns status = solve!(data.linsystem, options.linsolver)
+    data.solves += @elapsed_ns_if collectsstats(data) status = solve!(data.linsystem, options.linsolver)
     status == Success || return false
     negate!(getx(data.linsystem))   # a successful solve's x is finite (DampedLinearSolve's contract)
     return true
@@ -33,11 +33,11 @@ end
 # The assignment, because an immutable variable is rebuilt by `update!`
 @inline settrial!(data::OptimizationInternal, s = getstep(data)) = (data.varnext = update!(data.varnext, data.variables, s); nothing)
 @inline function trialcost!(data::OptimizationInternal, f)
-    data.costs += @elapsed_ns cost = f(data.varnext)
+    data.costs += @elapsed_ns_if collectsstats(data) cost = f(data.varnext)
     return cost
 end
 @inline function linearizetrial!(data::OptimizationInternal, fdf!)
     zero!(data.linsystem)
-    data.gradients += @elapsed_ns cost = fdf!(getb(data.linsystem), getA(data.linsystem), data.varnext)
+    data.gradients += @elapsed_ns_if collectsstats(data) cost = fdf!(getb(data.linsystem), getA(data.linsystem), data.varnext)
     return cost
 end

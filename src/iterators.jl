@@ -25,7 +25,7 @@ end
 function computelinearization!(data, fdf!, x)
     zero!(data.linsystem)
     cost = 0.0
-    data.gradients += @elapsed_ns cost = fdf!(getb(data.linsystem), getA(data.linsystem), x)
+    data.gradients += @elapsed_ns_if collectsstats(data) cost = fdf!(getb(data.linsystem), getA(data.linsystem), x)
     return cost
 end
 

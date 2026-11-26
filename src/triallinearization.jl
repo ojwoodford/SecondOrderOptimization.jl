@@ -18,7 +18,7 @@ discardtrial!(tl::TrialLinearization) = (tl.ready = false; nothing)
     likely || return trialcost!(data, f)
     tl.trial = sharex(tl.trial, data.linsystem)
     zero!(tl.trial)
-    data.gradients += @elapsed_ns cost = fdf!(getb(tl.trial), getA(tl.trial), data.varnext)
+    data.gradients += @elapsed_ns_if collectsstats(data) cost = fdf!(getb(tl.trial), getA(tl.trial), data.varnext)
     tl.ready = true
     tl.cost = cost
     return cost
