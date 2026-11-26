@@ -178,3 +178,15 @@ const ITERATOR_INTERFACE_API = sort([
     end
     @test :IteratorInterface in names(SOO)
 end
+
+# The manual's page on the interface documents exactly the submodule's names, as test/publicapi.jl pins api.md
+@testset "IteratorInterface: the manual's page lists exactly its names" begin
+    page = read(joinpath(@__DIR__, "..", "docs", "src", "iterator_interface.md"), String)
+    documented = Symbol[]
+    for block in eachmatch(r"```@docs[^\n]*\n(.*?)```"s, page), line in split(block[1], '\n')
+        entry = strip(replace(line, r"\(.*\)$" => ""))
+        isempty(entry) || push!(documented, Symbol(last(split(entry, '.'))))
+    end
+    @test allunique(documented)
+    @test sort(documented) == ITERATOR_INTERFACE_API
+end

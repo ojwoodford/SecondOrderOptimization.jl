@@ -61,7 +61,8 @@ TERMINATION_LINSOLVER_FAILED
 
 An iterator is chosen by the `iterator` keyword of [`OptimizationOptions`](@ref), as a symbol: one of the four
 built in, `:newton`, `:levenbergmarquardt`, `:levenbergmarquardt_dtd` or `:dogleg`, or one you define (gradient
-descent is the example of [Writing Your Own Iterator](tutorials/custom_iterator.md)). A
+descent is the example of [Writing Your Own Iterator](tutorials/custom_iterator.md)), through the interface described
+in [The Iterator Interface](iterator_interface.md). A
 linear solver is chosen by the `linsolver` keyword, also as a symbol: `:auto`, `:cholesky`, `:ldl`
 or `:qr`, and those the extensions below add.
 

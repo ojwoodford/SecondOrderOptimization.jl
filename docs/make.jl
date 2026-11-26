@@ -16,12 +16,14 @@ makedocs(
     pages = [
         "Home" => "index.md",
         "API Reference" => "api.md",
+        "The Iterator Interface" => "iterator_interface.md",
         "Examples & Tutorials" => [
             "Zero-Allocation Static Optimization" => "tutorials/static_optimization.md",
             "Manifold Optimization and Custom Variable Types" => "tutorials/manifold_optimization.md",
             "Sparse Large-Scale Optimization" => "tutorials/sparse_optimization.md",
             "Least Squares from a Jacobian" => "tutorials/jacobian_least_squares.md",
             "Callbacks & Step Monitoring" => "tutorials/callbacks.md",
+            "Writing Your Own Iterator" => "tutorials/custom_iterator.md",
         ],
         "Migration Guides" => [
             "From Optim.jl" => "migration/from_optim.md",

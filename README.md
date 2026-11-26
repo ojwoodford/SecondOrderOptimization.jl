@@ -11,7 +11,7 @@ High-performance, zero-allocation second-order nonlinear optimization in Julia.
 
 `SecondOrderOptimization.jl` minimizes smooth scalar objectives $f(x)$ using second-order trust-region and damped Newton methods:
 
-- **Iterators**: Levenberg-Marquardt (`:levenbergmarquardt`, `:levenbergmarquardt_dtd`), Powell's Dogleg (`:dogleg`), and undamped Newton (`:newton`); or your own, through the iterator interface (the documentation's tutorial writes a backtracking gradient descent).
+- **Iterators**: Levenberg-Marquardt (`:levenbergmarquardt`, `:levenbergmarquardt_dtd`), Powell's Dogleg (`:dogleg`), and undamped Newton (`:newton`). You can define your own iterator through `SecondOrderOptimization.IteratorInterface`, without changing the package: the documentation's tutorial writes a backtracking gradient descent, and `check_iterator` checks it against the contract.
 - **Objectives**: a cost with its gradient and Hessian (`HessianObjective`), or, for least squares, a cost with its residual and Jacobian (`JacobianObjective`), whose steps are solved without forming `JᵀJ` (or, for a dense Jacobian with `:cholesky` or `:ldl`, by the normal equations formed from it).
 - **Linear Solvers**, from [DampedLinearSolve.jl](https://github.com/ojwoodford/DampedLinearSolve.jl) (its [documentation](https://ojwoodford.github.io/DampedLinearSolve.jl/dev/) states the linear-system contract and how each solver is chosen):
   - *Built-in*: Cholesky (`:cholesky`), LDL / Bunch-Kaufman (`:ldl`, using `LDLFactorizations.jl` for sparse matrices), and QR (`:qr`, SuiteSparse's SPQR for sparse matrices), with automatic dispatch (`:auto`).
