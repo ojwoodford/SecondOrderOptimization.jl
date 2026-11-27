@@ -1,6 +1,6 @@
 name = "SecondOrderOptimization"
 uuid = "a3f5c71e-3b2d-4d9a-9e20-7f8e3c4b1a50"
-version = "0.1.1"
+version = "0.2.0"
 authors = ["Oliver Woodford"]
 
 [deps]

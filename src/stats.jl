@@ -25,6 +25,21 @@ macro elapsed_ns(ex)
     end
 end
 
+# `@elapsed_ns ex` when `flag` (a StaticBool, so that the branch is decided at compile time) is true; otherwise `ex`
+# evaluated without reading the clock, and a zero duration, so that a TimeCounter's count still advances
+macro elapsed_ns_if(flag, ex)
+    quote
+        if dynamic($(esc(flag)))
+            local t0 = Base.time_ns()
+            $(esc(ex))
+            Base.time_ns() - t0
+        else
+            $(esc(ex))
+            UInt64(0)
+        end
+    end
+end
+
 """
     StatsCounter(num_allocs, bytes_allocd, time_ns, count)
     StatsCounter()

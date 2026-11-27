@@ -18,6 +18,11 @@ isconverged
 OptimizationWorkspace
 ```
 
+Every run times its evaluations and solves and counts its allocations, into the time and allocation fields of the
+result. For a small problem solved many times, where reading the clock is a visible part of the cost of a run, pass
+`collectstats = false` to [`OptimizationOptions`](@ref): those fields are then zero, and everything else in the
+result is as before.
+
 Why a run stopped is in `result.termination`, a bitfield. Test it against the exported masks, for
 example `result.termination & TERMINATION_GRAD_TOL != 0`, and use [`isconverged`](@ref) for whether
 the run converged:
@@ -59,8 +64,10 @@ TERMINATION_LINSOLVER_FAILED
 
 ## Iterators and Linear Solvers
 
-An iterator is chosen by the `iterator` keyword of [`OptimizationOptions`](@ref), as a symbol:
-`:newton`, `:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg` or `:gradientdescent`. A
+An iterator is chosen by the `iterator` keyword of [`OptimizationOptions`](@ref), as a symbol: one of the four
+built in, `:newton`, `:levenbergmarquardt`, `:levenbergmarquardt_dtd` or `:dogleg`, or one you define (gradient
+descent is the example of [Writing Your Own Iterator](tutorials/custom_iterator.md)), through the interface described
+in [The Iterator Interface](iterator_interface.md). A
 linear solver is chosen by the `linsolver` keyword, also as a symbol: `:auto`, `:cholesky`, `:ldl`
 or `:qr`, and those the extensions below add.
 
@@ -69,6 +76,10 @@ The linear systems and their solvers are those of
 documentation states the linear-system contract the iterators use, the solvers each system takes and
 how `:auto` chooses, and how to implement the contract for your own storage. `OptimizationOptions`
 validates `linsolver` by asking it.
+
+```@docs
+IteratorInterface
+```
 
 ### Extension Solvers
 

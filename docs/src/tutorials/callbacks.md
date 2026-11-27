@@ -15,7 +15,10 @@ end
 ```
 
 `data` and `iteratedata` are the optimization loop's and the iterator's state. Their types and
-fields are internal, and may change without notice.
+fields are internal, and may change without notice. The functions of
+[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface) that read the state may be called on `data`
+from a callback, for example `getstep(data)` for the step just taken, or `getbestcost(data)`; see
+[The Iterator Interface](../iterator_interface.md).
 
 > [!NOTE]
 > If your callback modifies the optimization state or returns a modified `cost`, pass `callbackchangesstate = true` in [`OptimizationOptions`](@ref).

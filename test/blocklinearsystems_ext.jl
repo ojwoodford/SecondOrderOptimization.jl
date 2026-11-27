@@ -271,11 +271,11 @@ end
             M = SecondOrderOptimization.conformance_matrix(getA(ls))
             @test !isfinite(M[k, k])
             ref = DampedLinearSolve.DenseLinearSystem{Float64}(M, copy(p.b), zeros(n))
-            for mk in (() -> SecondOrderOptimization.MarquardtData(0.0, zeros(n)),
-                       () -> SecondOrderOptimization.MarquardtDataTrial(0.0, zeros(n), nothing, NaN, false))
-                lmd, lmd_ref = mk(), mk()
-                SecondOrderOptimization.updatescaling!(lmd, ls)
-                SecondOrderOptimization.updatescaling!(lmd_ref, ref)
+            for ccs in (True(), False())
+                lmd = SecondOrderOptimization.construct(static(:levenbergmarquardt_dtd), ls, ccs)
+                lmd_ref = SecondOrderOptimization.construct(static(:levenbergmarquardt_dtd), ref, ccs)
+                SecondOrderOptimization.updatescaling!(lmd, SecondOrderOptimization.OptimizationInternal(ls, zeros(n)))
+                SecondOrderOptimization.updatescaling!(lmd_ref, SecondOrderOptimization.OptimizationInternal(ref, zeros(n)))
                 @test all(isfinite, lmd.scaling)
                 @test lmd.scaling == lmd_ref.scaling
                 @test lmd.lambda == lmd_ref.lambda

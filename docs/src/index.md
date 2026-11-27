@@ -15,7 +15,7 @@
   - **Levenberg-Marquardt** (`:levenbergmarquardt` and `:levenbergmarquardt_dtd`): Dynamic damping with uniform or adaptive Marquardt diagonal scaling and speculative trial linearization reuse.
   - **Powell's Dogleg** (`:dogleg`): Trust-region interpolation between the Cauchy (steepest descent) step and the Newton step.
   - **Standard Newton** (`:newton`): Classical undamped second-order step.
-  - **Gradient Descent** (`:gradientdescent`): Quadratic-interpolation backtracking line search.
+  - **Your own**, through the iterator interface: [Writing Your Own Iterator](tutorials/custom_iterator.md) writes a backtracking gradient descent.
 - **Flexible Manifolds**: Native support for custom variable types and manifolds, by extending `nvars` and `update` from OptimizationVariableInterface.jl (see [Manifold Optimization and Custom Variable Types](tutorials/manifold_optimization.md)).
 - **Static, Dense & Sparse Systems**: Automatically selects static (`MMatrix`), dense (`Matrix`), or sparse (`SparseMatrixCSC` with zero-allocation `LDLFactorizations.jl` and `Cholesky`) linear systems.
 - **Least Squares from a Jacobian**: A [`JacobianObjective`](@ref) gives the residual and its Jacobian instead of the gradient and Hessian, and each step is solved from the Jacobian without forming `JᵀJ`: dense QR, static QR for a small problem with a static size, sparse QR (SPQR) for a sparse Jacobian, or LSMR (`:lsmr`); or, for a dense Jacobian with `:cholesky` or `:ldl`, by the normal equations, `JᵀJ` formed from the Jacobian once per linearization. Its docstring lists the supported combinations (see [Least Squares from a Jacobian](tutorials/jacobian_least_squares.md)).

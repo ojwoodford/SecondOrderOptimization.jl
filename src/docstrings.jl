@@ -33,9 +33,15 @@ Stores configuration options and stopping criteria for second-order optimization
   flat valley crossed slowly: whether the step was held back by damping or a trust radius is
   known only to the iterator. Check the gradient (`gtol`) when that matters.
 - `maxtime::Float64 = 30.0`: Maximum wall-clock optimization runtime in seconds.
-- `iterator::Symbol = :levenbergmarquardt`: Iterator algorithm (`:newton`, `:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg`, `:gradientdescent`).
+- `iterator::Symbol = :levenbergmarquardt`: Iterator algorithm: one of the four built in (`:newton`, `:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg`), or one defined through [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface) (the manual's tutorial writes a gradient descent, `:gradientdescent`).
 - `linsolver::Symbol = :auto`: Linear solver method: `:auto`, `:cholesky`, `:ldl` or `:qr`; `:cg` or `:minres` (Krylov solvers for a Hessian) and `:lsmr` (for a [`JacobianObjective`](@ref) only), via `Krylov.jl`; or `:pardiso`, via `Pardiso.jl`. Which of these an objective accepts is set by its prototype: see [`HessianObjective`](@ref) and the table of supported combinations in [`JacobianObjective`](@ref) (a dense Jacobian takes `:auto`, `:qr`, `:cholesky`, `:ldl` and `:lsmr`; a sparse one `:auto`, `:qr` and `:lsmr`).
 - `callbackchangesstate::Union{Bool, StaticBool} = false`: Set `true` if callback modifies problem state.
+- `collectstats::Union{Bool, StaticBool} = true`: Whether to time the run and count its allocations. With `false`, no
+  clock is read around an evaluation or a solve and the allocation counters are not read: every time and allocation
+  field of the [`OptimizationResult`](@ref) is zero (and `show` says that statistics were not collected), while the
+  counts of iterations, cost and gradient evaluations and linear solves, the costs and the termination are as with
+  `true`. `maxtime` is still enforced, by one reading of the clock per iteration. Held as a type parameter, so the
+  choice is made at compile time; a workspace built for one setting is not reused for the other.
 
 # Example
 ```julia
@@ -133,63 +139,38 @@ OptimizationInternal
 """
     NewtonData
 
-Iterator state for undamped Newton optimization when `callbackchangesstate` is `true`.
+Iterator state for undamped Newton optimization: whether the last step needed a diagonal shift, and, when
+`callbackchangesstate` is `false` (Newton then linearizes at each trial point at once, since it always moves there),
+the cost at the trial point.
 """
 NewtonData
-
-"""
-    NewtonDataRelinearize
-
-Iterator state for undamped Newton optimization when `callbackchangesstate` is `false`,
-relinearizing immediately at each trial point.
-"""
-NewtonDataRelinearize
 
 """
     DoglegData
 
 Iterator state for Powell's dogleg trust-region optimization (Nocedal & Wright 2006 framework),
 storing the active trust-region radius `trustradius`, maximum radius bound `maxtrustradius`,
-and scratch buffers for the Cauchy and Newton steps.
+scratch buffers for the Cauchy and Newton steps, and a `TrialLinearization` (with a spare system when
+`callbackchangesstate` is `false`).
 """
 DoglegData
 
 """
     LevenbergData
 
-Iterator state for Levenberg-Marquardt (`lambda * I`) when `callbackchangesstate` is `true`.
+Iterator state for Levenberg-Marquardt (`lambda * I`): the damping, and a `TrialLinearization` (with a spare system,
+for reusing the linearization at an accepted first trial, when `callbackchangesstate` is `false`).
 """
 LevenbergData
 
 """
-    LevenbergDataTrial
-
-Iterator state for Levenberg-Marquardt (`lambda * I`) when `callbackchangesstate` is `false`,
-reusing trial linearizations on accepted first steps.
-"""
-LevenbergDataTrial
-
-"""
     MarquardtData
 
-Iterator state for Levenberg-Marquardt (`lambda * D'D`) when `callbackchangesstate` is `true`.
+Iterator state for Levenberg-Marquardt (`lambda * D'D`): the damping, the scaling `D'D` and its work vector, and a
+`TrialLinearization` (with a spare system, for reusing the linearization at an accepted first trial, when
+`callbackchangesstate` is `false`).
 """
 MarquardtData
-
-"""
-    MarquardtDataTrial
-
-Iterator state for Levenberg-Marquardt (`lambda * D'D`) when `callbackchangesstate` is `false`,
-reusing trial linearizations on accepted first steps.
-"""
-MarquardtDataTrial
-
-"""
-    GradientDescentData
-
-Iterator state for backtracking gradient descent, storing the current `stepsize`.
-"""
-GradientDescentData
 
 """
     OptimizationLinearSolver
@@ -259,8 +240,8 @@ x_opt, res = optimize(x0, HessianObjective(f, fdf!); callback=storecostscallback
 CostTrajectory
 
 """
-    optimize!(x0, obj::HessianObjective, options=OptimizationOptions(); callback=nullcallback, workspace=nothing, startstats=Stats()) -> result
-    optimize!(x0, obj::JacobianObjective, options=OptimizationOptions(); callback=nullcallback, workspace=nothing, startstats=Stats()) -> result
+    optimize!(x0, obj::HessianObjective, options=OptimizationOptions(); callback=nullcallback, workspace=nothing, startstats=nothing) -> result
+    optimize!(x0, obj::JacobianObjective, options=OptimizationOptions(); callback=nullcallback, workspace=nothing, startstats=nothing) -> result
 
 Minimizes the objective `obj` starting from `x0`, updating `x0` in place, and returns the
 [`OptimizationResult`](@ref). On return `x0` holds the best point found.
@@ -282,13 +263,14 @@ For a `Number`, an `SVector` or any other immutable variable it throws an `Argum
 # Keyword Arguments
 - `callback = nullcallback`: Callback invoked per iteration: `callback(cost, x_trial, data, iteratedata) -> (cost, terminate_flags)`.
 - `workspace = nothing`: Optional [`OptimizationWorkspace`](@ref) for memory reuse.
-- `startstats = Stats()`: Time and allocation counters at the start, for the timings in the result.
+- `startstats = nothing`: Time and allocation counters at the start, for the timings in the result (a `Stats`);
+  `nothing` reads them at the call (without statistics, `collectstats = false`, the clock alone).
 """
 optimize!
 
 """
-    optimize(x0, obj::HessianObjective, options=OptimizationOptions(); callback=nullcallback, workspace=nothing, startstats=Stats()) -> (x, result)
-    optimize(x0, obj::JacobianObjective, options=OptimizationOptions(); callback=nullcallback, workspace=nothing, startstats=Stats()) -> (x, result)
+    optimize(x0, obj::HessianObjective, options=OptimizationOptions(); callback=nullcallback, workspace=nothing, startstats=nothing) -> (x, result)
+    optimize(x0, obj::JacobianObjective, options=OptimizationOptions(); callback=nullcallback, workspace=nothing, startstats=nothing) -> (x, result)
 
 Minimizes the objective `obj` starting from `x0`, and returns the best point found and the
 [`OptimizationResult`](@ref). `x0` is not modified: the optimization runs on `copyvars(x0)`.
@@ -500,3 +482,261 @@ Bit mask of [`OptimizationResult`](@ref)`.termination`, set when the linear solv
 Test it with `result.termination & TERMINATION_LINSOLVER_FAILED != 0`; see [`isconverged`](@ref).
 """
 TERMINATION_LINSOLVER_FAILED
+
+# The iterator interface (`SecondOrderOptimization.IteratorInterface`): the methods an iterator defines
+
+"""
+    iteratorname(::StaticSymbol{:name}) -> String
+
+The display name of the iterator selected by `iterator = :name` (`show(result)` prints it). Required: defining it
+registers the symbol, so that `OptimizationOptions(iterator = :name)` accepts it. Part of
+[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+iteratorname
+
+"""
+    construct(::StaticSymbol{:name}, ls, callbackchangesstate::StaticBool) -> itdata
+
+Returns the data of the iterator `:name` for a run on the linear system `ls`: the state it keeps between
+iterations. Required, one method per iterator. It may call [`similarstep`](@ref)`(ls)` for work vectors, and
+`TrialLinearization(ls, callbackchangesstate)`, and nothing else of `ls`. Part of
+[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+construct
+
+"""
+    reset!(itdata)
+
+Restores the iterator's data to the state [`construct`](@ref) returned, so that a run with a reused
+[`OptimizationWorkspace`](@ref) repeats a first run. Required. Part of
+[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+reset!
+
+"""
+    iterate!(itdata, data, f, fdf!, options) -> Float64
+
+One iteration. Sets the trial point ([`settrial!`](@ref)) and leaves the step in [`getstep`](@ref)`(data)`, and returns
+the cost at the trial point (`NaN` if the cost there is `NaN`); or [`LINSOLVER_FAILED`](@ref) when no solve succeeded; or
+[`NO_STEP`](@ref) when no finite step could be formed. `f` is the objective's cost function and `fdf!` its linearization, to be handed to the functions that evaluate
+them ([`trialcost!`](@ref), [`linearizetrial!`](@ref)); `options` is the run's [`OptimizationOptions`](@ref), of which
+an iterator reads `options.dstep` and `options.reldcost`, and hands `options` itself to [`solvestep!`](@ref).
+
+The loop moves to the returned point even if its cost is higher, keeping the best point itself; to reject a step, retry
+inside `iterate!`. Required. Part of [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+iterate!
+
+"""
+    restrictedstep(itdata) -> Bool
+
+Whether the step last returned was held back by the iterator's safeguard (damping, a trust radius, a shifted solve)
+rather than being its model's minimiser. After an accepted restricted step the loop does not test `reldcost` or
+`dstep`, since the step is small because of the safeguard. Optional; the default is `false`. Part of
+[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+restrictedstep
+
+"""
+    triallinearization(itdata) -> Union{TrialLinearization, Nothing}
+
+The iterator's [`TrialLinearization`](@ref), if it holds one, so that the default [`linearize!`](@ref) can swap in the
+linearization it made at an accepted trial point, and so that a run with a reused workspace can prepare its spare
+system. Optional; the default is `nothing`. Part of [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+triallinearization
+
+"""
+    linearize!(itdata, data, fdf!) -> Float64
+
+Linearizes the objective at the current point, the point the loop moved to, and returns the cost there. Optional:
+the default swaps in a trial linearization the iterator has ready (see `triallinearization`), and otherwise
+evaluates `fdf!` at the current point. Override it only to do something else, for example to return a cost the
+iterator has already computed by [`linearizetrial!`](@ref). Part of
+[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+linearize!
+
+# The functions an iterator calls on the loop's state
+
+"""
+    solvestep!(data, options) -> Bool
+    solvestep!(data, options, λ)
+    solvestep!(data, options, λ, scaling)
+
+Solves the linear system for the step with the run's linear solver, `options.linsolver`. The two-argument form solves
+the system as it is currently damped; the others first set the damping to `λ` (a multiple of the identity), or to `λ`
+times the diagonal `scaling` (Marquardt's form), which stays set until it is changed. On success writes the step,
+the negated solution, into [`getstep`](@ref)`(data)` and returns `true`; otherwise returns `false`, and the step's
+contents are undefined. Each call counts as one linear solve in the result, and is timed. Part of
+[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+solvestep!
+
+"""
+    undamp!(data)
+
+Sets the system's damping to zero, so that [`predictedchange`](@ref) and [`curvature`](@ref) use the undamped model.
+The loop undamps after each iteration. Part of [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+undamp!
+
+"""
+    systemisfinite(data) -> Bool
+
+Whether every entry of the system's matrix is finite. A failed solve of a non-finite matrix cannot be repaired by
+damping, so an iterator stops retrying. Part of [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+systemisfinite
+
+"""
+    systemeltype(data) -> Type
+
+The element type of the linear system's matrix (`Float64` or `Float32`). The step, the gradient and the costs are
+`Float64` whatever it is. A method of DampedLinearSolve's `systemeltype`, re-exported by
+[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+systemeltype(::OptimizationInternal)
+
+"""
+    dampingfloor(data) -> Float64
+
+The linear solver's smallest useful relative damping: a positive-definite matrix damped by
+`dampingfloor(data) * maxdiagonal(data)` solves. A method of DampedLinearSolve's `dampingfloor`, re-exported by
+[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+dampingfloor(::OptimizationInternal)
+
+"""
+    getgradient(data) -> AbstractVector{Float64}
+
+The gradient at the current point. Read-only for an iterator. Part of
+[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+getgradient
+
+"""
+    getstep(data) -> AbstractVector{Float64}
+
+The step storage, which [`solvestep!`](@ref) writes. An iterator leaves the step it took here: the loop reads it after
+[`iterate!`](@ref). Part of [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+getstep
+
+"""
+    similarstep(ls) -> AbstractVector{Float64}
+
+A new work vector like the step, for [`construct`](@ref) to allocate the iterator's data. Its contents are undefined.
+Part of [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+similarstep
+
+"""
+    predictedchange(data, s) -> Float64
+
+The change in cost the quadratic model predicts for the step `s`, `gᵀs + ½ sᵀHs`, on the undamped system (call
+[`undamp!`](@ref) first if the system is damped). Part of [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+predictedchange
+
+"""
+    curvature(data, v) -> Float64
+
+The curvature of the model along `v`, `vᵀHv` (`‖Jv‖²` for a Jacobian system), undamped. Part of
+[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+curvature
+
+"""
+    maxdiagonal(data) -> Float64
+
+The largest absolute diagonal entry of the system's matrix (of `JᵀJ` for a Jacobian system), or `NaN` if a diagonal
+entry is `NaN`. Part of [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+maxdiagonal
+
+"""
+    getdiagonal!(out, data) -> out
+
+Writes the undamped diagonal of the system's matrix (the squared column norms of `J` for a Jacobian system) into
+`out`, a vector like the step, and returns it. Part of [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+getdiagonal!
+
+"""
+    getbestcost(data) -> Float64
+
+The lowest cost the run has reached. Part of [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+getbestcost
+
+"""
+    settrial!(data)
+    settrial!(data, s)
+
+Sets the trial point to the current point updated by the step `s`, [`getstep`](@ref)`(data)` by default. Part of
+[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+settrial!
+
+"""
+    trialcost!(data, f) -> Float64
+    trialcost!(tl::TrialLinearization, data, f, fdf!, likely::Bool) -> Float64
+
+The cost at the trial point. The first form evaluates `f`, counted and timed as a cost evaluation. The second, for an
+iterator that holds a [`TrialLinearization`](@ref) `tl`: if `likely` (the iterator expects to accept the trial point)
+and `tl` holds a spare system, the cost is computed by `fdf!`, linearizing at the trial point into the spare (counted
+and timed as a gradient evaluation), which is then ready for the next [`linearize!`](@ref); otherwise by `f`, as the
+first form. Part of [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+trialcost!
+
+"""
+    TrialLinearization(ls, callbackchangesstate::StaticBool)
+
+A component for an iterator's data that saves an evaluation: when the iterator expects its trial point to be
+accepted it linearizes there ([`trialcost!`](@ref) with `likely = true`), into a spare system, while computing the
+cost; the default [`linearize!`](@ref) then swaps that system in instead of linearizing again. Built in
+[`construct`](@ref), from its arguments. With `callbackchangesstate` true it holds no spare (the callback may change
+the point or the cost after the trial) and always evaluates `f`. The iterator returns it from
+[`triallinearization`](@ref), resets it in its [`reset!`](@ref) (`reset!(tl)`), and discards a trial it will not
+accept with [`discardtrial!`](@ref). Part of [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+TrialLinearization
+
+"""
+    discardtrial!(tl::TrialLinearization)
+
+Marks the spare linearization as not ready: for a trial the iterator rejects, after a failed solve, and at the start
+of [`iterate!`](@ref). Part of [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+discardtrial!
+
+"""
+    linearizetrial!(data, fdf!) -> Float64
+
+Linearizes the objective at the trial point into the current system, in place, and returns the cost there. Counted
+and timed as a gradient evaluation. For an iterator that always moves to its trial point: it then returns that cost
+from its own [`linearize!`](@ref) method. Part of [`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+linearizetrial!
+
+"""
+    LINSOLVER_FAILED
+
+The value [`iterate!`](@ref) returns when no linear solve succeeded: a `NaN` with its own bit pattern, which the loop
+recognises (compared with `===`) and stops on, with `TERMINATION_LINSOLVER_FAILED`. Part of
+[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+LINSOLVER_FAILED
+
+"""
+    NO_STEP
+
+The value [`iterate!`](@ref) returns when no finite step could be formed (dogleg, when the curvature along the
+gradient is not finite), having set neither a trial point nor a step: a `NaN` with its own bit pattern, which the loop
+recognises (compared with `===`) and stops on at once, with `TERMINATION_COST_NAN`, before the callback and the step
+tests. A `NaN` cost at a trial point the iterator did set is returned as itself, not as `NO_STEP`. Part of
+[`IteratorInterface`](@ref SecondOrderOptimization.IteratorInterface).
+"""
+NO_STEP

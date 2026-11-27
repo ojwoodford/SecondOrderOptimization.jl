@@ -226,7 +226,7 @@ end
     for T in (Float64, Float32)
         ls = makehessiansystem(zeros(T, 2, 2), :auto)
         @test SOO.dampingcap(ls) == Float64(eps(T))^(3 / 4)
-        @test SOO.lambdafloor(SOO.MarquardtData(0.0, zeros(2)), ls) == min(Float64(eps(T)), Float64(eps(T))^(3 / 4))
+        @test SOO.lambdafloor(SOO.construct(SOO.static(:levenbergmarquardt_dtd), ls, SOO.True()), SOO.OptimizationInternal(ls, zeros(2))) == min(Float64(eps(T)), Float64(eps(T))^(3 / 4))
     end
     @test SOO.scalingfloor(Float64) == 1e-8
     @test SOO.scalingfloor(Float32) ≈ Float64(eps(Float32))^(1 / 2)

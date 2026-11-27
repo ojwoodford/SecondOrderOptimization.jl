@@ -128,9 +128,10 @@ shift the diagonal.
 | `SchurBlockJacobian{Float64, Matrix{Float64}}` (with BlockLinearSystems.jl) | QR elimination, dense reduced system | `:auto`, `:qr` (QR of the reduced Jacobian); `:cholesky`, `:ldl` (factor its normal equations); `:lsmr` (with Krylov.jl) |
 | `SchurBlockJacobian{Float64, SparseMatrixCSC{Float64, Int}}` (with BlockLinearSystems.jl) | QR elimination, sparse reduced system | `:auto`, `:qr` (sparse QR of the reduced Jacobian, SPQR); `:cholesky` (sparse Cholesky of the reduced normal equations, falling back to LDLᵀ), `:ldl`; `:lsmr` (with Krylov.jl) |
 
-Every row takes every iterator: `:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg`, `:newton`
-(Gauss-Newton) and `:gradientdescent`, which uses only the gradient $J^\top r$ and never solves the
-linear system. Everything else is rejected with an `ArgumentError` before `f` or `resjac!` is called:
+Every row takes every iterator: the four built-in ones, `:levenbergmarquardt`, `:levenbergmarquardt_dtd`,
+`:dogleg` and `:newton` (Gauss-Newton), and any you write through the iterator interface (the gradient descent of
+[Writing Your Own Iterator](custom_iterator.md) uses only the gradient $J^\top r$ and never solves the linear
+system). Everything else is rejected with an `ArgumentError` before `f` or `resjac!` is called:
 any other prototype type, element type or index type, and any other `linsolver`.
 
 With `linsolver = :lsmr` each damped step is solved iteratively by LSMR on $J$ (dense or sparse):

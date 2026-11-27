@@ -27,7 +27,7 @@ import DampedLinearSolve
 
     # B10: the first Newton shift is finite even when the diagonal contains NaN
     ls_nan = DampedLinearSolve.DenseLinearSystem{Float64}([NaN 0.0; 0.0 1.0], zeros(2), zeros(2))
-    @test SecondOrderOptimization.initial_shift(ls_nan) == 1e-6
+    @test SecondOrderOptimization.initial_shift(SecondOrderOptimization.OptimizationInternal(ls_nan, zeros(2))) == 1e-6
     ls_big = DampedLinearSolve.DenseLinearSystem{Float64}([1e4 0.0; 0.0 1.0], zeros(2), zeros(2))
-    @test SecondOrderOptimization.initial_shift(ls_big) == 1.0
+    @test SecondOrderOptimization.initial_shift(SecondOrderOptimization.OptimizationInternal(ls_big, zeros(2))) == 1.0
 end

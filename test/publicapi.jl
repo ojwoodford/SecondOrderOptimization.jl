@@ -5,6 +5,7 @@ using SecondOrderOptimization, Test
 const PUBLIC_API = sort([
     :CostTrajectory,
     :HessianObjective,
+    :IteratorInterface,
     :JacobianObjective,
     :OptimizationOptions,
     :OptimizationResult,
@@ -38,17 +39,18 @@ const PUBLIC_API = sort([
     @test issorted(PUBLIC_API)
     @test sort(names(SecondOrderOptimization)) == PUBLIC_API
     # (Base.Docs.hasdoc is not in Julia 1.10, so look the binding up in the module's docstrings)
-    docs = Base.Docs.meta(SecondOrderOptimization)
+    # (a submodule's docstring is in its own module's docstrings)
+    docs = merge(Base.Docs.meta(SecondOrderOptimization), Base.Docs.meta(SecondOrderOptimization.IteratorInterface))
     @testset "$name has a docstring" for name in PUBLIC_API
         @test haskey(docs, Base.Docs.Binding(SecondOrderOptimization, name))
     end
     # Internal names stay defined, under the module
     @testset "$name is defined but internal" for name in (
-            :OptimizationInternal, :NewtonData, :NewtonDataRelinearize, :DoglegData,
-            :LevenbergData, :LevenbergDataTrial, :MarquardtData, :MarquardtDataTrial, :GradientDescentData,
-            :iteratorname, :knowniterators, :checkiterator,
+            :OptimizationInternal, :NewtonData, :DoglegData,
+            :LevenbergData, :MarquardtData,
+            :iteratorname, :knowniterators, :validateiterator,
             :OptimizationLinearSolver, :auto_solver, :cholesky_solver, :ldl_solver, :qr_solver,
-            :LINSOLVER_FAILED, :fast_dot,
+            :LINSOLVER_FAILED, :NO_STEP, :fast_dot,
             :AbstractLinearSystem, :solve!, :dampen!, :zero!, :makehessiansystem, :copy_structure,
             :sharex, :quadform, :quadratic_model_change, :validatelinsolver,
             :SolveStatus, :Success, :NotPositiveDefinite, :Indefinite,
@@ -82,8 +84,7 @@ end
     obj = HessianObjective(x -> x[1]^2, (g, H, x) -> (g[1] = 2x[1]; H[1, 1] = 2.0; x[1]^2))
     # The names `show` printed before P1, when the field held the internal enum
     shown = (newton = "Newton", levenbergmarquardt = "Levenberg-Marquardt",
-             levenbergmarquardt_dtd = "Levenberg-Marquardt (D'D scaling)", dogleg = "Dogleg",
-             gradientdescent = "gradient descent")
+             levenbergmarquardt_dtd = "Levenberg-Marquardt (D'D scaling)", dogleg = "Dogleg")
     @test fieldtype(OptimizationResult, :iterator) === Symbol
     for (s, name) in pairs(shown)
         _, r = optimize([1.0], obj, OptimizationOptions(iterator = s))
@@ -99,10 +100,12 @@ end
                  :gradientdescent, :getiterator)
         @test !isdefined(SecondOrderOptimization, name)
     end
-    @test SecondOrderOptimization.knowniterators() == sort([:newton, :levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg, :gradientdescent])
+    # The four built-in iterators, and possibly the tests' user-defined :gradientdescent (test/fixtures/gradientdescent.jl),
+    # if another test file has loaded it in this session
+    @test setdiff(SecondOrderOptimization.knowniterators(), [:gradientdescent]) == sort([:newton, :levenbergmarquardt, :levenbergmarquardt_dtd, :dogleg])
     for s in (:not_an_iterator, :lbfgs)
         err = try OptimizationOptions(iterator = s); nothing catch e; e end
         @test err isa ArgumentError
-        @test sprint(showerror, err) == "ArgumentError: Unknown iterator: :$s. The iterators are :dogleg, :gradientdescent, :levenbergmarquardt, :levenbergmarquardt_dtd and :newton."
+        @test sprint(showerror, err) == "ArgumentError: Unknown iterator: :$s. The iterators are " * join((":$x" for x in SecondOrderOptimization.knowniterators()), ", ", " and ") * "."
     end
 end

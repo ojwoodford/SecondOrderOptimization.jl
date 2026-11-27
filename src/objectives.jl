@@ -118,9 +118,9 @@ that this holds.
 | `SchurBlockJacobian{T, Matrix{T}}` (another package's) | QR elimination, dense reduced system | `:auto`, `:qr` (QR of the reduced Jacobian); `:cholesky`, `:ldl` (factor its normal equations); `:lsmr` (with Krylov.jl) |
 | `SchurBlockJacobian{T, SparseMatrixCSC{T, Int}}` (another package's) | QR elimination, sparse reduced system | `:auto`, `:qr` (sparse QR of the reduced Jacobian, SPQR; `Float64` only); `:cholesky` (sparse Cholesky of the reduced normal equations, falling back to LDLᵀ; `Float32` only where CHOLMOD offers it), `:ldl`; `:lsmr` (with Krylov.jl) |
 
-Every row takes every iterator: `:levenbergmarquardt`, `:levenbergmarquardt_dtd`, `:dogleg`, `:newton`
-(Gauss-Newton) and `:gradientdescent`, which uses only the gradient `Jᵀr` and never solves the linear
-system. Everything else is rejected with an `ArgumentError` before `f` or `resjac!` is called: any
+Every row takes every iterator: the four built-in ones, `:levenbergmarquardt`, `:levenbergmarquardt_dtd`,
+`:dogleg` and `:newton` (Gauss-Newton), and any written through the iterator interface (the tutorial's
+gradient descent uses only the gradient `Jᵀr` and never solves the linear system). Everything else is rejected with an `ArgumentError` before `f` or `resjac!` is called: any
 other prototype type, element type or index type, and any other `linsolver`.
 
 The model Hessian is `JᵀJ`, so `iterator = :newton` is Gauss-Newton: each step solves
